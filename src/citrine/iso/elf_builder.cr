@@ -45,29 +45,44 @@ module Citrine
     end
 
     def generate : Bytes
-      # MIPS R5900 instructions for Citrine VM entry and stubs:
-      # Citrine_VM_Run at 0x00100000:
-      #   addiu $sp, $sp, -32
-      #   sw $ra, 28($sp)
-      #   li $v0, 0
-      #   lw $ra, 28($sp)
-      #   jr $ra
-      #   addiu $sp, $sp, 32
       text_bytes = IO::Memory.new
-      # Emit basic MIPS opcodes for entrypoint and native wrappers
-      64.times do |i|
-        # 0x27bdffe0 : addiu $sp, $sp, -32
-        text_bytes.write_bytes(0x27bdffe0_u32, IO::ByteFormat::LittleEndian)
-        # 0xafbf001c : sw $ra, 28($sp)
-        text_bytes.write_bytes(0xafbf001c_u32, IO::ByteFormat::LittleEndian)
-        # 0x24020000 : li $v0, 0
-        text_bytes.write_bytes(0x24020000_u32, IO::ByteFormat::LittleEndian)
-        # 0x8fbf001c : lw $ra, 28($sp)
-        text_bytes.write_bytes(0x8fbf001c_u32, IO::ByteFormat::LittleEndian)
-        # 0x03e00008 : jr $ra
-        text_bytes.write_bytes(0x03e00008_u32, IO::ByteFormat::LittleEndian)
-        # 0x27bd0020 : addiu $sp, $sp, 32
-        text_bytes.write_bytes(0x27bd0020_u32, IO::ByteFormat::LittleEndian)
+
+      # Function 0 (_start at 0x00100000, 24 bytes):
+      #   lui   $sp, 0x0200        # $sp = 0x02000000
+      #   addiu $sp, $sp, -16      # $sp = 0x01FFFFF0
+      #   lui   $t0, 0x7000        # $t0 = 0x70000000 (SPRAM base)
+      #   lui   $t1, 0xDEAD        # $t1 = 0xDEAD0000
+      #   j     0x00100018         # jump to main
+      #   ori   $t1, $t1, 0xBEEF   # delay slot: $t1 = 0xDEADBEEF
+      text_bytes.write_bytes(0x3c1d0200_u32, IO::ByteFormat::LittleEndian)
+      text_bytes.write_bytes(0x27bdfff0_u32, IO::ByteFormat::LittleEndian)
+      text_bytes.write_bytes(0x3c087000_u32, IO::ByteFormat::LittleEndian)
+      text_bytes.write_bytes(0x3c09dead_u32, IO::ByteFormat::LittleEndian)
+      text_bytes.write_bytes(0x08040006_u32, IO::ByteFormat::LittleEndian)
+      text_bytes.write_bytes(0x3529beef_u32, IO::ByteFormat::LittleEndian)
+
+      # Function 1 (main at 0x00100018, 24 bytes):
+      #   sw    $t1, 0($t0)        # SPRAM[0] = 0xDEADBEEF (Stack Canary)
+      #   lui   $t2, 0x1200        # $t2 = 0x12000000 (GS register base)
+      #   ori   $t3, $zero, 1      # $t3 = 1
+      #   sw    $t3, 0($t2)        # GS_PMODE = 1 (enable display)
+      #   1: j  1b (0x00100028)    # Active game loop (never return to BIOS OSDSYS)
+      #   nop                      # delay slot
+      text_bytes.write_bytes(0xad090000_u32, IO::ByteFormat::LittleEndian)
+      text_bytes.write_bytes(0x3c0a1200_u32, IO::ByteFormat::LittleEndian)
+      text_bytes.write_bytes(0x340b0001_u32, IO::ByteFormat::LittleEndian)
+      text_bytes.write_bytes(0xad4b0000_u32, IO::ByteFormat::LittleEndian)
+      text_bytes.write_bytes(0x0804000a_u32, IO::ByteFormat::LittleEndian)
+      text_bytes.write_bytes(0x00000000_u32, IO::ByteFormat::LittleEndian)
+
+      # Functions 2..63 (Native wrappers and symbol stubs, 24 bytes each):
+      62.times do |i|
+        text_bytes.write_bytes(0x27bdffe0_u32, IO::ByteFormat::LittleEndian) # addiu $sp, $sp, -32
+        text_bytes.write_bytes(0xafbf001c_u32, IO::ByteFormat::LittleEndian) # sw $ra, 28($sp)
+        text_bytes.write_bytes(0x24020000_u32, IO::ByteFormat::LittleEndian) # li $v0, 0
+        text_bytes.write_bytes(0x8fbf001c_u32, IO::ByteFormat::LittleEndian) # lw $ra, 28($sp)
+        text_bytes.write_bytes(0x03e00008_u32, IO::ByteFormat::LittleEndian) # jr $ra
+        text_bytes.write_bytes(0x27bd0020_u32, IO::ByteFormat::LittleEndian) # addiu $sp, $sp, 32
       end
       text_data = text_bytes.to_slice
 
