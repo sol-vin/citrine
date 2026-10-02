@@ -1490,6 +1490,11 @@ module Citrine
       when "Color::Green" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(0_u8, 255_u8, 0_u8, 255_u8).to_u32)
       when "Color::Blue" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(0_u8, 0_u8, 255_u8, 255_u8).to_u32)
       when "Color::Yellow" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(255_u8, 255_u8, 0_u8, 255_u8).to_u32)
+      when "Color::Cyan" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(0_u8, 255_u8, 255_u8, 255_u8).to_u32)
+      when "Color::Magenta" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(255_u8, 0_u8, 255_u8, 255_u8).to_u32)
+      when "Color::Gray" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(128_u8, 128_u8, 128_u8, 255_u8).to_u32)
+      when "Color::Orange" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(255_u8, 165_u8, 0_u8, 255_u8).to_u32)
+      when "Color::Purple" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(128_u8, 0_u8, 128_u8, 255_u8).to_u32)
       else ConstValue.new(ConstType::Int32, int_val: 0)
       end
     end

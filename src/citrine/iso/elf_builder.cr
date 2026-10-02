@@ -418,8 +418,19 @@ module Citrine
       emitter.sw(ZERO, 16, T0)
 
       if phases.size > 1
-        # Check if Cross button (bit 14: 0x4000) was pressed in edges (0x70000018)
+        # Check if Triangle button (bit 12: 0x1000) was pressed in edges (0x70000018)
+        # to reset phase index back to 0 (single logo state)
         emitter.lw(T5, 24, T0)
+        emitter.andi(T7, T5, 0x1000)
+        emitter.beqz(T7, "chk_cross_advance")
+        emitter.nop
+        emitter.sw(ZERO, 8, T0)
+        emitter.ori(T2, ZERO, 0)
+        emitter.j("apply_phase_update")
+        emitter.nop
+
+        emitter.label("chk_cross_advance")
+        # Check if Cross button (bit 14: 0x4000) was pressed in edges (0x70000018)
         emitter.andi(T7, T5, 0x4000)
         emitter.bnez(T7, "advance_phase")
         emitter.nop
@@ -445,6 +456,7 @@ module Citrine
         emitter.label("phase_in_range")
         emitter.sw(T2, 8, T0)
 
+        emitter.label("apply_phase_update")
         phases.each_with_index do |phase, i|
           if i < phases.size - 1
             emitter.ori(T3, ZERO, i)
@@ -855,7 +867,12 @@ module Citrine
                   in_main_loop = true
                   regs[dst_r] = 1_i64
                 when 40, 41, 42 # ButtonDown, ButtonPressed, ButtonReleased
-                  regs[dst_r] = simulated_button_press ? 1_i64 : 0_i64
+                  btn = regs[base_r].to_i
+                  if btn == 14 # Button::Cross
+                    regs[dst_r] = simulated_button_press ? 1_i64 : 0_i64
+                  else
+                    regs[dst_r] = 0_i64
+                  end
                 when 11 # EndDrawing
                   if current_commands.size > 0
                     if has_button_checks

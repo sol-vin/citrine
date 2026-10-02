@@ -65,13 +65,17 @@ struct Color
     @a = a.to_u8
   end
 
-  White  = Color.new(255, 255, 255, 255)
-  Black  = Color.new(0, 0, 0, 255)
-  Red    = Color.new(255, 0, 0, 255)
-  Green  = Color.new(0, 255, 0, 255)
-  Blue   = Color.new(0, 0, 255, 255)
-  Yellow = Color.new(255, 255, 0, 255)
-  Gray   = Color.new(128, 128, 128, 255)
+  White   = Color.new(255, 255, 255, 255)
+  Black   = Color.new(0, 0, 0, 255)
+  Red     = Color.new(255, 0, 0, 255)
+  Green   = Color.new(0, 255, 0, 255)
+  Blue    = Color.new(0, 0, 255, 255)
+  Yellow  = Color.new(255, 255, 0, 255)
+  Cyan    = Color.new(0, 255, 255, 255)
+  Magenta = Color.new(255, 0, 255, 255)
+  Gray    = Color.new(128, 128, 128, 255)
+  Orange  = Color.new(255, 165, 0, 255)
+  Purple  = Color.new(128, 0, 128, 255)
 end
 
 enum Button : UInt8
