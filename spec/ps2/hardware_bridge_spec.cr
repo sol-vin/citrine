@@ -5,7 +5,6 @@ describe "Citrine PS2 Hardware Bridge & Communication Suite" do
   it "executes debug_puts and communicates back through PCSX2 Bridge" do
     tc = Citrine::Spec::Ps2TestCase.new("bridge_comm_test")
     tc.source(<<-CR
-      require "../../src/stubs/citrine"
       debug_puts "[CITRINE DEBUG] Hardware Bridge Communication Online"
       debug_puts "[CITRINE TEST] Emotion Engine MIPS instructions verified"
     CR
@@ -25,7 +24,6 @@ describe "Citrine PS2 Hardware Bridge & Communication Suite" do
   it "verifies EE arithmetic logic and emits pass message" do
     tc = Citrine::Spec::Ps2TestCase.new("bridge_math_test")
     tc.source(<<-CR
-      require "../../src/stubs/citrine"
       a = 25
       b = 17
       c = a * b + 4
@@ -48,7 +46,6 @@ describe "Citrine PS2 Hardware Bridge & Communication Suite" do
   it "verifies panic detection and reporting through the bridge" do
     tc = Citrine::Spec::Ps2TestCase.new("bridge_panic_test")
     tc.source(<<-CR
-      require "../../src/stubs/citrine"
       debug_puts "[CITRINE TEST] Running pre-panic sanity check"
       Citrine.panic("Simulated Hardware Bridge Assertion Failure")
     CR
@@ -64,7 +61,6 @@ describe "Citrine PS2 Hardware Bridge & Communication Suite" do
   it "verifies SPRAM canary preservation across execution" do
     tc = Citrine::Spec::Ps2TestCase.new("spram_canary_test")
     tc.source(<<-CR
-      require "../../src/stubs/citrine"
       debug_puts "[CITRINE TEST] Verifying SPRAM Canary 0xDEADBEEF"
     CR
     )

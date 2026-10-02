@@ -80,4 +80,4 @@ module Citrine
   end
 end
 
-Citrine.main unless PROGRAM_NAME.includes?("spec")
+Citrine.main if Path[PROGRAM_NAME].stem == "citrine"

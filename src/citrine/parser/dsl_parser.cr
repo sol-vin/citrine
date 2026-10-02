@@ -88,7 +88,10 @@ module Citrine
     end
 
     private def handle_require(req_name : String, program : ParsedProgram)
-      return if req_name == "citrine" # Core Citrine is built-in
+      if req_name == "citrine" || req_name.ends_with?("stubs/citrine") || req_name.ends_with?("stubs/citrine.cr")
+        program.loaded_requires << "citrine"
+        return
+      end
       return if program.loaded_requires.includes?(req_name)
       program.loaded_requires << req_name
 

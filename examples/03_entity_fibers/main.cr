@@ -1,4 +1,4 @@
-require "../../src/stubs/citrine"
+require "citrine"
 
 Citrine.init_window(640, 448, "03 Entity Fibers - Citrine PS2")
 Citrine.set_target_fps(60)
