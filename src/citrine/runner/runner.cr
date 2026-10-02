@@ -3,6 +3,7 @@ require "../compiler/bytecode_compiler"
 require "../parser/dsl_parser"
 require "../iso/iso_builder"
 require "../iso/elf_builder"
+require "../debugger/pcsx2_bridge"
 
 module Citrine
   class Runner
@@ -126,6 +127,7 @@ module Citrine
 
       pcsx2 = @pcsx2_path
       if pcsx2
+        Debugger::Pcsx2Bridge.new.ensure_logging_configured rescue nil
         abs_iso = File.expand_path(output_iso)
         puts "[Citrine] Launching PCSX2 with #{abs_iso}..."
         args = [] of String

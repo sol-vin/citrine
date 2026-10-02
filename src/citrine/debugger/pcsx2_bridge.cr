@@ -122,6 +122,31 @@ module Citrine
           modified = true
         end
 
+        if content.includes?("EnableEESIOInput = false")
+          content = content.gsub("EnableEESIOInput = false", "EnableEESIOInput = true")
+          modified = true
+        elsif !content.includes?("EnableEESIOInput = true")
+          if content.includes?("[Logging]")
+            content = content.sub("[Logging]", "[Logging]\nEnableEESIOInput = true\nShowEESIOInput = true")
+          else
+            content += "\n[Logging]\nEnableEESIOInput = true\nShowEESIOInput = true\n"
+          end
+          modified = true
+        end
+
+        if content.includes?("[Pad1]")
+          if content =~ /Cross\s*=\s*([^\r\n]+)/
+            curr_cross = $1.strip
+            unless curr_cross.includes?("Keyboard/X")
+              content = content.sub(/Cross\s*=\s*[^\r\n]+/, "Cross = Keyboard/X, #{curr_cross}")
+              modified = true
+            end
+          else
+            content = content.sub("[Pad1]", "[Pad1]\nCross = Keyboard/X")
+            modified = true
+          end
+        end
+
         unless content.includes?("[Filenames]") && content.includes?("BIOS =")
           if content.includes?("[Filenames]")
             content = content.sub("[Filenames]", "[Filenames]\nBIOS = SCPH-39001_BIOS_V7_USA_160.BIN")

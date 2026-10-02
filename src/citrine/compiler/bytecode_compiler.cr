@@ -88,11 +88,6 @@ module Citrine
         compile_node(node, allocator, fn_instructions, main_fn)
       end
 
-      # Compile main loop if present
-      if loop_body = program.main_loop_body
-        compile_main_loop(loop_body, allocator, fn_instructions, main_fn)
-      end
-
       # Return at end of main
       ret_reg = allocator.alloc_temp
       fn_instructions << Instruction.encode_abc(Opcode::LoadNil, ret_reg, 0_u8, 0_u8)
@@ -129,7 +124,7 @@ module Citrine
       allocator : RegisterAllocator,
       instructions : Array(Instruction),
       fn : CompiledFunction
-    )
+    ) : UInt8
       loop_start_offset = instructions.size
 
       # Check window_open?
@@ -154,6 +149,10 @@ module Citrine
       exit_offset = (instructions.size - jump_exit_idx - 1).to_i16
       instructions[jump_exit_idx] = Instruction.encode_branch(Opcode::JumpIfFalse, cond_reg, exit_offset)
       allocator.free_temp(cond_reg)
+
+      ret_reg = allocator.alloc_temp
+      instructions << Instruction.encode_abc(Opcode::LoadNil, ret_reg, 0_u8, 0_u8)
+      ret_reg
     end
 
     private def compile_node(
@@ -381,6 +380,14 @@ module Citrine
         inner_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
         instructions << Instruction.encode_abc(Opcode::Neg, dest, inner_reg, 0_u8)
         allocator.free_temp(inner_reg)
+        return dest
+      end
+
+      # Main loop
+      if node.name == "main_loop" && (obj_str.empty? || obj_str == "Citrine") && node.block
+        loop_ret = compile_main_loop(node.block.not_nil!.body, allocator, instructions, fn)
+        instructions << Instruction.encode_abc(Opcode::Move, dest, loop_ret, 0_u8)
+        allocator.free_temp(loop_ret)
         return dest
       end
 
@@ -756,6 +763,14 @@ module Citrine
 
     private def strip_debug_nodes(program : ParsedProgram)
       program.top_level_nodes.reject! { |node| is_debug_node?(node) }
+      program.top_level_nodes.map! do |node|
+        if node.is_a?(Crystal::Call) && node.name == "main_loop" && (block = node.block)
+          block.body = strip_debug_from_node(block.body)
+          node
+        else
+          node
+        end
+      end
 
       if loop_body = program.main_loop_body
         program.main_loop_body = strip_debug_from_node(loop_body)

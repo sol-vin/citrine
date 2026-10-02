@@ -165,9 +165,9 @@ module Citrine
     end
 
     struct Phase
-      getter commands : Array(DrawCommand)
-      getter delay_frames : UInt32
-      getter message : String?
+      property commands : Array(DrawCommand)
+      property delay_frames : UInt32
+      property message : String?
 
       def initialize(@commands : Array(DrawCommand), @delay_frames : UInt32 = 0_u32, @message : String? = nil)
       end
@@ -223,6 +223,22 @@ module Citrine
 
       def or_(rd : Int32, rs : Int32, rt : Int32)
         emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x25_u32)
+      end
+
+      def and_(rd : Int32, rs : Int32, rt : Int32)
+        emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x24_u32)
+      end
+
+      def nor(rd : Int32, rs : Int32, rt : Int32)
+        emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x27_u32)
+      end
+
+      def srlv(rd : Int32, rt : Int32, rs : Int32)
+        emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x06_u32)
+      end
+
+      def srl(rd : Int32, rt : Int32, sa : Int32)
+        emit((rt.to_u32 << 16) | (rd.to_u32 << 11) | ((sa & 0x1F).to_u32 << 6) | 0x02_u32)
       end
 
       def dsll32(rd : Int32, rt : Int32, sa : Int32)
@@ -396,6 +412,9 @@ module Citrine
       emitter.lui(T1, (phase0_delay >> 16).to_i32)
       emitter.ori(T1, T1, (phase0_delay & 0xFFFF).to_i32)
       emitter.sw(T1, 12, T0)      # phase frames remaining
+      emitter.sw(ZERO, 16, T0)    # pad buttons current = 0
+      emitter.sw(ZERO, 20, T0)    # pad buttons prev = 0
+      emitter.sw(ZERO, 24, T0)    # pad buttons pressed = 0
       emitter.j("main")
       emitter.nop
 
@@ -544,6 +563,37 @@ module Citrine
 
       if phases.size > 1
         emitter.lui(T0, 0x7000)
+
+        # 1. Poll EE SIO UART Rx (0x1000f110 LSR, 0x1000f1c0 RXFIFO)
+        emitter.lui(T8, 0x1000)
+        emitter.ori(T8, T8, 0xf100)
+        emitter.lbu(T6, 0x10, T8)       # SIO_LSR at 0x1000f110
+        emitter.andi(T6, T6, 0x01)      # bit 0 = Data Ready (DR)
+        emitter.beqz(T6, "sio_rx_done")
+        emitter.nop
+        emitter.lbu(T7, 0xc0, T8)       # SIO_RXFIFO at 0x1000f1c0
+        emitter.beqz(T7, "sio_rx_done")
+        emitter.nop
+        # Key received over UART -> set Cross button (bit 14: 0x4000) in SPRAM
+        emitter.lw(T5, 16, T0)
+        emitter.ori(T5, T5, 0x4000)
+        emitter.sw(T5, 16, T0)
+        emitter.label("sio_rx_done")
+
+        # 2. Pad button check in SPRAM at 0x70000010:
+        emitter.lw(T5, 16, T0)       # T5 = current buttons (0x70000010)
+        emitter.lw(T6, 20, T0)       # T6 = previous buttons (0x70000014)
+        emitter.sw(T5, 20, T0)       # update previous buttons = current
+        emitter.nor(T6, T6, ZERO)    # T6 = ~previous
+        emitter.and_(T5, T5, T6)     # T5 = newly pressed edges
+        emitter.sw(T5, 24, T0)       # store pressed edges at 0x70000018
+
+        # Check if Cross button (bit 14: 0x4000) was pressed
+        emitter.andi(T7, T5, 0x4000)
+        emitter.bnez(T7, "advance_phase")
+        emitter.nop
+
+        # Timer countdown check
         emitter.lw(T4, 12, T0) # frames remaining
         emitter.beqz(T4, "loop_continue")
         emitter.nop
@@ -552,7 +602,15 @@ module Citrine
         emitter.bnez(T4, "loop_continue")
         emitter.nop
 
-        # Timer hit 0! Advance to next phase
+        # Timer hit 0 or button pressed! Advance to next phase
+        emitter.label("advance_phase")
+        # Clear Cross bit from 0x70000010 for clean edge trigger
+        emitter.lw(T5, 16, T0)
+        emitter.lui(T6, 0xffff)
+        emitter.ori(T6, T6, 0xbfff)  # ~0x4000
+        emitter.and_(T5, T5, T6)
+        emitter.sw(T5, 16, T0)
+
         emitter.lw(T2, 8, T0) # phase index
         emitter.addiu(T2, T2, 1)
         emitter.ori(T3, ZERO, phases.size)
@@ -668,13 +726,29 @@ module Citrine
 
       # Native API stubs (Citrine_VM_Run, etc.)
       stub_start = 0x00100000_u32 + (emitter.words.size.to_u32 * 4)
-      60.times do
-        emitter.addiu(SP, SP, -32)
-        emitter.sw(RA, 28, SP)
-        emitter.ori(V0, ZERO, 0)
-        emitter.lw(RA, 28, SP)
-        emitter.jr(RA)
-        emitter.addiu(SP, SP, 32)
+      60.times do |stub_idx|
+        if stub_idx == 18 # Citrine_ButtonDown (A0 = button index, returns V0 = 1 if down, 0 if up)
+          emitter.lui(T0, 0x7000)
+          emitter.lw(V0, 16, T0)
+          emitter.srlv(V0, V0, A0)
+          emitter.andi(V0, V0, 1)
+          emitter.jr(RA)
+          emitter.nop
+        elsif stub_idx == 19 # Citrine_ButtonPressed (A0 = button index, returns V0 = 1 if pressed, 0 if not)
+          emitter.lui(T0, 0x7000)
+          emitter.lw(V0, 24, T0)
+          emitter.srlv(V0, V0, A0)
+          emitter.andi(V0, V0, 1)
+          emitter.jr(RA)
+          emitter.nop
+        else
+          emitter.addiu(SP, SP, -32)
+          emitter.sw(RA, 28, SP)
+          emitter.ori(V0, ZERO, 0)
+          emitter.lw(RA, 28, SP)
+          emitter.jr(RA)
+          emitter.addiu(SP, SP, 32)
+        end
       end
 
       # Pad .text to 4096 bytes (0x1000)
@@ -1246,6 +1320,19 @@ module Citrine
             in_main_loop = false
             current_loop_message : String? = nil
 
+            has_button_checks = instructions.any? do |instr|
+              op = (instr >> 24) & 0xFF
+              nat = instr & 0xFF
+              op == 52 && (nat == 40 || nat == 41 || nat == 42)
+            end
+            has_drawing = instructions.any? do |instr|
+              op = (instr >> 24) & 0xFF
+              nat = instr & 0xFF
+              op == 52 && nat == 11
+            end
+            simulated_button_press = false
+            button_phase_count = 0
+
             while pc >= 0 && pc < instructions.size && steps < max_steps && !first_frame_done
               steps += 1
               instr = instructions[pc]
@@ -1326,11 +1413,31 @@ module Citrine
                   in_main_loop = true
                   regs[dst] = 1_i64
                 when 40, 41, 42 # ButtonDown, ButtonPressed, ButtonReleased
-                  regs[dst] = 0_i64
+                  regs[dst] = simulated_button_press ? 1_i64 : 0_i64
                 when 11 # EndDrawing
                   if current_commands.size > 0
-                    phases << Phase.new(current_commands.dup, 0_u32)
-                    first_frame_done = true
+                    if has_button_checks
+                      duplicate_idx = phases.index { |p| p.commands == current_commands }
+                      if duplicate_idx
+                        if duplicate_idx == 0 && current_loop_message
+                          phases[0].message ||= current_loop_message
+                        end
+                        first_frame_done = true
+                      else
+                        phases << Phase.new(current_commands.dup, 0_u32, current_loop_message)
+                        current_loop_message = nil
+                        button_phase_count += 1
+                        if button_phase_count >= 8
+                          first_frame_done = true
+                        else
+                          simulated_button_press = true
+                          current_commands = [] of DrawCommand
+                        end
+                      end
+                    else
+                      phases << Phase.new(current_commands.dup, 0_u32)
+                      first_frame_done = true
+                    end
                   end
                 when 12 # ClearBackground
                   c_idx = regs[base].to_i
@@ -1401,28 +1508,30 @@ module Citrine
                       boot_messages << text
                     end
                   end
-                  if current_commands.empty?
-                    current_commands << DrawCommand.new(DrawCommand::Type::Clear, color: 0xFF000000_u32)
-                  end
-                  text_count = current_commands.count { |c| c.type == DrawCommand::Type::Text }
-                  if text_count >= 12
-                    if first_idx = current_commands.index { |c| c.type == DrawCommand::Type::Text }
-                      current_commands.delete_at(first_idx)
+                  unless has_drawing
+                    if current_commands.empty?
+                      current_commands << DrawCommand.new(DrawCommand::Type::Clear, color: 0xFF000000_u32)
                     end
-                    new_cmds = [] of DrawCommand
-                    text_idx = 0
-                    current_commands.each do |c|
-                      if c.type == DrawCommand::Type::Text
-                        new_cmds << DrawCommand.new(c.type, c.x1, 60 + (text_idx * 28), c.x2, c.y2, c.x3, c.y3, radius: c.radius, color: c.color, text: c.text)
-                        text_idx += 1
-                      else
-                        new_cmds << c
+                    text_count = current_commands.count { |c| c.type == DrawCommand::Type::Text }
+                    if text_count >= 12
+                      if first_idx = current_commands.index { |c| c.type == DrawCommand::Type::Text }
+                        current_commands.delete_at(first_idx)
                       end
+                      new_cmds = [] of DrawCommand
+                      text_idx = 0
+                      current_commands.each do |c|
+                        if c.type == DrawCommand::Type::Text
+                          new_cmds << DrawCommand.new(c.type, c.x1, 60 + (text_idx * 28), c.x2, c.y2, c.x3, c.y3, radius: c.radius, color: c.color, text: c.text)
+                          text_idx += 1
+                        else
+                          new_cmds << c
+                        end
+                      end
+                      current_commands = new_cmds
                     end
-                    current_commands = new_cmds
+                    y_pos = 60 + (current_commands.count { |c| c.type == DrawCommand::Type::Text } * 28)
+                    current_commands << DrawCommand.new(DrawCommand::Type::Text, 60, y_pos, 20, 0, color: 0xFFFFFFFF_u32, text: text)
                   end
-                  y_pos = 60 + (current_commands.count { |c| c.type == DrawCommand::Type::Text } * 28)
-                  current_commands << DrawCommand.new(DrawCommand::Type::Text, 60, y_pos, 20, 0, color: 0xFFFFFFFF_u32, text: text)
                 when 99 # Panic
                   t_idx = regs[base].to_i
                   text = constants[t_idx]?.try(&.str_val) || "Citrine PS2 VM Panic"
@@ -1443,7 +1552,7 @@ module Citrine
               phases << Phase.new(current_commands.dup, 0_u32, current_loop_message)
             end
 
-            loop_start = (phases.size > 1 && phases[0].message.nil?) ? 1 : 0
+            loop_start = (phases.size > 1 && phases[0].message.nil? && !has_button_checks) ? 1 : 0
             return {phases, boot_messages, loop_start} if phases.size > 0
           end
         rescue ex

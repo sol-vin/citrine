@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include "../include/citrine_core.h"
+#include "../include/citrine_input.h"
 #include "../include/citrine_hud.h"
 
 CitrineContext g_citrine_ctx = {
@@ -32,6 +33,7 @@ void Citrine_CloseWindow(void) {
 }
 
 bool Citrine_WindowOpen(void) {
+    Citrine_PollInputIfNeeded();
     return g_citrine_ctx.is_open;
 }
 
@@ -47,8 +49,15 @@ float Citrine_GetDeltaTime(void) {
     return g_citrine_ctx.delta_time;
 }
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 void Citrine_BeginDrawing(void) {
-    g_citrine_ctx.frame_count++;
+    Citrine_PollInputIfNeeded();
+#if defined(_WIN32) && defined(HOST_TEST_BUILD)
+    Sleep(16);
+#endif
 }
 
 void Citrine_EndDrawing(void) {
@@ -56,6 +65,7 @@ void Citrine_EndDrawing(void) {
     if (Citrine_HUD_IsVisible()) {
         Citrine_HUD_Draw();
     }
+    g_citrine_ctx.frame_count++;
 
 #ifndef HOST_TEST_BUILD
     // PS2 GS Double-buffer flip & VSync wait

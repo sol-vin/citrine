@@ -29,6 +29,7 @@ typedef enum {
 
 void  Citrine_InitInput(void);
 void  Citrine_PollInput(void);
+void  Citrine_PollInputIfNeeded(void);
 bool  Citrine_ButtonDown(int button);
 bool  Citrine_ButtonPressed(int button);
 bool  Citrine_ButtonReleased(int button);

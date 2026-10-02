@@ -77,9 +77,8 @@ module Citrine
           if block = node.block
             program.main_loop_body = block.body
           end
-        else
-          program.top_level_nodes << node
         end
+        program.top_level_nodes << node
       when Crystal::Nop
         # Skip empty
       else
