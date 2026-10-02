@@ -16,17 +16,25 @@ void Citrine_InitInput(void) {
     s_buttons_curr = 0;
     s_buttons_prev = 0;
     s_input_polled_frame = 0xFFFFFFFF;
-#ifndef HOST_TEST_BUILD
-    // PS2SDK SIF RPC module load: rom0:SIO2MAN, rom0:PADMAN
-    // padInit(0);
-    // padPortOpen(0, 0, pad_buf);
+#if defined(__mips__)
+    volatile uint32_t* spram_pad = (volatile uint32_t*)0x70000010;
+    *spram_pad = 0;
+#endif
+}
+
+void Citrine_SetButtonState(uint16_t mask) {
+    s_buttons_curr = mask;
+#if defined(__mips__)
+    volatile uint32_t* spram_pad = (volatile uint32_t*)0x70000010;
+    *spram_pad = mask;
 #endif
 }
 
 void Citrine_PollInput(void) {
     s_buttons_prev = s_buttons_curr;
-#if defined(_WIN32)
     uint16_t mask = 0;
+
+#if defined(_WIN32)
     // Map keyboard to PS2 DualShock 2 buttons:
     // Cross = 14 (mapped to 'X' key, Space, or Enter)
     if ((GetAsyncKeyState('X') & 0x8000) || (GetAsyncKeyState(VK_SPACE) & 0x8000) || (GetAsyncKeyState(VK_RETURN) & 0x8000)) mask |= (1 << 14);
@@ -44,10 +52,23 @@ void Citrine_PollInput(void) {
     // Start = 3, Select = 0
     if (GetAsyncKeyState(VK_TAB) & 0x8000) mask |= (1 << 0);
     if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) mask |= (1 << 3);
-    s_buttons_curr = mask;
 #endif
-#ifndef HOST_TEST_BUILD
-    // Polls pad states using padGetState & padRead
+
+#if defined(__mips__)
+    // Read SPRAM Pad Mailbox at 0x70000010 (populated by virtual controller injector or GDB stub)
+    volatile uint32_t* spram_pad = (volatile uint32_t*)0x70000010;
+    uint32_t injected = *spram_pad;
+    mask |= (uint16_t)(injected & 0xFFFF);
+#endif
+
+    s_buttons_curr = mask;
+
+#if defined(__mips__)
+    volatile uint32_t* spram = (volatile uint32_t*)0x70000000;
+    spram[4] = s_buttons_curr;                         // 0x70000010: current
+    spram[5] = s_buttons_prev;                         // 0x70000014: previous
+    spram[6] = (s_buttons_curr & ~s_buttons_prev);     // 0x70000018: edge pressed
+    spram[7] = (~s_buttons_curr & s_buttons_prev);     // 0x7000001C: edge released
 #endif
 }
 

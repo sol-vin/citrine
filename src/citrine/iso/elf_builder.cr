@@ -2,6 +2,7 @@ require "io/memory"
 require "../mips/mips_emitter"
 require "../gs/gs_config"
 require "../gs/gif_packet_builder"
+require "../subsystems/controller"
 require "./elf_writer"
 
 module Citrine
@@ -63,12 +64,12 @@ module Citrine
       end
     end
 
-    def self.build_default_runner_elf(cbc_bytes : Bytes? = nil) : Bytes
+    def self.build_default_runner_elf(cbc_bytes : Bytes? = nil, input_schedule : Array(VirtualInput) = [] of VirtualInput) : Bytes
       builder = new
-      builder.generate(cbc_bytes)
+      builder.generate(cbc_bytes, input_schedule)
     end
 
-    def generate(cbc_bytes : Bytes? = nil) : Bytes
+    def generate(cbc_bytes : Bytes? = nil, input_schedule : Array(VirtualInput) = [] of VirtualInput) : Bytes
       phases, boot_messages, loop_start_phase = parse_cbc(cbc_bytes)
 
       # Build GIF Packets
@@ -107,9 +108,41 @@ module Citrine
         end
       end
 
+      # Virtual Input Schedule table in .rodata:
+      sched_addr = curr_addr
+      sched_bytes = IO::Memory.new
+      input_schedule.each do |s|
+        sched_bytes.write_bytes(s.start_frame, IO::ByteFormat::LittleEndian)
+        sched_bytes.write_bytes(s.button_mask, IO::ByteFormat::LittleEndian)
+        sched_bytes.write_bytes(s.duration_frames, IO::ByteFormat::LittleEndian)
+      end
+      # Terminator:
+      sched_bytes.write_bytes(0xFFFFFFFF_u32, IO::ByteFormat::LittleEndian)
+      sched_bytes.write_bytes(0_u16, IO::ByteFormat::LittleEndian)
+      sched_bytes.write_bytes(0_u16, IO::ByteFormat::LittleEndian)
+      sched_slice = sched_bytes.to_slice
+      curr_addr += sched_slice.size.to_u32
+
+      # Dedicated Button press debug strings in .rodata:
+      cross_msg_str = "[CITRINE] Button Cross (X) pressed!\n\0"
+      cross_msg_addr = curr_addr
+      curr_addr += cross_msg_str.bytesize.to_u32
+
+      triangle_msg_str = "[CITRINE] Button Triangle pressed!\n\0"
+      triangle_msg_addr = curr_addr
+      curr_addr += triangle_msg_str.bytesize.to_u32
+
+      circle_msg_str = "[CITRINE] Button Circle pressed!\n\0"
+      circle_msg_addr = curr_addr
+      curr_addr += circle_msg_str.bytesize.to_u32
+
+      square_msg_str = "[CITRINE] Button Square pressed!\n\0"
+      square_msg_addr = curr_addr
+      curr_addr += square_msg_str.bytesize.to_u32
+
       emitter = MipsEmitter.new(0x00100000_u32)
 
-      # Function 0 (_start at 0x00100000, 32 bytes):
+      # Function 0 (_start at 0x00100000, 36 bytes):
       phase0_delay = phases[0].delay_frames
       emitter.label("_start")
       emitter.lui(SP, 0x0200)
@@ -123,9 +156,10 @@ module Citrine
       emitter.lui(T1, (phase0_delay >> 16).to_i32)
       emitter.ori(T1, T1, (phase0_delay & 0xFFFF).to_i32)
       emitter.sw(T1, 12, T0)      # phase frames remaining
-      emitter.sw(ZERO, 16, T0)    # pad buttons current = 0
-      emitter.sw(ZERO, 20, T0)    # pad buttons prev = 0
-      emitter.sw(ZERO, 24, T0)    # pad buttons pressed = 0
+      emitter.sw(ZERO, 16, T0)    # pad buttons current = 0  (0x70000010)
+      emitter.sw(ZERO, 20, T0)    # pad buttons prev = 0     (0x70000014)
+      emitter.sw(ZERO, 24, T0)    # pad buttons pressed = 0  (0x70000018)
+      emitter.sw(ZERO, 28, T0)    # pad buttons released = 0 (0x7000001C)
       emitter.j("main")
       emitter.nop
 
@@ -272,34 +306,120 @@ module Citrine
 
       emitter.label("vsync_done")
 
+      emitter.lui(T0, 0x7000)
+
+      # 1. Check Virtual Input Schedule at sched_addr
+      emitter.lw(T1, 4, T0)         # T1 = current frame
+      emitter.lui(T8, (sched_addr >> 16).to_i32)
+      emitter.ori(T8, T8, (sched_addr & 0xFFFF).to_i32)
+      emitter.ori(T9, ZERO, 0)      # T9 = injected button mask = 0
+
+      emitter.label("sched_loop")
+      emitter.lw(T6, 0, T8)        # T6 = entry.start_frame
+      emitter.lui(T5, 0xFFFF)
+      emitter.ori(T5, T5, 0xFFFF)
+      emitter.beq(T6, T5, "sched_done") # if entry.start_frame == 0xFFFFFFFF
+      emitter.nop
+      emitter.sltu(T7, T1, T6)     # T7 = 1 if frame < start_frame
+      emitter.bnez(T7, "sched_next")
+      emitter.nop
+      emitter.lhu(T4, 6, T8)       # T4 = duration_frames
+      emitter.addu(T6, T6, T4)     # T6 = start_frame + duration
+      emitter.sltu(T7, T1, T6)     # T7 = 1 if frame < end_frame
+      emitter.beqz(T7, "sched_next")
+      emitter.nop
+      # Inside duration: OR button_mask into T9
+      emitter.lhu(T4, 4, T8)       # T4 = button_mask
+      emitter.or_(T9, T9, T4)
+      emitter.label("sched_next")
+      emitter.addiu(T8, T8, 8)     # Next entry (8 bytes)
+      emitter.j("sched_loop")
+      emitter.nop
+
+      emitter.label("sched_done")
+      # OR injected mask into SPRAM 0x70000010:
+      emitter.lw(T5, 16, T0)
+      emitter.or_(T5, T5, T9)
+      emitter.sw(T5, 16, T0)
+
+      # 2. Poll EE SIO UART Rx (0x1000f110 LSR, 0x1000f1c0 RXFIFO)
+      emitter.lui(T8, 0x1000)
+      emitter.ori(T8, T8, 0xf100)
+      emitter.lbu(T6, 0x10, T8)       # SIO_LSR at 0x1000f110
+      emitter.andi(T6, T6, 0x01)      # bit 0 = Data Ready (DR)
+      emitter.beqz(T6, "sio_rx_done")
+      emitter.nop
+      emitter.lbu(T7, 0xc0, T8)       # SIO_RXFIFO at 0x1000f1c0
+      emitter.beqz(T7, "sio_rx_done")
+      emitter.nop
+      # Key received over UART -> set Cross button (bit 14: 0x4000) in SPRAM
+      emitter.lw(T5, 16, T0)
+      emitter.ori(T5, T5, 0x4000)
+      emitter.sw(T5, 16, T0)
+      emitter.label("sio_rx_done")
+
+      # 3. Compute edge transitions:
+      emitter.lw(T5, 16, T0)       # T5 = current buttons (0x70000010)
+      emitter.lw(T6, 20, T0)       # T6 = previous buttons (0x70000014)
+      emitter.sw(T5, 20, T0)       # update previous buttons = current
+      emitter.nor(T7, T6, ZERO)    # T7 = ~previous
+      emitter.and_(T8, T5, T7)     # T8 = newly pressed edges (curr & ~prev)
+      emitter.sw(T8, 24, T0)       # store pressed edges at 0x70000018
+      emitter.nor(T7, T5, ZERO)    # T7 = ~current
+      emitter.and_(T7, T6, T7)     # T7 = newly released edges (prev & ~curr)
+      emitter.sw(T7, 28, T0)       # store released edges at 0x7000001C
+
+      # 4. Emit button press console debug logs:
+      # Check Cross (0x4000)
+      emitter.andi(T7, T8, 0x4000)
+      emitter.beqz(T7, "chk_btn_triangle")
+      emitter.nop
+      emitter.lui(A0, (cross_msg_addr >> 16).to_i32)
+      emitter.ori(A0, A0, (cross_msg_addr & 0xFFFF).to_i32)
+      emitter.jal("debug_puts")
+      emitter.nop
+      emitter.lui(T0, 0x7000)
+      emitter.lw(T8, 24, T0)
+
+      emitter.label("chk_btn_triangle")
+      emitter.andi(T7, T8, 0x1000)
+      emitter.beqz(T7, "chk_btn_circle")
+      emitter.nop
+      emitter.lui(A0, (triangle_msg_addr >> 16).to_i32)
+      emitter.ori(A0, A0, (triangle_msg_addr & 0xFFFF).to_i32)
+      emitter.jal("debug_puts")
+      emitter.nop
+      emitter.lui(T0, 0x7000)
+      emitter.lw(T8, 24, T0)
+
+      emitter.label("chk_btn_circle")
+      emitter.andi(T7, T8, 0x2000)
+      emitter.beqz(T7, "chk_btn_square")
+      emitter.nop
+      emitter.lui(A0, (circle_msg_addr >> 16).to_i32)
+      emitter.ori(A0, A0, (circle_msg_addr & 0xFFFF).to_i32)
+      emitter.jal("debug_puts")
+      emitter.nop
+      emitter.lui(T0, 0x7000)
+      emitter.lw(T8, 24, T0)
+
+      emitter.label("chk_btn_square")
+      emitter.andi(T7, T8, 0x8000)
+      emitter.beqz(T7, "btn_chk_done")
+      emitter.nop
+      emitter.lui(A0, (square_msg_addr >> 16).to_i32)
+      emitter.ori(A0, A0, (square_msg_addr & 0xFFFF).to_i32)
+      emitter.jal("debug_puts")
+      emitter.nop
+      emitter.lui(T0, 0x7000)
+
+      emitter.label("btn_chk_done")
+      # Reset current buttons at 0x70000010 to 0 (so next frame re-polls schedule or hardware)
+      emitter.sw(ZERO, 16, T0)
+
       if phases.size > 1
-        emitter.lui(T0, 0x7000)
-
-        # 1. Poll EE SIO UART Rx (0x1000f110 LSR, 0x1000f1c0 RXFIFO)
-        emitter.lui(T8, 0x1000)
-        emitter.ori(T8, T8, 0xf100)
-        emitter.lbu(T6, 0x10, T8)       # SIO_LSR at 0x1000f110
-        emitter.andi(T6, T6, 0x01)      # bit 0 = Data Ready (DR)
-        emitter.beqz(T6, "sio_rx_done")
-        emitter.nop
-        emitter.lbu(T7, 0xc0, T8)       # SIO_RXFIFO at 0x1000f1c0
-        emitter.beqz(T7, "sio_rx_done")
-        emitter.nop
-        # Key received over UART -> set Cross button (bit 14: 0x4000) in SPRAM
-        emitter.lw(T5, 16, T0)
-        emitter.ori(T5, T5, 0x4000)
-        emitter.sw(T5, 16, T0)
-        emitter.label("sio_rx_done")
-
-        # 2. Pad button check in SPRAM at 0x70000010:
-        emitter.lw(T5, 16, T0)       # T5 = current buttons (0x70000010)
-        emitter.lw(T6, 20, T0)       # T6 = previous buttons (0x70000014)
-        emitter.sw(T5, 20, T0)       # update previous buttons = current
-        emitter.nor(T6, T6, ZERO)    # T6 = ~previous
-        emitter.and_(T5, T5, T6)     # T5 = newly pressed edges
-        emitter.sw(T5, 24, T0)       # store pressed edges at 0x70000018
-
-        # Check if Cross button (bit 14: 0x4000) was pressed
+        # Check if Cross button (bit 14: 0x4000) was pressed in edges (0x70000018)
+        emitter.lw(T5, 24, T0)
         emitter.andi(T7, T5, 0x4000)
         emitter.bnez(T7, "advance_phase")
         emitter.nop
@@ -315,13 +435,6 @@ module Citrine
 
         # Timer hit 0 or button pressed! Advance to next phase
         emitter.label("advance_phase")
-        # Clear Cross bit from 0x70000010 for clean edge trigger
-        emitter.lw(T5, 16, T0)
-        emitter.lui(T6, 0xffff)
-        emitter.ori(T6, T6, 0xbfff)  # ~0x4000
-        emitter.and_(T5, T5, T6)
-        emitter.sw(T5, 16, T0)
-
         emitter.lw(T2, 8, T0) # phase index
         emitter.addiu(T2, T2, 1)
         emitter.ori(T3, ZERO, phases.size)
@@ -482,6 +595,11 @@ module Citrine
           rodata_bytes.write("#{msg}\n\0".to_slice)
         end
       end
+      rodata_bytes.write(sched_slice)
+      rodata_bytes.write(cross_msg_str.to_slice)
+      rodata_bytes.write(triangle_msg_str.to_slice)
+      rodata_bytes.write(circle_msg_str.to_slice)
+      rodata_bytes.write(square_msg_str.to_slice)
       rodata_bytes.write("Citrine PS2 Virtual Machine runtime v0.1.0\0".to_slice)
       rodata_bytes.write("Emotion Engine R5900 / Graphic Synthesizer\0".to_slice)
       rodata_data = rodata_bytes.to_slice

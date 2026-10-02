@@ -9,13 +9,13 @@ module Citrine
 
     record IsoFile, name : String, data : Bytes, sector : UInt32, size : UInt32
 
-    def self.build(output_path : String, cbc_bytes : Bytes, elf_bytes : Bytes? = nil, extra_files : Hash(String, Bytes) = {} of String => Bytes)
+    def self.build(output_path : String, cbc_bytes : Bytes, elf_bytes : Bytes? = nil, extra_files : Hash(String, Bytes) = {} of String => Bytes, input_schedule : Array(VirtualInput) = [] of VirtualInput)
       builder = new
-      builder.build(output_path, cbc_bytes, elf_bytes, extra_files)
+      builder.build(output_path, cbc_bytes, elf_bytes, extra_files, input_schedule)
     end
 
-    def build(output_path : String, cbc_bytes : Bytes, elf_bytes : Bytes? = nil, extra_files : Hash(String, Bytes) = {} of String => Bytes)
-      elf_data = elf_bytes || ElfBuilder.build_default_runner_elf(cbc_bytes)
+    def build(output_path : String, cbc_bytes : Bytes, elf_bytes : Bytes? = nil, extra_files : Hash(String, Bytes) = {} of String => Bytes, input_schedule : Array(VirtualInput) = [] of VirtualInput)
+      elf_data = elf_bytes || ElfBuilder.build_default_runner_elf(cbc_bytes, input_schedule)
 
       # Standard PS2 boot configuration
       system_cnf = "BOOT2 = cdrom0:\\CITRINE.ELF;1\r\nVER = 1.00\r\nVMODE = NTSC\r\n".to_slice

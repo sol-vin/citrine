@@ -97,8 +97,24 @@ module Citrine
         emit((0x24_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
       end
 
+      def lhu(rt : Int32, offset : Int32, base : Int32)
+        emit((0x25_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
+      end
+
       def sb(rt : Int32, offset : Int32, base : Int32)
         emit((0x28_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
+      end
+
+      def sh(rt : Int32, offset : Int32, base : Int32)
+        emit((0x29_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
+      end
+
+      def slt(rd : Int32, rs : Int32, rt : Int32)
+        emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x2A_u32)
+      end
+
+      def sltu(rd : Int32, rs : Int32, rt : Int32)
+        emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x2B_u32)
       end
 
       def subu(rd : Int32, rs : Int32, rt : Int32)

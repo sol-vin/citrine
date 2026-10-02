@@ -378,6 +378,26 @@ module Citrine
           @last_panic_message = line
         end
       end
+
+      # Injects a 16-bit button mask into PS2 SPRAM 0x70000010 via GDB Stub
+      def inject_button_gdb(button_mask : UInt16, gdb_port : Int32 = 28011) : Bool
+        begin
+          client = TCPSocket.new("127.0.0.1", gdb_port, connect_timeout: 1.second)
+          # GDB memory write packet: $M70000010,4:xxxx0000#checksum
+          # Write Little-Endian 32-bit: byte0 = mask & 0xFF, byte1 = (mask >> 8) & 0xFF, byte2 = 0, byte3 = 0
+          b0 = (button_mask & 0xFF).to_s(16).rjust(2, '0')
+          b1 = ((button_mask >> 8) & 0xFF).to_s(16).rjust(2, '0')
+          payload = "M70000010,4:#{b0}#{b1}0000"
+          checksum = payload.bytes.reduce(0) { |acc, b| (acc + b) & 0xFF }.to_s(16).rjust(2, '0')
+          packet = "$#{payload}##{checksum}"
+          client << packet
+          client.flush
+          client.close
+          true
+        rescue
+          false
+        end
+      end
     end
   end
 end

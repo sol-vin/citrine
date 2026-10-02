@@ -85,6 +85,7 @@ module Citrine
       property target_file : String?
       property max_registers : UInt8 = 0_u8
       property total_bytecode_bytes : Int32 = 0
+      property input_schedule : Array(Citrine::VirtualInput) = [] of Citrine::VirtualInput
 
       def initialize(@name : String)
       end
@@ -95,6 +96,11 @@ module Citrine
 
       def target(path : String)
         @target_file = path
+      end
+
+      def inject_input(frame : Int32, button : Citrine::PadButton | Int32, duration : Int32 = 2)
+        mask = Citrine::VirtualInput.button_mask(button.to_i)
+        @input_schedule << Citrine::VirtualInput.new(frame.to_u32, mask, duration.to_u16)
       end
 
       def compile : Tuple(Bytes, SourceMap)
@@ -117,7 +123,7 @@ module Citrine
       def boot_pcsx2(timeout : ::Time::Span = 4.seconds) : Ps2ExecutionResult
         bytes, sm = compile
         temp_iso = "tmp_spec_#{@name.gsub(/[^a-zA-Z0-9_]/, "_")}.iso"
-        IsoBuilder.build(temp_iso, bytes)
+        IsoBuilder.build(temp_iso, bytes, input_schedule: @input_schedule)
 
         bridge = Debugger::Pcsx2Bridge.new
         lines = [] of String
