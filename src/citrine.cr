@@ -26,7 +26,7 @@ module Citrine
       run [file.cr | file.cbc | iso]    Compile, build ISO, and boot in PCSX2
       debug <file.cbc> [--port <port>]  Launch radare2 debugging session on PCSX2 GDB stub
       test [spec_path]                  Run PS2 automated test suite & PCSX2 hardware specs
-      import <type> <file> [options]    Import & optimize media via Flourite (video, audio, textures)
+      import <type> <file> [options]    Import & optimize media via Fluorite (video, audio, textures)
       disasm <file.cbc>                 Disassemble bytecode and inspect symbols
       monitor [--port <port>]           Connect live telemetry monitor to PS2 / PCSX2
       new <project_name>                Scaffold a new Citrine PS2 project

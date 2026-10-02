@@ -149,7 +149,7 @@ module Citrine
   #   <tbody>
   #     <tr>
   #       <td><code>MEDIA_PIPELINE</code></td>
-  #       <td><strong>Flourite Universal Media Pipeline</strong></td>
+  #       <td><strong>Fluorite Universal Media Pipeline</strong></td>
   #       <td>FFmpeg-powered transcoding for PS2 IPU video streaming, SPU2 ADPCM audio, and GS CLUT paletted textures.</td>
   #     </tr>
   #   </tbody>
@@ -265,7 +265,7 @@ module Citrine
     # - `G_CONCURRENCY::CONCURRENCY`: **Cooperative Concurrency & CSP Channels** &mdash; Microsecond coroutines, bounded CSP channels, zero dynamic allocation, and safety on the PS2 Emotion Engine.
     #
     # ##### 8. Media pipeline (`H_MEDIA_PIPELINE`)
-    # - `H_MEDIA_PIPELINE::MEDIA_PIPELINE`: **Flourite Universal Media Pipeline** &mdash; FFmpeg-powered transcoding for PS2 IPU video streaming, SPU2 ADPCM audio, and GS CLUT paletted textures.
+    # - `H_MEDIA_PIPELINE::MEDIA_PIPELINE`: **Fluorite Universal Media Pipeline** &mdash; FFmpeg-powered transcoding for PS2 IPU video streaming, SPU2 ADPCM audio, and GS CLUT paletted textures.
     #
     # ##### 9. Testing suite (`I_TESTING_SUITE`)
     # - `I_TESTING_SUITE::TESTING_SUITE`: **PS2 Hardware Testing Suite & Spec DSL** &mdash; Automated PCSX2 testing suite with hardware matchers, SPRAM corruption detection, and crash symbolication.
@@ -307,7 +307,7 @@ module Citrine
     # - `G_CONCURRENCY::CONCURRENCY`: **Cooperative Concurrency & CSP Channels** &mdash; Microsecond coroutines, bounded CSP channels, zero dynamic allocation, and safety on the PS2 Emotion Engine.
     #
     # ##### `H_MEDIA_PIPELINE`
-    # - `H_MEDIA_PIPELINE::MEDIA_PIPELINE`: **Flourite Universal Media Pipeline** &mdash; FFmpeg-powered transcoding for PS2 IPU video streaming, SPU2 ADPCM audio, and GS CLUT paletted textures.
+    # - `H_MEDIA_PIPELINE::MEDIA_PIPELINE`: **Fluorite Universal Media Pipeline** &mdash; FFmpeg-powered transcoding for PS2 IPU video streaming, SPU2 ADPCM audio, and GS CLUT paletted textures.
     #
     # ##### `I_TESTING_SUITE`
     # - `I_TESTING_SUITE::TESTING_SUITE`: **PS2 Hardware Testing Suite & Spec DSL** &mdash; Automated PCSX2 testing suite with hardware matchers, SPRAM corruption detection, and crash symbolication.

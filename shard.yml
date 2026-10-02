@@ -25,8 +25,8 @@ dependencies:
   cradare2:
     github: sol-vin/cradare2
     branch: master
-  flourite:
-    github: sol-vin/flourite
+  fluorite:
+    github: sol-vin/fluorite
     branch: main
 
 targets:

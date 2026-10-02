@@ -1,4 +1,4 @@
-require "../importers/flourite_media"
+require "../importers/fluorite_media"
 
 module Citrine
   module CLI
@@ -33,7 +33,7 @@ module Citrine
 
       def self.print_help
         puts <<-HELP
-        Citrine Media Importer (powered by Flourite & FFmpeg)
+        Citrine Media Importer (powered by Fluorite & FFmpeg)
         Transcodes and optimizes video, audio, and images for PlayStation 2 hardware.
 
         Usage:
@@ -100,7 +100,7 @@ module Citrine
         puts "  DVD Track:   #{dvd_track ? "YES (interleaved sector stream)" : "NO"}"
         puts "----------------------------------------------------------------------"
 
-        config = Importers::FlouriteMedia::VideoConfig.new(
+        config = Importers::FluoriteMedia::VideoConfig.new(
           fps: fps,
           width: width,
           height: height,
@@ -108,7 +108,7 @@ module Citrine
           dvd_track: dvd_track
         )
 
-        status, metadata = Importers::FlouriteMedia.convert_video(input, out_path, config)
+        status, metadata = Importers::FluoriteMedia.convert_video(input, out_path, config)
         if status.success?
           orig_kb = File.size(input) // 1024
           out_kb = File.size(out_path) // 1024
@@ -144,12 +144,12 @@ module Citrine
         puts "  Loop Repeat: #{loop_audio}"
         puts "----------------------------------------------------------------------"
 
-        config = Importers::FlouriteMedia::AudioConfig.new(
+        config = Importers::FluoriteMedia::AudioConfig.new(
           sample_rate: rate,
           loop_audio: loop_audio
         )
 
-        if Importers::FlouriteMedia.convert_audio(input, out_path, config)
+        if Importers::FluoriteMedia.convert_audio(input, out_path, config)
           orig_kb = File.size(input) // 1024
           out_kb = File.size(out_path) // 1024
           puts "\n[SUCCESS] Audio encoded to SPU2 ADPCM (.vag) successfully!"
@@ -188,13 +188,13 @@ module Citrine
         puts "  Target Size: #{width && height ? "#{width}x#{height}" : "original"}"
         puts "----------------------------------------------------------------------"
 
-        config = Importers::FlouriteMedia::TextureConfig.new(
+        config = Importers::FluoriteMedia::TextureConfig.new(
           clut_bits: clut,
           width: width,
           height: height
         )
 
-        if Importers::FlouriteMedia.convert_texture(input, out_path, config)
+        if Importers::FluoriteMedia.convert_texture(input, out_path, config)
           out_kb = File.size(out_path) // 1024
           puts "\n[SUCCESS] Texture exported to Citrine CBT format!"
           puts "  Output size: #{out_kb} KB"
@@ -219,7 +219,7 @@ module Citrine
         puts "  Target:   #{out_dir}"
         puts "----------------------------------------------------------------------"
 
-        count, orig_bytes, opt_bytes = Importers::FlouriteMedia.auto_import_directory(input_dir, out_dir) do |msg|
+        count, orig_bytes, opt_bytes = Importers::FluoriteMedia.auto_import_directory(input_dir, out_dir) do |msg|
           puts "  * #{msg}"
         end
 
@@ -240,7 +240,7 @@ module Citrine
           return
         end
 
-        res = Importers::FlouriteMedia.probe(input)
+        res = Importers::FluoriteMedia.probe(input)
         puts "======================================================================"
         puts "                      CITRINE MEDIA PROBE                             "
         puts "======================================================================"

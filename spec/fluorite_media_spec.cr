@@ -1,13 +1,13 @@
 require "./spec_helper"
-require "../src/citrine/importers/flourite_media"
+require "../src/citrine/importers/fluorite_media"
 
-describe "Citrine Media Pipeline (Flourite & FFmpeg)" do
+describe "Citrine Media Pipeline (Fluorite & FFmpeg)" do
   it "detects FFmpeg installation" do
-    Citrine::Importers::FlouriteMedia.ffmpeg_installed?.should be_true
+    Citrine::Importers::FluoriteMedia.ffmpeg_installed?.should be_true
   end
 
   it "configures Video presets with 15 FPS downsampling for PS2 IPU" do
-    cfg = Citrine::Importers::FlouriteMedia::VideoConfig.new
+    cfg = Citrine::Importers::FluoriteMedia::VideoConfig.new
     cfg.fps.should eq(15)
     cfg.width.should eq(512)
     cfg.height.should eq(448)
@@ -19,7 +19,7 @@ describe "Citrine Media Pipeline (Flourite & FFmpeg)" do
     file_bytes = 100_000_i64
     sector_size = 2048
     sectors = (file_bytes + sector_size - 1) // sector_size
-    meta = Citrine::Importers::FlouriteMedia::DvdTrackMetadata.new(
+    meta = Citrine::Importers::FluoriteMedia::DvdTrackMetadata.new(
       path: "cutscene.pss",
       sector_size: sector_size,
       total_sectors: sectors,
@@ -35,14 +35,14 @@ describe "Citrine Media Pipeline (Flourite & FFmpeg)" do
   end
 
   it "configures SPU2 Audio presets with 22.05kHz 4-bit ADPCM" do
-    cfg = Citrine::Importers::FlouriteMedia::AudioConfig.new
+    cfg = Citrine::Importers::FluoriteMedia::AudioConfig.new
     cfg.sample_rate.should eq(22050)
     cfg.channels.should eq(1)
     cfg.loop_audio.should be_false
   end
 
   it "configures GS Texture presets with CLUT8 (256 colors)" do
-    cfg = Citrine::Importers::FlouriteMedia::TextureConfig.new
+    cfg = Citrine::Importers::FluoriteMedia::TextureConfig.new
     cfg.clut_bits.should eq(8)
   end
 

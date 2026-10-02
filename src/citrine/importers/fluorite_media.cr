@@ -1,10 +1,10 @@
-require "flourite"
+require "fluorite"
 require "./sound_importer"
 require "./image_importer"
 
 module Citrine
   module Importers
-    module FlouriteMedia
+    module FluoriteMedia
       # Video presets optimized for PlayStation 2 Emotion Engine & IPU
       record VideoConfig,
         fps : Int32 = 15,
@@ -42,8 +42,8 @@ module Citrine
         Process.find_executable("ffmpeg") != nil
       end
 
-      def self.probe(target_path : String) : Flourite::Probe::ProbeResult
-        Flourite.probe(target_path)
+      def self.probe(target_path : String) : Fluorite::Probe::ProbeResult
+        Fluorite.probe(target_path)
       end
 
       # Converts any media video input into PS2 IPU-compatible MPEG-2 Program Stream (.pss / .mpg)
@@ -53,11 +53,11 @@ module Citrine
         input_path : String,
         output_path : String,
         config : VideoConfig = VideoConfig.new,
-        &progress_block : Flourite::Runner::Progress -> Nil
+        &progress_block : Fluorite::Runner::Progress -> Nil
       ) : Tuple(Process::Status, DvdTrackMetadata?)
         raise "FFmpeg is not installed or not in PATH." unless ffmpeg_installed?
 
-        cmd = Flourite.build do
+        cmd = Fluorite.build do
           overwrite!
           input(input_path)
 
@@ -134,8 +134,8 @@ module Citrine
 
         temp_wav = "#{output_path}.tmp_pcm.wav"
 
-        # Step 1: Decode/resample source to 16-bit PCM WAV using Flourite
-        cmd = Flourite.build do
+        # Step 1: Decode/resample source to 16-bit PCM WAV using Fluorite
+        cmd = Fluorite.build do
           overwrite!
           input(input_path)
 
@@ -177,7 +177,7 @@ module Citrine
 
         temp_bmp = "#{output_path}.tmp_conv.bmp"
 
-        cmd = Flourite.build do
+        cmd = Fluorite.build do
           overwrite!
           input(input_path)
 

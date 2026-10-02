@@ -7,9 +7,9 @@
 module Citrine
   module Docs
     module H_MEDIA_PIPELINE
-      # # Flourite Universal Media Pipeline
+      # # Fluorite Universal Media Pipeline
       #
-      # Citrine integrates Flourite (`sol-vin/flourite`), modern Crystal bindings for FFmpeg, to provide a zero-effort
+      # Citrine integrates Fluorite (`sol-vin/fluorite`), modern Crystal bindings for FFmpeg, to provide a zero-effort
       # media import pipeline. Any sound file (MP3, WAV, FLAC, OGG, AAC), video format (MP4, MKV, AVI, MOV), or image
       # can be transcoded into optimized PlayStation 2 native hardware formats with a single command.
       #
@@ -43,7 +43,7 @@ module Citrine
       # </table>
       #
       # ### Related Guides & Source References
-      # - src/citrine/importers/flourite_media.cr
+      # - src/citrine/importers/fluorite_media.cr
       # - src/citrine/cli/import_command.cr
       # - runtime/include/citrine_video.h
       # - runtime/include/citrine_audio.h
@@ -68,7 +68,7 @@ module Citrine
 
         # **SPU2 4-Bit ADPCM (VAG) Encoding**: 4:1 hardware compression saving 75% sound RAM.
         #
-        # The PS2 Sound Processing Unit 2 (SPU2) features 2MB of dedicated sound memory. Citrine uses Flourite to resample
+        # The PS2 Sound Processing Unit 2 (SPU2) features 2MB of dedicated sound memory. Citrine uses Fluorite to resample
         # audio to 22.05kHz mono/stereo and encodes it into 16-byte Sony ADPCM blocks (28 4-bit nibbles per block).
         # This achieves 4:1 compression over 16-bit PCM, saving 75% of SPU2 RAM.
         # ```bash
