@@ -997,6 +997,14 @@ module Citrine
                   c_idx = regs[base + 4 * step].to_i
                   color = constants[c_idx]?.try(&.u32_val) || 0xFFFFFFFF_u32
                   commands << DrawCommand.new(DrawCommand::Type::Text, x, y, size, 0, color: color, text: text)
+                when 70 # Log / puts / print
+                  t_idx = regs[base].to_i
+                  text = constants[t_idx]?.try(&.str_val) || ""
+                  if commands.empty?
+                    commands << DrawCommand.new(DrawCommand::Type::Clear, color: 0xFF000000_u32)
+                  end
+                  y_pos = 60 + (commands.count { |c| c.type == DrawCommand::Type::Text } * 28)
+                  commands << DrawCommand.new(DrawCommand::Type::Text, 60, y_pos, 20, 0, color: 0xFFFFFFFF_u32, text: text)
                 end
               end
             end

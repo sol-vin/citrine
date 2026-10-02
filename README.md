@@ -181,7 +181,7 @@ Citrine seamlessly bridges with [`cradare2`](https://github.com/sol-vin/cradare2
 ## Examples
 
 Check the `examples/` directory:
-- [`01_hello_pad`](examples/01_hello_pad/main.cr): 2D sprite controlled by DualShock 2 D-pad and analog sticks.
+- [`01_hello_pad`](examples/01_hello_pad/main.cr): Minimal Hello World print function for console and PlayStation 2 screen.
 - [`02_shapes_and_text`](examples/02_shapes_and_text/main.cr): 2D primitives, colors, text, and interactive profiler HUD overlay.
 - [`03_entity_fibers`](examples/03_entity_fibers/main.cr): Entity AI patrol logic with cooperative coroutines/fibers.
 - [`04_safety_and_panic`](examples/04_safety_and_panic/main.cr): Demonstrates hardware safety guards and the on-screen crash screen.

@@ -427,6 +427,14 @@ module Citrine
     puts msg
   end
 
+  def self.print(msg : String)
+    puts msg
+  end
+
+  def self.puts(msg : String)
+    puts msg
+  end
+
   def self.panic(msg : String)
     raise msg
   end

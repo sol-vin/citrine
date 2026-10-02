@@ -656,7 +656,7 @@ module Citrine
       when "play_sound" then NativeId::PlaySound
       when "stop_sound" then NativeId::StopSound
       when "debug_overlay=" then NativeId::SetDebugOverlay
-      when "log" then NativeId::Log
+      when "log", "puts", "print", "println", "printf" then NativeId::Log
       when "sleep" then NativeId::Sleep
       when "fiber_id" then NativeId::FiberId
       when "fiber_alive?" then NativeId::FiberAlive
