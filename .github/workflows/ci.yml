@@ -55,10 +55,10 @@ jobs:
           7z x "$env:TEMP\pcsx2_dl\*.7z" -o"C:\Program Files\PCSX2" -y | Out-Null
           
           # Standardize PCSX2 executable names
-          if (Test-Path "C:\Program Files\PCSX2\pcsx2-qtx64.exe" -and -not (Test-Path "C:\Program Files\PCSX2\pcsx2-qt.exe")) {
+          if ((Test-Path "C:\Program Files\PCSX2\pcsx2-qtx64.exe") -and !(Test-Path "C:\Program Files\PCSX2\pcsx2-qt.exe")) {
             Copy-Item "C:\Program Files\PCSX2\pcsx2-qtx64.exe" "C:\Program Files\PCSX2\pcsx2-qt.exe" -Force
           }
-          if (Test-Path "C:\Program Files\PCSX2\pcsx2-qtx64-avx2.exe" -and -not (Test-Path "C:\Program Files\PCSX2\pcsx2-qt.exe")) {
+          if ((Test-Path "C:\Program Files\PCSX2\pcsx2-qtx64-avx2.exe") -and !(Test-Path "C:\Program Files\PCSX2\pcsx2-qt.exe")) {
             Copy-Item "C:\Program Files\PCSX2\pcsx2-qtx64-avx2.exe" "C:\Program Files\PCSX2\pcsx2-qt.exe" -Force
           }
 
