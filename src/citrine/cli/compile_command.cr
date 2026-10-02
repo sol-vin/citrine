@@ -18,9 +18,9 @@ module Citrine
 
         puts "[Citrine] Compiling #{input_file} -> #{output_file}..."
         runner = Runner.new
-        t0 = Time.monotonic
+        t0 = Time.instant
         compiler = runner.compile_game(input_file, output_file)
-        dt = (Time.monotonic - t0).total_milliseconds
+        dt = (Time.instant - t0).total_milliseconds
 
         size = File.size(output_file)
         puts "[Citrine] Success: #{output_file} generated (#{size} bytes) in #{dt.round(1)} ms."

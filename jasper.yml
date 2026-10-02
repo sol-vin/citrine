@@ -1,0 +1,22 @@
+namespace: "Citrine::Docs"
+source_dir: "docs_src"
+output_dir: "src/citrine/docs"
+master_file: "src/citrine/docs.cr"
+
+features:
+  release_guard: true
+  naming_style: "prefixed"
+  prefix_format: "topic_%02d_"
+  table_auto_html: true
+  protect_summary: true
+  summary_table: true
+  master_index: true
+  aliases:
+    - "CitrineDocs"
+  quick_start:
+    title: "Citrine PlayStation 2 Toolkit Commands"
+    commands:
+      - "citrine run examples/01_hello_pad/main.cr"
+      - "citrine iso examples/05_hello_world/main.cr"
+      - "citrine debug examples/01_hello_pad/game.cbc"
+      - "citrine ui"

@@ -1,0 +1,38 @@
+id: ASSET_PIPELINE
+title: Asset Pipeline & ISO Disc Generation
+summary: Importers for 3D meshes (OBJ, glTF, GLB), fonts (TTF, OTF, FNT), textures, audio, and ISO9660 mastering.
+track: 05_asset_pipeline
+overview: |
+  Citrine converts modern 3D and multimedia assets into optimized PlayStation 2 binary formats
+  and masters bootable ISO9660 disc images (`.iso`).
+related_sources:
+  - "src/citrine/importers/mesh_importer.cr"
+  - "src/citrine/importers/font_importer.cr"
+  - "src/citrine/importers/image_importer.cr"
+  - "src/citrine/importers/sound_importer.cr"
+  - "src/citrine/iso/iso_builder.cr"
+sections:
+  - id: mesh_import
+    title: 3D Meshes (.obj, .gltf, .glb)
+    summary: Converts models to 16-byte aligned Citrine Binary Mesh (.cbm).
+    content: |
+      Vertices are packed into 32-byte interleaved records (Pos XYZ, Normal XYZ, UV) aligned
+      to 16-byte quadword boundaries for Emotion Engine GIF-DMA transfers.
+  - id: font_rasterizer
+    title: TTF & OTF Vector Font Rasterizer
+    summary: Bakes vector fonts into 256x256 GS texture atlases and Citrine Binary Font (.cbf) metrics.
+    content: |
+      Offline rasterization converts TrueType bezier contours into textured quads, enabling
+      high-speed 60 FPS text rendering on the GS without runtime font engine overhead.
+  - id: audio_spu2
+    title: SPU2 ADPCM Audio (VAG)
+    summary: 4:1 compression encoding 28 16-bit PCM samples into 16-byte hardware ADPCM blocks.
+    content: |
+      PS2 SPU2 hardware decodes 16-byte VAG blocks directly. Citrine's sound importer compresses
+      WAV audio to fit within the 2MB Sound Memory limit.
+  - id: iso9660_mastering
+    title: Pure Crystal ISO9660 Builder
+    summary: Generates bootable PS2 CD/DVD disc images without external dependencies.
+    content: |
+      `Citrine::IsoBuilder` assembles PVD sector 16, Terminator sector 17, L/M Path tables,
+      and root directory records containing `SYSTEM.CNF`, `CITRINE.ELF`, and `GAME.CBC`.

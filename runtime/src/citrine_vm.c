@@ -5,6 +5,7 @@
 #include "../include/citrine_vm.h"
 #include "../include/citrine_core.h"
 #include "../include/citrine_draw2d.h"
+#include "../include/citrine_draw3d.h"
 #include "../include/citrine_input.h"
 #include "../include/citrine_audio.h"
 #include "../include/citrine_hud.h"
@@ -618,6 +619,50 @@ static void native_dispatch(CitrineVM* vm, uint16_t native_id, Value* args, uint
                 (uint32_t)args[4].as.i
             );
             break;
+        case 25: { // BeginMode3D(cam)
+            CitrineCamera3D cam = {0};
+            Citrine_BeginMode3D(cam);
+            break;
+        }
+        case 26: // EndMode3D()
+            Citrine_EndMode3D();
+            break;
+        case 27: { // DrawCube(pos_x, pos_y, pos_z, w, h, l, color)
+            CitrineVector3 pos = {
+                (args[0].type == VAL_FLOAT32) ? args[0].as.f : (float)args[0].as.i,
+                (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i,
+                (args[2].type == VAL_FLOAT32) ? args[2].as.f : (float)args[2].as.i
+            };
+            float w = (args[3].type == VAL_FLOAT32) ? args[3].as.f : (float)args[3].as.i;
+            float h = (args[4].type == VAL_FLOAT32) ? args[4].as.f : (float)args[4].as.i;
+            float l = (args[5].type == VAL_FLOAT32) ? args[5].as.f : (float)args[5].as.i;
+            Citrine_DrawCube(pos, w, h, l, (uint32_t)args[6].as.i);
+            break;
+        }
+        case 28: { // DrawCubeWires(pos_x, pos_y, pos_z, w, h, l, color)
+            CitrineVector3 pos = {
+                (args[0].type == VAL_FLOAT32) ? args[0].as.f : (float)args[0].as.i,
+                (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i,
+                (args[2].type == VAL_FLOAT32) ? args[2].as.f : (float)args[2].as.i
+            };
+            float w = (args[3].type == VAL_FLOAT32) ? args[3].as.f : (float)args[3].as.i;
+            float h = (args[4].type == VAL_FLOAT32) ? args[4].as.f : (float)args[4].as.i;
+            float l = (args[5].type == VAL_FLOAT32) ? args[5].as.f : (float)args[5].as.i;
+            Citrine_DrawCubeWires(pos, w, h, l, (uint32_t)args[6].as.i);
+            break;
+        }
+        case 29: // DrawGrid(slices, spacing)
+            Citrine_DrawGrid(args[0].as.i, (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i);
+            break;
+        case 34: { // DrawMesh(mesh_id, pos_x, pos_y, pos_z, tint)
+            CitrineVector3 pos = {
+                (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i,
+                (args[2].type == VAL_FLOAT32) ? args[2].as.f : (float)args[2].as.i,
+                (args[3].type == VAL_FLOAT32) ? args[3].as.f : (float)args[3].as.i
+            };
+            Citrine_DrawMesh(args[0].as.handle, pos, (uint32_t)args[4].as.i);
+            break;
+        }
         case 30: // LoadTexture(path)
             out_ret->type = VAL_HANDLE;
             out_ret->as.handle = Citrine_LoadTexture(args[0].as.str);

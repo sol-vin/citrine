@@ -1,0 +1,31 @@
+id: GETTING_STARTED
+title: Getting Started with Citrine PS2
+summary: Complete introduction to the Crystal VM and Raylib-style PlayStation 2 toolkit.
+track: 01_getting_started
+overview: |
+  Citrine is a Crystal game development toolkit and virtual machine targeting the Sony PlayStation 2 (PS2).
+  It enables writing modern Crystal code using an ergonomic Raylib-style API and executing it directly on
+  the PS2 Emotion Engine (R5900 @ 294MHz) and Graphic Synthesizer (GS 4MB eDRAM).
+related_sources:
+  - "src/citrine.cr"
+  - "src/citrine/runner/runner.cr"
+sections:
+  - id: quickstart
+    title: Quickstart Guide
+    summary: Compile and run your first PlayStation 2 game.
+    content: |
+      To compile and boot any Citrine game in the PCSX2 emulator:
+      ```bash
+      citrine run examples/01_hello_pad/main.cr
+      ```
+      This automatically compiles the Crystal code into compact Citrine Bytecode (`.cbc`),
+      packages it into an ISO9660 disc image (`game.iso`), and launches PCSX2.
+  - id: tui_dashboard
+    title: Opal Terminal Dashboard
+    summary: Interactive terminal dashboard for project telemetry and budget auditing.
+    content: |
+      Launch the interactive terminal UI dashboard powered by Opal:
+      ```bash
+      citrine ui
+      ```
+      Explore examples, audit SPRAM budgets, inspect functions, and test controller inputs.

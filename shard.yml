@@ -12,6 +12,20 @@ description: |
 
 license: MIT
 
+dependencies:
+  opal:
+    github: sol-vin/opal
+    branch: main
+  carbon:
+    github: sol-vin/carbon
+    branch: main
+  jasper:
+    github: sol-vin/jasper
+    branch: main
+  cradare2:
+    github: sol-vin/cradare2
+    branch: master
+
 targets:
   citrine:
     main: src/citrine.cr

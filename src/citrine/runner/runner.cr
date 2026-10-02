@@ -1,14 +1,29 @@
 require "file_utils"
 require "../compiler/bytecode_compiler"
 require "../parser/dsl_parser"
+require "../iso/iso_builder"
+require "../iso/elf_builder"
 
 module Citrine
   class Runner
     property pcsx2_path : String?
     property runner_elf_path : String
+    property host_runner_path : String
 
-    def initialize(@pcsx2_path : String? = nil, @runner_elf_path : String = "runtime/bin/citrine_runner.elf")
+    def initialize(
+      @pcsx2_path : String? = nil,
+      @runner_elf_path : String = "runtime/bin/citrine_runner.elf",
+      @host_runner_path : String = "runtime/bin/citrine_host_runner.exe"
+    )
       @pcsx2_path ||= find_pcsx2
+      ensure_runner_elf
+    end
+
+    def ensure_runner_elf
+      unless File.exists?(@runner_elf_path)
+        Dir.mkdir_p(File.dirname(@runner_elf_path))
+        File.write(@runner_elf_path, ElfBuilder.build_default_runner_elf)
+      end
     end
 
     def find_pcsx2 : String?
@@ -16,13 +31,16 @@ module Citrine
         return env_path if File.exists?(env_path)
       end
 
-      # Common search paths on Windows & Linux
+      # Common search paths on Windows & Linux & macOS
       candidates = [
         "pcsx2",
         "pcsx2-qt",
         "C:\\Program Files\\PCSX2\\pcsx2-qt.exe",
         "C:\\Program Files (x86)\\PCSX2\\pcsx2.exe",
-        "#{ENV["LOCALAPPDATA"]? || ""}\\Programs\\PCSX2\\pcsx2-qt.exe"
+        "#{ENV["LOCALAPPDATA"]? || ""}\\Programs\\PCSX2\\pcsx2-qt.exe",
+        "/usr/bin/pcsx2",
+        "/usr/bin/pcsx2-qt",
+        "/Applications/PCSX2.app/Contents/MacOS/PCSX2"
       ]
 
       candidates.each do |c|
@@ -49,38 +67,91 @@ module Citrine
       compiler
     end
 
-    def run(source_path : String, host_dir : String = ".")
-      output_cbc = File.join(host_dir, "game.cbc")
-      puts "[Citrine] Compiling #{source_path} -> #{output_cbc}..."
-      t0 = Time.monotonic
-      compiler = compile_game(source_path, output_cbc)
-      dt = (Time.monotonic - t0).total_milliseconds
-      puts "[Citrine] Compiled successfully in #{dt.round(1)} ms."
+    def build_iso(cbc_path : String, output_iso_path : String, extra_files : Hash(String, Bytes) = {} of String => Bytes) : String
+      ensure_runner_elf
+      elf_data = File.read(@runner_elf_path).to_slice
+      cbc_data = File.read(cbc_path).to_slice
+      IsoBuilder.build(output_iso_path, cbc_data, elf_data, extra_files)
+      output_iso_path
+    end
 
-      # Run safety budget check
-      fn_regs = {} of String => UInt8
-      compiler.functions.each { |f| fn_regs[f.name] = f.num_registers }
-      report = BudgetChecker.check(fn_regs, File.size(output_cbc).to_i32)
+    def run(source_path : String, host_dir : String = ".", batch_mode : Bool = false, host_sim : Bool = false)
+      if host_sim
+        run_host_simulator(source_path, host_dir)
+        return
+      end
 
-      if report.warnings.size > 0
-        puts "[Citrine] Budget Warnings:"
-        report.warnings.each { |w| puts "  - #{w}" }
+      output_iso = ""
+      output_cbc = ""
+
+      if source_path.ends_with?(".iso")
+        output_iso = source_path
+      elsif source_path.ends_with?(".cbc")
+        output_cbc = source_path
+        output_iso = source_path.gsub(/\.cbc$/, ".iso")
+        puts "[Citrine] Packaging #{output_cbc} into PS2 ISO9660 image: #{output_iso}..."
+        build_iso(output_cbc, output_iso)
+      else
+        dir = File.dirname(source_path)
+        base = File.basename(source_path, ".cr")
+        output_cbc = File.join(dir, "#{base}.cbc")
+        output_iso = File.join(dir, "game.iso")
+
+        puts "[Citrine] Compiling #{source_path} -> #{output_cbc}..."
+        t0 = Time.instant
+        compiler = compile_game(source_path, output_cbc)
+        dt = (Time.instant - t0).total_milliseconds
+        puts "[Citrine] Compiled successfully in #{dt.round(1)} ms."
+
+        # Run safety budget check
+        fn_regs = {} of String => UInt8
+        compiler.functions.each { |f| fn_regs[f.name] = f.num_registers }
+        report = BudgetChecker.check(fn_regs, File.size(output_cbc).to_i32)
+
+        if report.warnings.size > 0
+          puts "[Citrine] Budget Warnings:"
+          report.warnings.each { |w| puts "  - #{w}" }
+        end
+
+        puts "[Citrine] Packaging #{output_cbc} into PS2 ISO9660 image: #{output_iso}..."
+        build_iso(output_cbc, output_iso)
+        puts "[Citrine] Success: #{output_iso} generated (#{File.size(output_iso)} bytes)."
       end
 
       pcsx2 = @pcsx2_path
       if pcsx2
-        puts "[Citrine] Launching PCSX2 with #{runner_elf_path}..."
-        args = ["-elf", runner_elf_path, "-hostpath", host_dir]
-        Process.run(pcsx2, args)
+        puts "[Citrine] Launching PCSX2 with #{output_iso}..."
+        args = [] of String
+        args << "-batch" if batch_mode
+        args << output_iso
+        # Spawn process asynchronously so terminal remains free and PCSX2 window opens
+        Process.new(pcsx2, args)
+        puts "[Citrine] PCSX2 process started successfully."
       else
-        puts "[Citrine] PCSX2 not found in standard paths. Bytecode generated at #{output_cbc}."
-        puts "[Citrine] Set PCSX2_PATH or run directly in your PS2 emulator/hardware."
+        puts "[Citrine] PCSX2 not found in standard paths. Disc image ready at #{output_iso}."
+        puts "[Citrine] Set PCSX2_PATH or open #{output_iso} manually in PCSX2."
+      end
+    end
+
+    def run_host_simulator(source_path : String, host_dir : String = ".")
+      output_cbc = source_path.ends_with?(".cbc") ? source_path : File.join(host_dir, "game.cbc")
+      if source_path.ends_with?(".cr")
+        compile_game(source_path, output_cbc)
+      end
+
+      if File.exists?(@host_runner_path)
+        puts "[Citrine] Starting Citrine Host Simulator (#{@host_runner_path})..."
+        Process.run(@host_runner_path, [output_cbc])
+      else
+        puts "[Citrine] Host runner binary not found at #{@host_runner_path}."
       end
     end
 
     def watch_and_reload(source_path : String, host_dir : String = ".")
       output_cbc = File.join(host_dir, "game.cbc")
+      output_iso = File.join(host_dir, "game.iso")
       compile_game(source_path, output_cbc)
+      build_iso(output_cbc, output_iso)
       puts "[Citrine] Watching #{source_path} for live hot-reloading (Ctrl+C to stop)..."
 
       last_mtime = File.info(source_path).modification_time
@@ -92,10 +163,11 @@ module Citrine
           if current_mtime > last_mtime
             last_mtime = current_mtime
             puts "\n[Citrine] Change detected! Recompiling..."
-            t0 = Time.monotonic
+            t0 = Time.instant
             compile_game(source_path, output_cbc)
-            dt = (Time.monotonic - t0).total_milliseconds
-            puts "[Citrine] Hot-reloaded #{output_cbc} in #{dt.round(1)} ms! Screen updated."
+            build_iso(output_cbc, output_iso)
+            dt = (Time.instant - t0).total_milliseconds
+            puts "[Citrine] Hot-reloaded #{output_cbc} and #{output_iso} in #{dt.round(1)} ms! Screen updated."
           end
         rescue ex
           # File might be temporarily locked while saving

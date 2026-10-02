@@ -136,7 +136,8 @@ module Citrine
       instructions << Instruction.encode_branch(Opcode::JumpIfFalse, cond_reg, 0_i16)
 
       # Body
-      compile_node(body, allocator, instructions, fn)
+      body_reg = compile_node(body, allocator, instructions, fn)
+      allocator.free_temp(body_reg)
 
       # Loop back
       loop_end_offset = instructions.size
@@ -160,8 +161,13 @@ module Citrine
       case node
       when Crystal::Expressions
         last_reg = 0_u8
-        node.expressions.each do |child|
-          last_reg = compile_node(child, allocator, instructions, fn)
+        node.expressions.each_with_index do |child, idx|
+          reg = compile_node(child, allocator, instructions, fn)
+          if idx == node.expressions.size - 1
+            last_reg = reg
+          else
+            allocator.free_temp(reg)
+          end
         end
         last_reg
 
@@ -171,6 +177,7 @@ module Citrine
         local_reg = allocator.allocate_local(target_name)
         instructions << Instruction.encode_abc(Opcode::Move, local_reg, val_reg, 0_u8)
         @source_map.record_register(fn.name, local_reg.to_i32, target_name)
+        allocator.free_temp(val_reg)
         local_reg
 
       when Crystal::Var
@@ -267,6 +274,7 @@ module Citrine
         # Then branch
         then_reg = compile_node(node.then, allocator, instructions, fn)
         instructions << Instruction.encode_abc(Opcode::Move, dest, then_reg, 0_u8)
+        allocator.free_temp(then_reg)
         jump_end_idx = instructions.size
         instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, 0_i16)
 
@@ -278,6 +286,7 @@ module Citrine
         if node.else && !node.else.is_a?(Crystal::Nop)
           else_reg = compile_node(node.else, allocator, instructions, fn)
           instructions << Instruction.encode_abc(Opcode::Move, dest, else_reg, 0_u8)
+          allocator.free_temp(else_reg)
         end
 
         # Patch end
@@ -382,6 +391,7 @@ module Citrine
                       (base_reg.to_u32 << 8) |
                       native_id.value.to_u32
           instructions << Instruction.new(instr_val)
+          arg_regs.each { |r| allocator.free_temp(r) }
           return dest
         end
 
@@ -489,6 +499,12 @@ module Citrine
       when "load_texture" then NativeId::LoadTexture
       when "draw_texture" then NativeId::DrawTexture
       when "draw_texture_rec" then NativeId::DrawTextureRec
+      when "begin_mode_3d" then NativeId::BeginMode3D
+      when "end_mode_3d" then NativeId::EndMode3D
+      when "draw_cube" then NativeId::DrawCube
+      when "draw_cube_wires" then NativeId::DrawCubeWires
+      when "draw_grid" then NativeId::DrawGrid
+      when "draw_mesh" then NativeId::DrawMesh
       when "button_down?" then NativeId::ButtonDown
       when "button_pressed?" then NativeId::ButtonPressed
       when "button_released?" then NativeId::ButtonReleased

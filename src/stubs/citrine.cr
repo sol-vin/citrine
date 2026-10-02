@@ -23,6 +23,32 @@ struct Vector2
   end
 end
 
+struct Vector3
+  property x : Float32
+  property y : Float32
+  property z : Float32
+
+  def initialize(@x : Float32, @y : Float32, @z : Float32)
+  end
+
+  def initialize(x : Number, y : Number, z : Number)
+    @x = x.to_f32
+    @y = y.to_f32
+    @z = z.to_f32
+  end
+end
+
+struct Camera3D
+  property position : Vector3
+  property target : Vector3
+  property up : Vector3
+  property fovy : Float32
+  property projection : Int32
+
+  def initialize(@position : Vector3, @target : Vector3, @up : Vector3 = Vector3.new(0.0, 1.0, 0.0), @fovy : Float32 = 45.0_f32, @projection : Int32 = 0)
+  end
+end
+
 struct Color
   property r : UInt8
   property g : UInt8
@@ -143,6 +169,28 @@ module Citrine
   end
 
   def self.draw_text(text : String, x : Number, y : Number, font_size : Int32, color : Color)
+  end
+
+  # 3D Graphics
+  def self.begin_mode_3d(camera : Camera3D)
+  end
+
+  def self.begin_mode_3d
+  end
+
+  def self.end_mode_3d
+  end
+
+  def self.draw_cube(x : Number, y : Number, z : Number, width : Number, height : Number, length : Number, color : Color)
+  end
+
+  def self.draw_cube_wires(x : Number, y : Number, z : Number, width : Number, height : Number, length : Number, color : Color)
+  end
+
+  def self.draw_grid(slices : Int32, spacing : Number)
+  end
+
+  def self.draw_mesh(mesh_id : UInt32, x : Number, y : Number, z : Number, tint : Color = Color::White)
   end
 
   # Textures

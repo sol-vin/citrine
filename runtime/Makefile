@@ -3,8 +3,8 @@
 
 EE_BIN = bin/citrine_runner.elf
 EE_OBJS = src/citrine_vm.o src/citrine_core.o src/citrine_draw2d.o \
-          src/citrine_input.o src/citrine_audio.o src/citrine_hud.o \
-          src/citrine_panic.o src/main.o
+          src/citrine_draw3d.o src/citrine_input.o src/citrine_audio.o \
+          src/citrine_hud.o src/citrine_panic.o src/main.o
 
 EE_INCS := -Iinclude -I$(PS2SDK)/ee/include -I$(PS2SDK)/common/include
 EE_CFLAGS := -O3 -fno-strict-aliasing -Wall -Wextra

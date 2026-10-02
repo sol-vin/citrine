@@ -1,0 +1,47 @@
+id: RAYLIB_API
+title: Raylib-style PlayStation 2 API
+summary: Guide to 2D and 3D graphics, DualShock 2 input, and SPU2 audio playback.
+track: 04_raylib_api
+overview: |
+  Citrine provides an ergonomic Raylib-inspired API in Crystal that maps directly to hardware registers
+  and Graphic Synthesizer DMA packets on the PlayStation 2.
+related_sources:
+  - "src/stubs/citrine.cr"
+  - "runtime/include/citrine_draw2d.h"
+  - "runtime/include/citrine_draw3d.h"
+sections:
+  - id: rendering_2d
+    title: 2D Shape & Text Rendering
+    summary: Drawing rectangles, circles, lines, triangles, and bitmap fonts.
+    content: |
+      ```crystal
+      Citrine.begin_drawing
+      Citrine.clear_background(Color::Black)
+      Citrine.draw_rectangle(50, 50, 100, 80, Color::Red)
+      Citrine.draw_circle(200, 100, 30, Color::Yellow)
+      Citrine.draw_text("Hello PS2", 50, 200, 16, Color::White)
+      Citrine.end_drawing
+      ```
+  - id: rendering_3d
+    title: 3D Camera & Mesh Rendering
+    summary: Perspective projection, floor grids, 3D cubes, and indexed meshes.
+    content: |
+      ```crystal
+      cam = Camera3D.new(position: Vector3.new(0, 5, 10), target: Vector3.new(0, 0, 0))
+      Citrine.begin_mode_3d(cam)
+      Citrine.draw_grid(10, 1.0)
+      Citrine.draw_cube(0, 1, 0, 2, 2, 2, Color::Blue)
+      Citrine.draw_cube_wires(0, 1, 0, 2.1, 2.1, 2.1, Color::Yellow)
+      Citrine.end_mode_3d
+      ```
+  - id: dualshock_input
+    title: DualShock 2 Gamepad & Vibration
+    summary: Digital buttons, analog sticks, and force-feedback rumble motors.
+    content: |
+      ```crystal
+      if Citrine.button_down?(Button::Cross)
+        Citrine.set_rumble(128_u8, 0_u8) # Small motor
+      end
+      lx = Citrine.get_analog(0) # Left Stick X (-1.0 to 1.0)
+      ly = Citrine.get_analog(1) # Left Stick Y (-1.0 to 1.0)
+      ```

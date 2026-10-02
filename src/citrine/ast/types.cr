@@ -27,10 +27,16 @@ module Citrine
     DrawLine        = 22
     DrawTriangle    = 23
     DrawText        = 24
+    BeginMode3D     = 25
+    EndMode3D       = 26
+    DrawCube        = 27
+    DrawCubeWires   = 28
+    DrawGrid        = 29
     LoadTexture     = 30
     DrawTexture     = 31
     DrawTextureRec  = 32
     UnloadTexture   = 33
+    DrawMesh        = 34
     ButtonDown      = 40
     ButtonPressed   = 41
     ButtonReleased  = 42

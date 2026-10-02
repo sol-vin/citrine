@@ -1,0 +1,29 @@
+id: PS2_HARDWARE
+title: PlayStation 2 Hardware Architecture
+summary: In-depth guide to the Emotion Engine, Scratchpad RAM, and Graphic Synthesizer.
+track: 02_ps2_hardware
+overview: |
+  The Sony PlayStation 2 possesses a unique asymmetrical architecture composed of the Emotion Engine
+  (R5900 MIPS core with 128-bit SIMD registers), Graphic Synthesizer, SPU2 sound processor, and IOP I/O processor.
+related_sources:
+  - "runtime/include/citrine_vm.h"
+  - "runtime/include/citrine_draw3d.h"
+sections:
+  - id: emotion_engine
+    title: Emotion Engine (EE) CPU
+    summary: R5900 64-bit MIPS CPU clocked at 294.912 MHz with 128-bit multimedia registers.
+    content: |
+      Citrine values are 16-byte aligned 128-bit quadwords (`Value`), allowing single-cycle DMA transfers
+      and vector transformations directly in hardware registers.
+  - id: spram_mapping
+    title: 16KB Scratchpad RAM (SPRAM)
+    summary: Zero-latency on-chip data memory located at physical address 0x70000000.
+    content: |
+      Citrine maps the active function register frame directly to the 16KB SPRAM at `0x70000000`.
+      This provides up to 1024 registers with zero cache miss penalties for high-speed game logic loops.
+  - id: graphic_synthesizer
+    title: Graphic Synthesizer (GS)
+    summary: 147.456 MHz rasterizer featuring 4MB embedded DRAM with 48 GB/s bandwidth.
+    content: |
+      The GS handles 2D primitives and 3D textured quads with hardware Z-buffering (ZBUF),
+      alpha blending, and color formats including PSMCT32 (32-bit RGBA) and PSMT8 (8-bit paletted).

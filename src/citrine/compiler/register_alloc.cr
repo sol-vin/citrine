@@ -5,12 +5,12 @@ module Citrine
 
     getter local_map : Hash(String, UInt8)
     getter max_registers : UInt8
-    getter next_reg : UInt8
+    getter next_reg : Int32
     getter free_temps : Array(UInt8)
 
     def initialize(initial_args : Array(String) = [] of String)
       @local_map = {} of String => UInt8
-      @next_reg = 0_u8
+      @next_reg = 0
       @max_registers = 0_u8
       @free_temps = [] of UInt8
 
@@ -49,14 +49,14 @@ module Citrine
     end
 
     private def alloc_raw : UInt8
-      reg = @next_reg
-      @next_reg += 1_u8
-      if @next_reg > @max_registers
-        @max_registers = @next_reg
+      if @next_reg >= 250
+        raise "Register Limit Exceeded: function exceeded 250 registers in frame"
       end
 
-      if @next_reg > MAX_SPRAM_REGISTERS
-        raise "SPRAM Register Overflow: function exceeded 1024 registers in SPRAM"
+      reg = @next_reg.to_u8
+      @next_reg += 1
+      if @next_reg > @max_registers
+        @max_registers = @next_reg.to_u8
       end
 
       reg

@@ -4,6 +4,9 @@ require "./citrine/cli/run_command"
 require "./citrine/cli/disasm_command"
 require "./citrine/cli/monitor_command"
 require "./citrine/cli/new_command"
+require "./citrine/cli/debug_command"
+require "./citrine/cli/tui_dashboard"
+require "./citrine/cli/iso_command"
 
 module Citrine
   def self.print_help
@@ -15,8 +18,11 @@ module Citrine
       citrine <command> [options] [arguments]
 
     Commands:
+      ui, tui                           Launch interactive Opal Terminal Dashboard
       compile <file.cr> [-o <out.cbc>]  Compile Crystal game code to Citrine Bytecode
-      run <file.cr> [--watch]           Compile and boot game in PCSX2 with hot-reloading
+      iso <file.cr | file.cbc> [-o iso] Package bytecode into bootable PS2 ISO9660 disc
+      run [file.cr | file.cbc | iso]    Compile, build ISO, and boot in PCSX2
+      debug <file.cbc> [--port <port>]  Launch radare2 debugging session on PCSX2 GDB stub
       disasm <file.cbc>                 Disassemble bytecode and inspect symbols
       monitor [--port <port>]           Connect live telemetry monitor to PS2 / PCSX2
       new <project_name>                Scaffold a new Citrine PS2 project
@@ -24,8 +30,10 @@ module Citrine
       help                              Display this help message
 
     Examples:
+      citrine ui
       citrine new my_game
       citrine run examples/01_hello_pad/main.cr --watch
+      citrine debug build/game.cbc
       citrine compile src/main.cr -o build/game.cbc
       citrine disasm build/game.cbc
     HELP
@@ -35,10 +43,16 @@ module Citrine
     cmd = args.first?
 
     case cmd
+    when "ui", "tui"
+      CLI::TuiDashboard.run
     when "compile"
       CLI::CompileCommand.run(args[1..])
+    when "iso", "build-iso"
+      CLI::IsoCommand.run(args[1..])
     when "run"
       CLI::RunCommand.run(args[1..])
+    when "debug"
+      CLI::DebugCommand.run(args[1..])
     when "disasm"
       CLI::DisasmCommand.run(args[1..])
     when "monitor"

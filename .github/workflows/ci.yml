@@ -8,8 +8,12 @@ on:
 
 jobs:
   test:
-    name: Test & Build Citrine Toolkit
-    runs-on: ubuntu-latest
+    name: Test & Build Citrine Toolkit (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
       - name: Checkout Code
@@ -27,22 +31,37 @@ jobs:
         run: crystal spec --error-trace
 
       - name: Build Citrine CLI
+        shell: bash
         run: |
           mkdir -p bin
           crystal build src/citrine.cr -o bin/citrine --release --no-debug
 
-      - name: Verify Example Bytecode Compilation
+      - name: Verify All 8 Examples Bytecode Compilation (.cbc)
+        shell: bash
         run: |
           ./bin/citrine compile examples/01_hello_pad/main.cr -o examples/01_hello_pad/game.cbc
           ./bin/citrine compile examples/02_shapes_and_text/main.cr -o examples/02_shapes_and_text/game.cbc
           ./bin/citrine compile examples/03_entity_fibers/main.cr -o examples/03_entity_fibers/game.cbc
           ./bin/citrine compile examples/04_safety_and_panic/main.cr -o examples/04_safety_and_panic/game.cbc
+          ./bin/citrine compile examples/05_hello_world/main.cr -o examples/05_hello_world/game.cbc
+          ./bin/citrine compile examples/06_dvd_bounce/main.cr -o examples/06_dvd_bounce/game.cbc
+          ./bin/citrine compile examples/07_primitives_2d_3d/main.cr -o examples/07_primitives_2d_3d/game.cbc
+          ./bin/citrine compile examples/08_controller_tester/main.cr -o examples/08_controller_tester/game.cbc
+
+      - name: Verify PlayStation 2 ISO9660 Disc Generation
+        shell: bash
+        run: |
+          ./bin/citrine iso examples/01_hello_pad/game.cbc -o examples/01_hello_pad/game.iso
+          ./bin/citrine iso examples/05_hello_world/game.cbc -o examples/05_hello_world/game.iso
+          ./bin/citrine iso examples/08_controller_tester/game.cbc -o examples/08_controller_tester/game.iso
 
       - name: Verify Disassembly of Examples
+        shell: bash
         run: |
           ./bin/citrine disasm examples/01_hello_pad/game.cbc
-          ./bin/citrine disasm examples/02_shapes_and_text/game.cbc
+          ./bin/citrine disasm examples/05_hello_world/game.cbc
 
-      - name: Verify C Runtime Syntax
+      - name: Verify C99 Runtime Syntax
+        if: runner.os != 'Windows'
         run: |
-          gcc -Wall -Wextra -std=c99 -fsyntax-only -DHOST_TEST_BUILD -Iruntime/include runtime/src/citrine_vm.c
+          gcc -Wall -Wextra -std=c99 -fsyntax-only -DHOST_TEST_BUILD -Iruntime/include runtime/src/citrine_vm.c runtime/src/citrine_draw3d.c

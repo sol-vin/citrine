@@ -1,0 +1,25 @@
+id: VIRTUAL_MACHINE
+title: Citrine Virtual Machine Architecture
+summary: Direct-threaded bytecode interpreter, register windows, and zero-GC memory model.
+track: 03_virtual_machine
+overview: |
+  Citrine VM executes fixed-width 32-bit instructions with a register-based architecture optimized for MIPS.
+  It enforces zero-allocation loops through frame bump allocators, avoiding Garbage Collector pauses.
+related_sources:
+  - "runtime/src/citrine_vm.c"
+  - "src/citrine/compiler/bytecode_compiler.cr"
+sections:
+  - id: instruction_encoding
+    title: 32-bit Opcode Encoding
+    summary: Compact 32-bit instruction format with 8-bit registers and 16-bit immediate fields.
+    content: |
+      Instructions follow 3 primary encodings:
+      - `ABC`: 8-bit Opcode, 8-bit Reg Dest, 8-bit Reg A, 8-bit Reg B
+      - `AB_IMM`: 8-bit Opcode, 8-bit Reg Dest, 16-bit Immediate (Unsigned)
+      - `BRANCH`: 8-bit Opcode, 8-bit Reg Cond, 16-bit Relative Signed Offset
+  - id: zero_gc_arena
+    title: Zero-GC Memory Arenas
+    summary: Per-frame linear bump arenas reset every V-Blank interval.
+    content: |
+      Dynamic allocations inside the frame loop use the 64KB frame arena. At each `Citrine.begin_drawing`
+      call, the bump arena offset is reset to zero, ensuring constant 60 FPS frame times without GC pauses.

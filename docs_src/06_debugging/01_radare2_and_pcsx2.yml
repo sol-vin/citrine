@@ -1,0 +1,30 @@
+id: DEBUGGING
+title: Debugging with Radare2 & PCSX2
+summary: Disassembly, SPRAM memory inspection, GDB stub debugging, and symbol exploration.
+track: 06_debugging
+overview: |
+  Citrine integrates directly with radare2 and cradare2 for hardware-level debugging of PS2 Emotion Engine
+  registers, Scratchpad RAM, and PCSX2 GDB stub emulation.
+related_sources:
+  - "src/citrine/cli/debug_command.cr"
+  - "src/citrine/cradare2/plugin.cr"
+sections:
+  - id: r2_debugging
+    title: Radare2 (r2) Integration
+    summary: Automatic r2 script generation with MIPS R5900 arch, SPRAM flags, and custom macros.
+    content: |
+      Running `citrine debug game.cbc` configures radare2 with:
+      - Architecture: `e asm.arch = mips`, `e asm.cpu = r5900`
+      - SPRAM base flag: `f spram.start = 0x70000000`
+      - GS Framebuffer flags: `f gs.framebuffer0 = 0x00000000`
+      - Macro `(spram <idx>)`: Inspects 16-byte aligned QWORD SPRAM registers
+      - Macro `(ee_regs)`: Displays Emotion Engine 128-bit general purpose registers
+  - id: pcsx2_gdb
+    title: PCSX2 GDB Stub
+    summary: Live interactive breakpoints and variable inspection on port 1234.
+    content: |
+      Start PCSX2 with the GDB server enabled, then attach radare2:
+      ```bash
+      r2 -d gdb://127.0.0.1:1234 -i citrine_r2.rc
+      ```
+      Step through instructions, inspect memory maps, and verify bytecode execution in real-time.
