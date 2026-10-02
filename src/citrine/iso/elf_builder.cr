@@ -167,8 +167,9 @@ module Citrine
     struct Phase
       getter commands : Array(DrawCommand)
       getter delay_frames : UInt32
+      getter message : String?
 
-      def initialize(@commands : Array(DrawCommand), @delay_frames : UInt32 = 0_u32)
+      def initialize(@commands : Array(DrawCommand), @delay_frames : UInt32 = 0_u32, @message : String? = nil)
       end
     end
 
@@ -341,7 +342,7 @@ module Citrine
     end
 
     def generate(cbc_bytes : Bytes? = nil) : Bytes
-      phases, debug_messages = parse_cbc(cbc_bytes)
+      phases, boot_messages, loop_start_phase = parse_cbc(cbc_bytes)
 
       # Build GIF Packets
       env_packet = build_env_packet
@@ -365,10 +366,18 @@ module Citrine
       banner_addr = curr_addr
       curr_addr += banner_str.bytesize.to_u32
 
-      debug_msg_addrs = [] of UInt32
-      debug_messages.each do |msg|
-        debug_msg_addrs << curr_addr
+      boot_msg_addrs = [] of UInt32
+      boot_messages.each do |msg|
+        boot_msg_addrs << curr_addr
         curr_addr += (msg.bytesize + 2).to_u32 # msg + "\n\0"
+      end
+
+      phase_msg_addrs = {} of Int32 => UInt32
+      phases.each_with_index do |phase, i|
+        if msg = phase.message
+          phase_msg_addrs[i] = curr_addr
+          curr_addr += (msg.bytesize + 2).to_u32 # msg + "\n\0"
+        end
       end
 
       emitter = MipsEmitter.new(0x00100000_u32)
@@ -450,8 +459,8 @@ module Citrine
       emitter.jal("debug_puts")
       emitter.nop
 
-      # Emit debug messages via debug_puts:
-      debug_msg_addrs.each do |msg_addr|
+      # Emit boot messages via debug_puts:
+      boot_msg_addrs.each do |msg_addr|
         emitter.lui(A0, (msg_addr >> 16).to_i32)
         emitter.ori(A0, A0, (msg_addr & 0xFFFF).to_i32)
         emitter.jal("debug_puts")
@@ -521,7 +530,7 @@ module Citrine
       emitter.ori(V1, V1, 0x1000)
       emitter.ori(V0, ZERO, 8)
       emitter.sd(V0, 0, V1)        # Clear VSINT with 64-bit store
-      emitter.lui(T1, 0x0002)       # Timeout counter (~131072 iterations)
+      emitter.lui(T1, 0x0020)       # Timeout counter (~2097152 iterations, ~80ms safety timeout)
 
       emitter.label("vsync_spin")
       emitter.ld(V0, 0, V1)        # 64-bit load from GS_CSR
@@ -547,11 +556,11 @@ module Citrine
         emitter.lw(T2, 8, T0) # phase index
         emitter.addiu(T2, T2, 1)
         emitter.ori(T3, ZERO, phases.size)
-        emitter.bne(T2, T3, "phase_clamped")
+        emitter.bne(T2, T3, "phase_in_range")
         emitter.nop
-        emitter.addiu(T2, T3, -1) # clamp to last phase
+        emitter.ori(T2, ZERO, loop_start_phase) # wrap back to loop start phase
 
-        emitter.label("phase_clamped")
+        emitter.label("phase_in_range")
         emitter.sw(T2, 8, T0)
 
         phases.each_with_index do |phase, i|
@@ -560,6 +569,16 @@ module Citrine
             emitter.bne(T2, T3, "check_delay_#{i + 1}")
             emitter.nop
           end
+
+          # If this phase has a live debug message, emit it via debug_puts:
+          if msg_addr = phase_msg_addrs[i]?
+            emitter.lui(A0, (msg_addr >> 16).to_i32)
+            emitter.ori(A0, A0, (msg_addr & 0xFFFF).to_i32)
+            emitter.jal("debug_puts")
+            emitter.nop
+            emitter.lui(T0, 0x7000)
+          end
+
           emitter.lui(T4, (phase.delay_frames >> 16).to_i32)
           emitter.ori(T4, T4, (phase.delay_frames & 0xFFFF).to_i32)
           emitter.sw(T4, 12, T0)
@@ -670,8 +689,13 @@ module Citrine
         rodata_bytes.write(pkt)
       end
       rodata_bytes.write(banner_str.to_slice)
-      debug_messages.each do |msg|
+      boot_messages.each do |msg|
         rodata_bytes.write("#{msg}\n\0".to_slice)
+      end
+      phases.each do |phase|
+        if msg = phase.message
+          rodata_bytes.write("#{msg}\n\0".to_slice)
+        end
       end
       rodata_bytes.write("Citrine PS2 Virtual Machine runtime v0.1.0\0".to_slice)
       rodata_bytes.write("Emotion Engine R5900 / Graphic Synthesizer\0".to_slice)
@@ -1145,8 +1169,9 @@ module Citrine
       quad_count
     end
 
-    def parse_cbc(cbc_bytes : Bytes?) : Tuple(Array(Phase), Array(String))
-      debug_messages = [] of String
+    def parse_cbc(cbc_bytes : Bytes?) : Tuple(Array(Phase), Array(String), Int32)
+      boot_messages = [] of String
+      loop_start_phase = 0
       if cbc_bytes && cbc_bytes.size > 20 && String.new(cbc_bytes[0..3]) == "CBC1"
         begin
           io = IO::Memory.new(cbc_bytes)
@@ -1218,6 +1243,8 @@ module Citrine
             max_steps = 10000
             steps = 0
             first_frame_done = false
+            in_main_loop = false
+            current_loop_message : String? = nil
 
             while pc >= 0 && pc < instructions.size && steps < max_steps && !first_frame_done
               steps += 1
@@ -1296,6 +1323,7 @@ module Citrine
 
                 case native_id
                 when 3 # WindowOpen
+                  in_main_loop = true
                   regs[dst] = 1_i64
                 when 40, 41, 42 # ButtonDown, ButtonPressed, ButtonReleased
                   regs[dst] = 0_i64
@@ -1354,25 +1382,51 @@ module Citrine
                   sec = regs[base].to_i
                   sec = 1 if sec <= 0
                   delay_frames = (sec * 60).to_u32
-                  phases << Phase.new(current_commands.dup, delay_frames)
-                  if phases.size >= 4
+                  phases << Phase.new(current_commands.dup, delay_frames, current_loop_message)
+                  current_loop_message = nil
+                  if phases.size >= 10
                     first_frame_done = true
                   end
                 when 70, 71 # Log / puts / print / debug_puts / debug_log
                   t_idx = regs[base].to_i
                   text = constants[t_idx]?.try(&.str_val) || ""
                   unless text.empty?
-                    debug_messages << text
+                    if in_main_loop
+                      if cur = current_loop_message
+                        current_loop_message = "#{cur}\n#{text}"
+                      else
+                        current_loop_message = text
+                      end
+                    else
+                      boot_messages << text
+                    end
                   end
                   if current_commands.empty?
                     current_commands << DrawCommand.new(DrawCommand::Type::Clear, color: 0xFF000000_u32)
+                  end
+                  text_count = current_commands.count { |c| c.type == DrawCommand::Type::Text }
+                  if text_count >= 12
+                    if first_idx = current_commands.index { |c| c.type == DrawCommand::Type::Text }
+                      current_commands.delete_at(first_idx)
+                    end
+                    new_cmds = [] of DrawCommand
+                    text_idx = 0
+                    current_commands.each do |c|
+                      if c.type == DrawCommand::Type::Text
+                        new_cmds << DrawCommand.new(c.type, c.x1, 60 + (text_idx * 28), c.x2, c.y2, c.x3, c.y3, radius: c.radius, color: c.color, text: c.text)
+                        text_idx += 1
+                      else
+                        new_cmds << c
+                      end
+                    end
+                    current_commands = new_cmds
                   end
                   y_pos = 60 + (current_commands.count { |c| c.type == DrawCommand::Type::Text } * 28)
                   current_commands << DrawCommand.new(DrawCommand::Type::Text, 60, y_pos, 20, 0, color: 0xFFFFFFFF_u32, text: text)
                 when 99 # Panic
                   t_idx = regs[base].to_i
                   text = constants[t_idx]?.try(&.str_val) || "Citrine PS2 VM Panic"
-                  debug_messages << "[CITRINE PANIC] #{text}"
+                  boot_messages << "[CITRINE PANIC] #{text}"
                 end
               end
             end
@@ -1386,10 +1440,11 @@ module Citrine
               end
               phases << Phase.new(current_commands, 0_u32)
             elsif current_commands.size > phases.last.commands.size
-              phases << Phase.new(current_commands.dup, 0_u32)
+              phases << Phase.new(current_commands.dup, 0_u32, current_loop_message)
             end
 
-            return {phases, debug_messages} if phases.size > 0
+            loop_start = (phases.size > 1 && phases[0].message.nil?) ? 1 : 0
+            return {phases, boot_messages, loop_start} if phases.size > 0
           end
         rescue ex
           STDERR.puts "[parse_cbc Exception] #{ex.class}: #{ex.message}\n#{ex.backtrace.join("\n")}"
@@ -1403,7 +1458,7 @@ module Citrine
           DrawCommand.new(DrawCommand::Type::Text, 60, 60, 20, 0, color: 0xFFFFFFFF_u32, text: "Hello, world!")
         ], 0_u32)
       ]
-      {fallback_phases, debug_messages}
+      {fallback_phases, boot_messages, 0}
     end
   end
 end

@@ -69,4 +69,24 @@ describe "Citrine PS2 Hardware Bridge & Communication Suite" do
     result.should_boot_cleanly
     result.should_preserve_spram
   end
+
+  it "verifies main_loop sleep timing and dynamic phase printing" do
+    tc = Citrine::Spec::Ps2TestCase.new("loop_sleep_phase_test")
+    tc.source(<<-CR
+      debug_puts "[CITRINE TEST] Boot phase online"
+      Citrine.main_loop do
+        sleep 1
+        debug_puts "[CITRINE TEST] Dynamic loop phase triggered"
+      end
+    CR
+    )
+    bytes, sm = tc.compile
+    bytes.size.should be > 18
+
+    result = tc.boot_pcsx2(timeout: 6.seconds)
+    result.should_boot_cleanly
+    result.should_have_output("[CITRINE] PS2 EE Engine Initialized")
+    result.should_have_output("[CITRINE TEST] Boot phase online")
+    result.should_have_output("[CITRINE TEST] Dynamic loop phase triggered")
+  end
 end
