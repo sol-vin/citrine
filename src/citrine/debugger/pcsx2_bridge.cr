@@ -19,28 +19,47 @@ module Citrine
       end
 
       def find_pcsx2_executable : String?
+        if env_path = ENV["PCSX2_PATH"]?
+          return env_path if File.exists?(env_path)
+        end
+
+        home = Path.home
         # Check standard installation locations on Windows and PATH
         candidates = [
           "C:\\Program Files\\PCSX2\\pcsx2-qt.exe",
-          "C:\\Program Files (x86)\\PCSX2\\pcsx2-qt.exe",
+          "C:\\Program Files\\PCSX2\\pcsx2-qtx64.exe",
+          "C:\\Program Files\\PCSX2\\pcsx2-qtx64-avx2.exe",
           "C:\\Program Files\\PCSX2\\pcsx2.exe",
-          File.expand_path("~/AppData/Local/Programs/PCSX2/pcsx2-qt.exe"),
-          File.expand_path("~/Documents/PCSX2/pcsx2-qt.exe")
+          "C:\\Program Files (x86)\\PCSX2\\pcsx2-qt.exe",
+          "C:\\Program Files (x86)\\PCSX2\\pcsx2-qtx64.exe",
+          "C:\\Program Files (x86)\\PCSX2\\pcsx2.exe",
+          home.join("AppData", "Local", "Programs", "PCSX2", "pcsx2-qt.exe").to_s,
+          home.join("AppData", "Local", "Programs", "PCSX2", "pcsx2-qtx64.exe").to_s,
+          home.join("Documents", "PCSX2", "pcsx2-qt.exe").to_s,
+          home.join("Documents", "PCSX2", "pcsx2-qtx64.exe").to_s,
+          home.join("Documents", "PCSX2", "pcsx2.exe").to_s
         ]
 
         candidates.each do |c|
           return c if File.exists?(c)
         end
 
-        Process.find_executable("pcsx2-qt") || Process.find_executable("pcsx2")
+        Process.find_executable("pcsx2-qt") || Process.find_executable("pcsx2-qtx64") || Process.find_executable("pcsx2")
       end
 
       def find_emulog_path : String?
+        if env_log = ENV["PCSX2_LOG"]?
+          return env_log
+        end
+
+        home = Path.home
         candidates = [
-          File.expand_path("~/Documents/PCSX2/logs/emulog.txt"),
+          home.join("Documents", "PCSX2", "logs", "emulog.txt").to_s,
+          "C:\\Program Files\\PCSX2\\logs\\emulog.txt",
           "C:\\Users\\Ian\\Documents\\PCSX2\\logs\\emulog.txt",
-          File.expand_path("~/AppData/Roaming/PCSX2/logs/emulog.txt"),
-          File.expand_path("~/AppData/Local/PCSX2/logs/emulog.txt")
+          home.join("AppData", "Roaming", "PCSX2", "logs", "emulog.txt").to_s,
+          home.join("AppData", "Local", "PCSX2", "logs", "emulog.txt").to_s,
+          File.expand_path("logs/emulog.txt")
         ]
 
         candidates.each do |c|
@@ -48,21 +67,28 @@ module Citrine
         end
 
         # Return primary default
-        File.expand_path("~/Documents/PCSX2/logs/emulog.txt")
+        home.join("Documents", "PCSX2", "logs", "emulog.txt").to_s
       end
 
       def find_inis_path : String?
+        if env_inis = ENV["PCSX2_INIS"]?
+          return env_inis
+        end
+
+        home = Path.home
         candidates = [
-          File.expand_path("~/Documents/PCSX2/inis/PCSX2.ini"),
+          home.join("Documents", "PCSX2", "inis", "PCSX2.ini").to_s,
+          "C:\\Program Files\\PCSX2\\inis\\PCSX2.ini",
           "C:\\Users\\Ian\\Documents\\PCSX2\\inis\\PCSX2.ini",
-          File.expand_path("~/AppData/Roaming/PCSX2/inis/PCSX2.ini")
+          home.join("AppData", "Roaming", "PCSX2", "inis", "PCSX2.ini").to_s,
+          File.expand_path("inis/PCSX2.ini")
         ]
 
         candidates.each do |c|
           return c if File.exists?(c)
         end
 
-        File.expand_path("~/Documents/PCSX2/inis/PCSX2.ini")
+        home.join("Documents", "PCSX2", "inis", "PCSX2.ini").to_s
       end
 
       def ensure_logging_configured : Bool

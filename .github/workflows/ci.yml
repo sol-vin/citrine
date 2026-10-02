@@ -12,6 +12,8 @@ jobs:
   test:
     name: Test & Build Citrine Toolkit (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    env:
+      PCSX2_BIOS_URL: ${{ secrets.PCSX2_BIOS_URL }}
     strategy:
       fail-fast: false
       matrix:
@@ -44,7 +46,6 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PCSX2_BIOS_URL: ${{ secrets.PCSX2_BIOS_URL }}
         run: |
           Write-Host "Installing PCSX2 portable emulator release..."
           New-Item -ItemType Directory -Force -Path "$env:TEMP\pcsx2_dl"
@@ -53,39 +54,84 @@ jobs:
           New-Item -ItemType Directory -Force -Path "C:\Program Files\PCSX2"
           7z x "$env:TEMP\pcsx2_dl\*.7z" -o"C:\Program Files\PCSX2" -y | Out-Null
           
-          Write-Host "Configuring PCSX2.ini..."
+          # Standardize PCSX2 executable names
+          if (Test-Path "C:\Program Files\PCSX2\pcsx2-qtx64.exe" -and -not (Test-Path "C:\Program Files\PCSX2\pcsx2-qt.exe")) {
+            Copy-Item "C:\Program Files\PCSX2\pcsx2-qtx64.exe" "C:\Program Files\PCSX2\pcsx2-qt.exe" -Force
+          }
+          if (Test-Path "C:\Program Files\PCSX2\pcsx2-qtx64-avx2.exe" -and -not (Test-Path "C:\Program Files\PCSX2\pcsx2-qt.exe")) {
+            Copy-Item "C:\Program Files\PCSX2\pcsx2-qtx64-avx2.exe" "C:\Program Files\PCSX2\pcsx2-qt.exe" -Force
+          }
+
+          Write-Host "Configuring PCSX2.ini and directories..."
           $inisDir = "$HOME\Documents\PCSX2\inis"
           New-Item -ItemType Directory -Force -Path $inisDir
-          @"
-          [UI]
-          SetupWizardIncomplete = false
-
-          [Folders]
-          Bios = bios
-          Logs = logs
-
-          [Logging]
-          EnableSystemConsole = true
-          EnableFileLogging = true
-          EnableEEConsole = true
-          EnableIOPConsole = true
-
-          [EmuCore]
-          EnableFastBoot = true
-          "@ | Set-Content -Path "$inisDir\PCSX2.ini"
-
           $biosDir = "$HOME\Documents\PCSX2\bios"
           New-Item -ItemType Directory -Force -Path $biosDir
+          $logsDir = "$HOME\Documents\PCSX2\logs"
+          New-Item -ItemType Directory -Force -Path $logsDir
+
+          $iniContent = @"
+[UI]
+SetupWizardIncomplete = false
+
+[Folders]
+Bios = $biosDir
+Logs = $logsDir
+
+[Logging]
+EnableSystemConsole = true
+EnableFileLogging = true
+EnableEEConsole = true
+EnableIOPConsole = true
+
+[EmuCore]
+EnableFastBoot = true
+"@
+          $iniContent | Set-Content -Path "$inisDir\PCSX2.ini" -Force
+          New-Item -ItemType Directory -Force -Path "C:\Program Files\PCSX2\inis"
+          $iniContent | Set-Content -Path "C:\Program Files\PCSX2\inis\PCSX2.ini" -Force
 
           if ($env:PCSX2_BIOS_URL) {
             Write-Host "Downloading PS2 BIOS from secure URL..."
-            curl.exe -L -s -f -o "$env:TEMP\bios_dl" "$env:PCSX2_BIOS_URL"
-            & 7z x "$env:TEMP\bios_dl" -o"$biosDir" -y -r 2>&1 | Out-Null
-            if ((Get-ChildItem $biosDir -Recurse -Filter "*.bin", "*.BIN").Count -eq 0) {
-              Move-Item -Path "$env:TEMP\bios_dl" -Destination "$biosDir\SCPH-70004_BIOS_V12_PAL_200.BIN" -Force
+            $success = $false
+            try {
+              curl.exe -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -L --connect-timeout 15 -m 60 -s -f -o "$env:TEMP\bios_dl" "$env:PCSX2_BIOS_URL"
+              if ($LASTEXITCODE -eq 0 -and (Test-Path "$env:TEMP\bios_dl") -and (Get-Item "$env:TEMP\bios_dl").Length -gt 100000) {
+                $success = $true
+              }
+            } catch {
+              Write-Warning "curl failed: $_"
             }
-            Write-Host "PS2 BIOS successfully configured:"
-            Get-ChildItem $biosDir
+
+            if (-not $success) {
+              try {
+                Write-Host "Trying Invoke-WebRequest fallback..."
+                $headers = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" }
+                Invoke-WebRequest -Uri "$env:PCSX2_BIOS_URL" -OutFile "$env:TEMP\bios_dl" -Headers $headers -TimeoutSec 60
+                if ((Test-Path "$env:TEMP\bios_dl") -and (Get-Item "$env:TEMP\bios_dl").Length -gt 100000) {
+                  $success = $true
+                }
+              } catch {
+                Write-Warning "Invoke-WebRequest fallback failed: $_"
+              }
+            }
+
+            if ($success) {
+              & 7z x "$env:TEMP\bios_dl" -o"$biosDir" -y -r 2>&1 | Out-Null
+              if ((Get-ChildItem $biosDir -Recurse -Filter "*.bin", "*.BIN").Count -eq 0) {
+                Copy-Item -Path "$env:TEMP\bios_dl" -Destination "$biosDir\SCPH-39001_BIOS_V7_USA_160.BIN" -Force
+              }
+
+              New-Item -ItemType Directory -Force -Path "C:\Program Files\PCSX2\bios"
+              Copy-Item "$biosDir\*" -Destination "C:\Program Files\PCSX2\bios" -Force -Recurse
+              New-Item -ItemType Directory -Force -Path ".\bios"
+              Copy-Item "$biosDir\*" -Destination ".\bios" -Force -Recurse
+
+              Write-Host "PS2 BIOS successfully configured:"
+              Get-ChildItem $biosDir
+            } else {
+              Write-Warning "::warning::Could not download PS2 BIOS within timeout."
+            }
           } else {
             Write-Warning "::warning::PCSX2_BIOS_URL secret is not set. Set the PCSX2_BIOS_URL secret in repository settings to run live PCSX2 tests."
           }
@@ -99,7 +145,6 @@ jobs:
         shell: bash
         env:
           REQUIRE_PCSX2: "1"
-          PCSX2_BIOS_URL: ${{ secrets.PCSX2_BIOS_URL }}
         run: |
           crystal spec spec/ps2/hardware_bridge_spec.cr spec/ps2/examples_ps2_spec.cr
 
