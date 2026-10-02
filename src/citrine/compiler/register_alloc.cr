@@ -63,6 +63,13 @@ module Citrine
       base
     end
 
+    def alloc_call_frame(count : Int32) : UInt8
+      return @next_reg.to_u8 if count <= 0
+      base = @next_reg.to_u8
+      count.times { alloc_raw }
+      base
+    end
+
     def free_temp(reg : UInt8)
       # Do not free if it's a declared local variable
       unless @local_map.values.includes?(reg)

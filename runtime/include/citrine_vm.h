@@ -35,6 +35,30 @@ typedef struct __attribute__((aligned(16))) {
     } as;
 } Value;
 
+// Citrine Object Header (Classes & Structs)
+typedef struct {
+    uint32_t class_id;
+    uint32_t field_count;
+    Value*   fields;
+} CitrineObject;
+
+// Citrine Array Header (Dynamic & Static Arrays)
+typedef struct {
+    uint32_t capacity;
+    uint32_t size;
+    bool     is_static;
+    Value*   elements;
+} CitrineArray;
+
+// Citrine In-Memory IO Stream (IO::Memory)
+typedef struct {
+    char*    buffer;
+    size_t   capacity;
+    size_t   size;
+    size_t   pos;
+} CitrineMemoryIO;
+
+
 // Scratchpad RAM (SPRAM) mapping on PS2 Emotion Engine
 #ifndef HOST_TEST_BUILD
 #define SPRAM_BASE ((Value*)0x70000000)

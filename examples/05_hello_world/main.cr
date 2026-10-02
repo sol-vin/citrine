@@ -3,6 +3,10 @@ require "citrine"
 Citrine.init_window(640, 448, "05 Hello World - Citrine PS2")
 Citrine.set_target_fps(60)
 
+# Build formatted stream using IO::Memory
+stream = IO::Memory.new(128)
+stream.puts "CITRINE PS2 TOOLKIT"
+
 Citrine.main_loop do
   Citrine.begin_drawing
   Citrine.clear_background(Color::Black)

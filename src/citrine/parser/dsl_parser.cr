@@ -6,6 +6,7 @@ module Citrine
   class ParsedProgram
     property defs : Hash(String, Crystal::Def)
     property structs : Hash(String, Crystal::ClassDef)
+    property modules : Hash(String, Crystal::ModuleDef)
     property top_level_nodes : Array(Crystal::ASTNode)
     property main_loop_body : Crystal::ASTNode?
     property filename : String?
@@ -14,10 +15,12 @@ module Citrine
     def initialize(@filename : String? = nil)
       @defs = {} of String => Crystal::Def
       @structs = {} of String => Crystal::ClassDef
+      @modules = {} of String => Crystal::ModuleDef
       @top_level_nodes = [] of Crystal::ASTNode
       @main_loop_body = nil
       @loaded_requires = Set(String).new
     end
+
   end
 
   class DslParser
@@ -70,6 +73,8 @@ module Citrine
         program.defs[node.name] = node
       when Crystal::ClassDef
         program.structs[node.name.to_s] = node
+      when Crystal::ModuleDef
+        program.modules[node.name.to_s] = node
       when Crystal::Require
         handle_require(node.string, program)
       when Crystal::Call
@@ -111,7 +116,9 @@ module Citrine
 
         sub_prog.defs.each { |k, v| program.defs[k] = v }
         sub_prog.structs.each { |k, v| program.structs[k] = v }
+        sub_prog.modules.each { |k, v| program.modules[k] = v }
         sub_prog.top_level_nodes.each { |n| program.top_level_nodes << n }
+
         sub_prog.loaded_requires.each { |r| program.loaded_requires << r }
       end
     end

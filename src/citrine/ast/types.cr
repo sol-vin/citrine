@@ -76,7 +76,31 @@ module Citrine
     GLRotate        = 109
     GLScale         = 110
     GLLoadIdentity  = 111
+    ArrayNew        = 120
+    ArrayGet        = 121
+    ArraySet        = 122
+    ArrayPush       = 123
+    ArrayPop        = 124
+    ArraySize       = 125
+    ArrayClear      = 126
+    StaticArrayNew  = 130
+    StaticArrayGet  = 131
+    StaticArraySet  = 132
+    StaticArraySize = 133
+    MemoryIONew     = 140
+    MemoryIOWriteByte = 141
+    MemoryIOWrite   = 142
+    MemoryIOPuts    = 143
+    MemoryIOToS     = 144
+    MemoryIORewind  = 145
+    MemoryIOPos     = 146
+    MemoryIOSize    = 147
+    MemoryIOClear   = 148
+    ObjectNew       = 150
+    ObjectGetField  = 151
+    ObjectSetField  = 152
   end
+
 
   enum GLMode : UInt8
     Points        = 0

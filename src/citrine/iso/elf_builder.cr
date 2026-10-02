@@ -54,6 +54,15 @@ module Citrine
       end
     end
 
+    struct CallFrame
+      property return_pc : Int32
+      property caller_instructions : Array(UInt32)
+      property caller_dest : Int32
+      property caller_reg_base : Int32
+      def initialize(@return_pc, @caller_instructions, @caller_dest, @caller_reg_base)
+      end
+    end
+
     def self.build_default_runner_elf(cbc_bytes : Bytes? = nil) : Bytes
       builder = new
       builder.generate(cbc_bytes)
@@ -588,7 +597,15 @@ module Citrine
               instructions << io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
             end
 
-            regs = Array(Int64).new(256, 0_i64)
+            regs = Array(Int64).new(1024, 0_i64)
+            reg_base = 0
+            call_stack = [] of CallFrame
+            objects = Hash(Int64, Array(Int64)).new
+            next_obj_id = 1_i64
+            arrays = Hash(Int64, Array(Int64)).new
+            next_arr_id = 1000_i64
+            io_streams = Hash(Int64, IO::Memory).new
+            next_io_id = 2000_i64
             current_commands = [] of DrawCommand
             phases = [] of Phase
             pc = 0
@@ -622,44 +639,48 @@ module Citrine
               val16 = (instr & 0xFFFF).to_i32
               imm16_signed = (val16 >= 0x8000 ? val16 - 0x10000 : val16).to_i64
 
+              dst_r = (reg_base + dst).clamp(0, 1023)
+              a_r = (reg_base + a).clamp(0, 1023)
+              b_r = (reg_base + b).clamp(0, 1023)
+
               pc += 1
 
               case opcode
               when 0 # Nop
               when 1 # Move
-                regs[dst] = regs[a]
+                regs[dst_r] = regs[a_r]
               when 2 # LoadNil
-                regs[dst] = 0_i64
+                regs[dst_r] = 0_i64
               when 3 # LoadBool
-                regs[dst] = imm16
+                regs[dst_r] = imm16
               when 4 # LoadInt
-                regs[dst] = imm16
+                regs[dst_r] = imm16
               when 5 # LoadConst
-                regs[dst] = imm16
+                regs[dst_r] = imm16
               when 10 # Add
-                regs[dst] = regs[a] + regs[b]
+                regs[dst_r] = regs[a_r] + regs[b_r]
               when 11 # Sub
-                regs[dst] = regs[a] - regs[b]
+                regs[dst_r] = regs[a_r] - regs[b_r]
               when 12 # Mul
-                regs[dst] = regs[a] * regs[b]
+                regs[dst_r] = regs[a_r] * regs[b_r]
               when 13 # Div
-                regs[dst] = regs[b] != 0 ? (regs[a] // regs[b]) : 0_i64
+                regs[dst_r] = regs[b_r] != 0 ? (regs[a_r] // regs[b_r]) : 0_i64
               when 14 # Mod
-                regs[dst] = regs[b] != 0 ? (regs[a] % regs[b]) : 0_i64
+                regs[dst_r] = regs[b_r] != 0 ? (regs[a_r] % regs[b_r]) : 0_i64
               when 15 # Neg
-                regs[dst] = -regs[a]
+                regs[dst_r] = -regs[a_r]
               when 30 # Eq
-                regs[dst] = (regs[a] == regs[b]) ? 1_i64 : 0_i64
+                regs[dst_r] = (regs[a_r] == regs[b_r]) ? 1_i64 : 0_i64
               when 31 # Ne
-                regs[dst] = (regs[a] != regs[b]) ? 1_i64 : 0_i64
+                regs[dst_r] = (regs[a_r] != regs[b_r]) ? 1_i64 : 0_i64
               when 32 # Lt
-                regs[dst] = (regs[a] < regs[b]) ? 1_i64 : 0_i64
+                regs[dst_r] = (regs[a_r] < regs[b_r]) ? 1_i64 : 0_i64
               when 33 # Le
-                regs[dst] = (regs[a] <= regs[b]) ? 1_i64 : 0_i64
+                regs[dst_r] = (regs[a_r] <= regs[b_r]) ? 1_i64 : 0_i64
               when 34 # Gt
-                regs[dst] = (regs[a] > regs[b]) ? 1_i64 : 0_i64
+                regs[dst_r] = (regs[a_r] > regs[b_r]) ? 1_i64 : 0_i64
               when 35 # Ge
-                regs[dst] = (regs[a] >= regs[b]) ? 1_i64 : 0_i64
+                regs[dst_r] = (regs[a_r] >= regs[b_r]) ? 1_i64 : 0_i64
               when 40 # Jump
                 target_pc = pc + imm16_signed
                 if imm16_signed < 0 && target_pc >= 0 && target_pc < instructions.size
@@ -675,23 +696,48 @@ module Citrine
                 end
                 pc += imm16_signed
               when 41 # JumpIfTrue
-                pc += imm16_signed if regs[dst] != 0
+                pc += imm16_signed if regs[dst_r] != 0
               when 42 # JumpIfFalse
-                pc += imm16_signed if regs[dst] == 0
+                pc += imm16_signed if regs[dst_r] == 0
+              when 50 # Call
+                target_fn_idx = imm16.to_i
+                if target_fn = fns[target_fn_idx]?
+                  saved_pos = io.pos
+                  io.pos = instructions_start_pos + (target_fn.offset.to_i64 * 4)
+                  fn_instructions = [] of UInt32
+                  target_fn.count.times do
+                    fn_instructions << io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
+                  end
+                  io.pos = saved_pos
+
+                  call_stack << CallFrame.new(pc, instructions, dst_r, reg_base)
+                  reg_base = (reg_base + dst + 1).clamp(0, 1000)
+                  instructions = fn_instructions
+                  pc = 0
+                end
               when 51 # Return
-                break
+                if frame = call_stack.pop?
+                  ret_val = regs[dst_r]
+                  reg_base = frame.caller_reg_base
+                  regs[frame.caller_dest] = ret_val
+                  instructions = frame.caller_instructions
+                  pc = frame.return_pc
+                else
+                  break
+                end
               when 70 # Halt
                 break
               when 52 # CallNative
                 base = a
+                base_r = (reg_base + base).clamp(0, 1023)
                 native_id = b
 
                 case native_id
                 when 3 # WindowOpen
                   in_main_loop = true
-                  regs[dst] = 1_i64
+                  regs[dst_r] = 1_i64
                 when 40, 41, 42 # ButtonDown, ButtonPressed, ButtonReleased
-                  regs[dst] = simulated_button_press ? 1_i64 : 0_i64
+                  regs[dst_r] = simulated_button_press ? 1_i64 : 0_i64
                 when 11 # EndDrawing
                   if current_commands.size > 0
                     if has_button_checks
@@ -718,65 +764,65 @@ module Citrine
                     end
                   end
                 when 12 # ClearBackground
-                  c_idx = regs[base].to_i
+                  c_idx = regs[base_r].to_i
                   color = constants[c_idx]?.try(&.u32_val) || 0_u32
                   current_commands << DrawCommand.new(DrawCommand::Type::Clear, color: color)
                 when 20 # DrawRectangle
-                  x = regs[base].to_i
-                  y = regs[base + 1].to_i
-                  w = regs[base + 2].to_i
-                  h = regs[base + 3].to_i
-                  c_idx = regs[base + 4].to_i
+                  x = regs[base_r].to_i
+                  y = regs[base_r + 1].to_i
+                  w = regs[base_r + 2].to_i
+                  h = regs[base_r + 3].to_i
+                  c_idx = regs[base_r + 4].to_i
                   color = constants[c_idx]?.try(&.u32_val) || 0xFFFFFFFF_u32
                   current_commands << DrawCommand.new(DrawCommand::Type::Rect, x, y, x + w, y + h, color: color)
                 when 21 # DrawCircle
-                  cx = regs[base].to_i
-                  cy = regs[base + 1].to_i
-                  radius = regs[base + 2].to_i
-                  c_idx = regs[base + 3].to_i
+                  cx = regs[base_r].to_i
+                  cy = regs[base_r + 1].to_i
+                  radius = regs[base_r + 2].to_i
+                  c_idx = regs[base_r + 3].to_i
                   color = constants[c_idx]?.try(&.u32_val) || 0xFFFFFFFF_u32
                   current_commands << DrawCommand.new(DrawCommand::Type::Circle, cx, cy, 0, 0, 0, 0, radius: radius, color: color)
                 when 22 # DrawLine
-                  x1 = regs[base].to_i
-                  y1 = regs[base + 1].to_i
-                  x2 = regs[base + 2].to_i
-                  y2 = regs[base + 3].to_i
-                  c_idx = regs[base + 4].to_i
+                  x1 = regs[base_r].to_i
+                  y1 = regs[base_r + 1].to_i
+                  x2 = regs[base_r + 2].to_i
+                  y2 = regs[base_r + 3].to_i
+                  c_idx = regs[base_r + 4].to_i
                   color = constants[c_idx]?.try(&.u32_val) || 0xFFFFFFFF_u32
                   current_commands << DrawCommand.new(DrawCommand::Type::Line, x1, y1, x2, y2, color: color)
                 when 23 # DrawTriangle
-                  x1 = regs[base].to_i
-                  y1 = regs[base + 1].to_i
-                  x2 = regs[base + 2].to_i
-                  y2 = regs[base + 3].to_i
-                  x3 = regs[base + 4].to_i
-                  y3 = regs[base + 5].to_i
-                  c_idx = regs[base + 6].to_i
+                  x1 = regs[base_r].to_i
+                  y1 = regs[base_r + 1].to_i
+                  x2 = regs[base_r + 2].to_i
+                  y2 = regs[base_r + 3].to_i
+                  x3 = regs[base_r + 4].to_i
+                  y3 = regs[base_r + 5].to_i
+                  c_idx = regs[base_r + 6].to_i
                   color = constants[c_idx]?.try(&.u32_val) || 0xFFFFFFFF_u32
                   current_commands << DrawCommand.new(DrawCommand::Type::Triangle, x1, y1, x2, y2, x3, y3, color: color)
                 when 24 # DrawText
-                  t_idx = regs[base].to_i
+                  t_idx = regs[base_r].to_i
                   text = constants[t_idx]?.try(&.str_val) || ""
-                  x = regs[base + 1].to_i
-                  y = regs[base + 2].to_i
-                  size = regs[base + 3].to_i
-                  c_idx = regs[base + 4].to_i
+                  x = regs[base_r + 1].to_i
+                  y = regs[base_r + 2].to_i
+                  size = regs[base_r + 3].to_i
+                  c_idx = regs[base_r + 4].to_i
                   color = constants[c_idx]?.try(&.u32_val) || 0xFFFFFFFF_u32
                   current_commands << DrawCommand.new(DrawCommand::Type::Text, x, y, size, 0, color: color, text: text)
                 when 25 # DrawQuad (decomposes to 2 triangles)
-                  x1 = regs[base].to_i
-                  y1 = regs[base + 1].to_i
-                  x2 = regs[base + 2].to_i
-                  y2 = regs[base + 3].to_i
-                  x3 = regs[base + 4].to_i
-                  y3 = regs[base + 5].to_i
-                  x4 = regs[base + 6].to_i
-                  y4 = regs[base + 7].to_i
-                  c_idx = regs[base + 8].to_i
+                  x1 = regs[base_r].to_i
+                  y1 = regs[base_r + 1].to_i
+                  x2 = regs[base_r + 2].to_i
+                  y2 = regs[base_r + 3].to_i
+                  x3 = regs[base_r + 4].to_i
+                  y3 = regs[base_r + 5].to_i
+                  x4 = regs[base_r + 6].to_i
+                  y4 = regs[base_r + 7].to_i
+                  c_idx = regs[base_r + 8].to_i
                   color = constants[c_idx]?.try(&.u32_val) || 0xFFFFFFFF_u32
                   current_commands << DrawCommand.new(DrawCommand::Type::Quad, x1, y1, x2, y2, x3, y3, x4, y4, color: color)
                 when 65 # Sleep(seconds)
-                  sec = regs[base].to_i
+                  sec = regs[base_r].to_i
                   sec = 1 if sec <= 0
                   delay_frames = (sec * 60).to_u32
                   phases << Phase.new(current_commands.dup, delay_frames, current_loop_message)
@@ -785,7 +831,7 @@ module Citrine
                     first_frame_done = true
                   end
                 when 70, 71 # Log / puts / print / debug_puts / debug_log
-                  t_idx = regs[base].to_i
+                  t_idx = regs[base_r].to_i
                   text = constants[t_idx]?.try(&.str_val) || ""
                   unless text.empty?
                     if in_main_loop
@@ -823,9 +869,135 @@ module Citrine
                     current_commands << DrawCommand.new(DrawCommand::Type::Text, 60, y_pos, 20, 0, color: 0xFFFFFFFF_u32, text: text)
                   end
                 when 99 # Panic
-                  t_idx = regs[base].to_i
+                  t_idx = regs[base_r].to_i
                   text = constants[t_idx]?.try(&.str_val) || "Citrine PS2 VM Panic"
                   boot_messages << "[CITRINE PANIC] #{text}"
+                when 120 # ArrayNew
+                  arr_id = next_arr_id
+                  next_arr_id += 1
+                  arrays[arr_id] = [] of Int64
+                  regs[dst_r] = arr_id
+                when 121 # ArrayGet
+                  arr_id = regs[base_r]
+                  idx = regs[base_r + 1].to_i
+                  regs[dst_r] = arrays[arr_id]?.try(&.[idx]?) || 0_i64
+                when 122 # ArraySet
+                  arr_id = regs[base_r]
+                  idx = regs[base_r + 1].to_i
+                  val = regs[base_r + 2]
+                  if arr = arrays[arr_id]?
+                    while arr.size <= idx
+                      arr << 0_i64
+                    end
+                    arr[idx] = val
+                  end
+                  regs[dst_r] = val
+                when 123 # ArrayPush
+                  arr_id = regs[base_r]
+                  val = regs[base_r + 1]
+                  if arr = arrays[arr_id]?
+                    arr << val
+                  end
+                  regs[dst_r] = arr_id
+                when 124 # ArrayPop
+                  arr_id = regs[base_r]
+                  regs[dst_r] = arrays[arr_id]?.try(&.pop?) || 0_i64
+                when 125 # ArraySize
+                  arr_id = regs[base_r]
+                  regs[dst_r] = (arrays[arr_id]?.try(&.size) || 0).to_i64
+                when 126 # ArrayClear
+                  arr_id = regs[base_r]
+                  arrays[arr_id]?.try(&.clear)
+                  regs[dst_r] = 0_i64
+                when 130 # StaticArrayNew
+                  sz = regs[base_r].to_i
+                  def_val = regs[base_r + 1]
+                  arr_id = next_arr_id
+                  next_arr_id += 1
+                  arrays[arr_id] = Array(Int64).new(sz, def_val)
+                  regs[dst_r] = arr_id
+                when 131 # StaticArrayGet
+                  arr_id = regs[base_r]
+                  idx = regs[base_r + 1].to_i
+                  regs[dst_r] = arrays[arr_id]?.try(&.[idx]?) || 0_i64
+                when 132 # StaticArraySet
+                  arr_id = regs[base_r]
+                  idx = regs[base_r + 1].to_i
+                  val = regs[base_r + 2]
+                  if arr = arrays[arr_id]?
+                    while arr.size <= idx
+                      arr << 0_i64
+                    end
+                    arr[idx] = val
+                  end
+                  regs[dst_r] = val
+                when 133 # StaticArraySize
+                  arr_id = regs[base_r]
+                  regs[dst_r] = (arrays[arr_id]?.try(&.size) || 0).to_i64
+                when 140 # MemoryIONew
+                  io_id = next_io_id
+                  next_io_id += 1
+                  io_streams[io_id] = IO::Memory.new
+                  regs[dst_r] = io_id
+                when 141 # MemoryIOWriteByte
+                  io_id = regs[base_r]
+                  byte = regs[base_r + 1].to_u8
+                  io_streams[io_id]?.try(&.write_byte(byte))
+                  regs[dst_r] = 1_i64
+                when 142 # MemoryIOWrite
+                  io_id = regs[base_r]
+                  t_idx = regs[base_r + 1].to_i
+                  str = constants[t_idx]?.try(&.str_val) || ""
+                  io_streams[io_id]?.try(&.print(str))
+                  regs[dst_r] = str.bytesize.to_i64
+                when 143 # MemoryIOPuts
+                  io_id = regs[base_r]
+                  t_idx = regs[base_r + 1].to_i
+                  str = constants[t_idx]?.try(&.str_val) || ""
+                  io_streams[io_id]?.try(&.puts(str))
+                  boot_messages << str unless str.empty?
+                  regs[dst_r] = (str.bytesize + 1).to_i64
+                when 144 # MemoryIOToS
+                  io_id = regs[base_r]
+                  str = io_streams[io_id]?.try(&.to_s) || ""
+                  s_idx = strings.index(str) || (strings << str; strings.size - 1)
+                  constants << CVal.new(6_u8, 0_u32, str)
+                  regs[dst_r] = (constants.size - 1).to_i64
+                when 145 # MemoryIORewind
+                  io_id = regs[base_r]
+                  io_streams[io_id]?.try(&.rewind)
+                  regs[dst_r] = 0_i64
+                when 146 # MemoryIOPos
+                  io_id = regs[base_r]
+                  regs[dst_r] = (io_streams[io_id]?.try(&.pos) || 0).to_i64
+                when 147 # MemoryIOSize
+                  io_id = regs[base_r]
+                  regs[dst_r] = (io_streams[io_id]?.try(&.size) || 0).to_i64
+                when 148 # MemoryIOClear
+                  io_id = regs[base_r]
+                  io_streams[io_id]?.try(&.clear)
+                  regs[dst_r] = 0_i64
+                when 150 # ObjectNew
+                  field_count = regs[base_r + 1].to_i
+                  obj_id = next_obj_id
+                  next_obj_id += 1
+                  objects[obj_id] = Array(Int64).new(field_count, 0_i64)
+                  regs[dst_r] = obj_id
+                when 151 # ObjectGetField
+                  obj_id = regs[base_r]
+                  f_idx = regs[base_r + 1].to_i
+                  regs[dst_r] = objects[obj_id]?.try(&.[f_idx]?) || 0_i64
+                when 152 # ObjectSetField
+                  obj_id = regs[base_r]
+                  f_idx = regs[base_r + 1].to_i
+                  val = regs[base_r + 2]
+                  if obj = objects[obj_id]?
+                    while obj.size <= f_idx
+                      obj << 0_i64
+                    end
+                    obj[f_idx] = val
+                  end
+                  regs[dst_r] = val
                 end
               end
             end

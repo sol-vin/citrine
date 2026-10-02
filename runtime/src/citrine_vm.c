@@ -20,6 +20,147 @@ Value g_host_spram[1024];
 // Forward declaration of native dispatch table
 static void native_dispatch(CitrineVM* vm, uint16_t native_id, Value* args, uint8_t argc, Value* out_ret);
 
+// ----------------------------------------------------------------------------
+// Core Parity Data Structures: Arrays, IO::Memory, Objects
+// ----------------------------------------------------------------------------
+
+static void citrine_value_to_str(Value val, char* out_buf, size_t buf_size) {
+    if (!out_buf || buf_size == 0) return;
+    switch (val.type) {
+        case VAL_STRING:
+            snprintf(out_buf, buf_size, "%s", val.as.str ? val.as.str : "");
+            break;
+        case VAL_INT32:
+            snprintf(out_buf, buf_size, "%d", val.as.i);
+            break;
+        case VAL_FLOAT32:
+            snprintf(out_buf, buf_size, "%g", val.as.f);
+            break;
+        case VAL_BOOL:
+            snprintf(out_buf, buf_size, "%s", val.as.i ? "true" : "false");
+            break;
+        case VAL_NIL:
+            snprintf(out_buf, buf_size, "nil");
+            break;
+        case VAL_OBJECT:
+            snprintf(out_buf, buf_size, "<object %p>", val.as.ptr);
+            break;
+        default:
+            snprintf(out_buf, buf_size, "<value>");
+            break;
+    }
+}
+
+static CitrineArray* citrine_array_new(uint32_t capacity, bool is_static) {
+    if (capacity == 0) capacity = 4;
+    CitrineArray* arr = (CitrineArray*)calloc(1, sizeof(CitrineArray));
+    if (!arr) return NULL;
+    arr->capacity = capacity;
+    arr->size = is_static ? capacity : 0;
+    arr->is_static = is_static;
+    arr->elements = (Value*)calloc(capacity, sizeof(Value));
+    return arr;
+}
+
+static void citrine_array_push(CitrineArray* arr, Value val) {
+    if (!arr || arr->is_static) return;
+    if (arr->size >= arr->capacity) {
+        uint32_t new_cap = arr->capacity * 2;
+        Value* new_elems = (Value*)realloc(arr->elements, new_cap * sizeof(Value));
+        if (new_elems) {
+            arr->elements = new_elems;
+            arr->capacity = new_cap;
+        } else {
+            return;
+        }
+    }
+    arr->elements[arr->size++] = val;
+}
+
+static Value citrine_array_pop(CitrineArray* arr) {
+    Value nil_val = { .type = VAL_NIL, .flags = 0, .as = { .i = 0 } };
+    if (!arr || arr->size == 0) return nil_val;
+    arr->size--;
+    return arr->elements[arr->size];
+}
+
+static Value citrine_array_get(CitrineArray* arr, int32_t index) {
+    Value nil_val = { .type = VAL_NIL, .flags = 0, .as = { .i = 0 } };
+    if (!arr || index < 0 || (uint32_t)index >= arr->size) return nil_val;
+    return arr->elements[index];
+}
+
+static void citrine_array_set(CitrineArray* arr, int32_t index, Value val) {
+    if (!arr || index < 0) return;
+    if ((uint32_t)index >= arr->capacity) {
+        if (arr->is_static) return;
+        uint32_t new_cap = ((uint32_t)index + 1) * 2;
+        Value* new_elems = (Value*)realloc(arr->elements, new_cap * sizeof(Value));
+        if (!new_elems) return;
+        for (uint32_t i = arr->capacity; i < new_cap; i++) {
+            new_elems[i].type = VAL_NIL;
+        }
+        arr->elements = new_elems;
+        arr->capacity = new_cap;
+    }
+    if ((uint32_t)index >= arr->size) {
+        arr->size = (uint32_t)index + 1;
+    }
+    arr->elements[index] = val;
+}
+
+static CitrineMemoryIO* citrine_memory_io_new(size_t capacity) {
+    if (capacity == 0) capacity = 64;
+    CitrineMemoryIO* io = (CitrineMemoryIO*)calloc(1, sizeof(CitrineMemoryIO));
+    if (!io) return NULL;
+    io->capacity = capacity;
+    io->size = 0;
+    io->pos = 0;
+    io->buffer = (char*)calloc(capacity, 1);
+    return io;
+}
+
+static void citrine_memory_io_write(CitrineMemoryIO* io, const char* str, size_t len) {
+    if (!io || !str || len == 0) return;
+    if (io->pos + len + 1 >= io->capacity) {
+        size_t new_cap = (io->capacity + len) * 2;
+        char* new_buf = (char*)realloc(io->buffer, new_cap);
+        if (!new_buf) return;
+        io->buffer = new_buf;
+        io->capacity = new_cap;
+    }
+    memcpy(io->buffer + io->pos, str, len);
+    io->pos += len;
+    if (io->pos > io->size) io->size = io->pos;
+    io->buffer[io->size] = '\0';
+}
+
+static void citrine_memory_io_write_byte(CitrineMemoryIO* io, uint8_t byte) {
+    char b = (char)byte;
+    citrine_memory_io_write(io, &b, 1);
+}
+
+static void citrine_memory_io_puts(CitrineMemoryIO* io, const char* str) {
+    if (str) citrine_memory_io_write(io, str, strlen(str));
+    citrine_memory_io_write(io, "\n", 1);
+}
+
+static const char* citrine_memory_io_to_s(CitrineMemoryIO* io) {
+    if (!io || !io->buffer) return "";
+    io->buffer[io->size] = '\0';
+    return io->buffer;
+}
+
+static CitrineObject* citrine_object_new(uint32_t class_id, uint32_t field_count) {
+    CitrineObject* obj = (CitrineObject*)calloc(1, sizeof(CitrineObject));
+    if (!obj) return NULL;
+    obj->class_id = class_id;
+    obj->field_count = field_count;
+    obj->fields = (field_count > 0) ? (Value*)calloc(field_count, sizeof(Value)) : NULL;
+    return obj;
+}
+
+
 CitrineVM* citrine_vm_create(const uint8_t* cbc_data, size_t cbc_size) {
     if (cbc_size < 18 || memcmp(cbc_data, "CBC1", 4) != 0) {
         fprintf(stderr, "[CitrineVM] Error: Invalid bytecode magic header\n");
@@ -474,7 +615,9 @@ uint32_t citrine_channel_capacity(CitrineVM* vm, uint32_t chan_id) {
 void citrine_vm_run(CitrineVM* vm) {
     if (!vm || vm->panic_triggered) return;
 
-    Value* regs = vm->spram_regs;
+    Value* spram = vm->spram_regs;
+    uint16_t reg_base = 0;
+    Value* regs = spram + reg_base;
 
 #if defined(__GNUC__)
     // Direct-Threaded Dispatch using computed goto (GNU labels-as-values)
@@ -834,20 +977,34 @@ void citrine_vm_run(CitrineVM* vm) {
     do_call: {
         uint32_t raw = vm->bytecode[vm->pc - 1];
         uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t base = (raw >> 8) & 0xFF;
-        (void)base;
-        // Function call handling
+        uint16_t func_idx = raw & 0xFFFF;
         if (vm->call_depth >= 63) {
             citrine_vm_panic(vm, "Stack Overflow: call depth exceeded 64 frames");
             return;
         }
+        if (func_idx >= vm->num_functions) {
+            citrine_vm_panic(vm, "Call to invalid function index %u (num_functions=%u)", func_idx, vm->num_functions);
+            return;
+        }
+        CitrineFunction* target_fn = &vm->functions[func_idx];
         vm->call_stack[vm->call_depth].return_pc = vm->pc;
+        vm->call_stack[vm->call_depth].reg_base = reg_base;
         vm->call_stack[vm->call_depth].dest_reg = dst;
         vm->call_depth++;
+        reg_base += dst + 1;
+        if (reg_base + target_fn->num_registers >= MAX_SPRAM_REGISTERS - 1) {
+            citrine_vm_panic(vm, "SPRAM Register Window Overflow (exceeded %u registers)", MAX_SPRAM_REGISTERS);
+            return;
+        }
+        regs = spram + reg_base;
+        vm->pc = target_fn->code_offset;
         DISPATCH();
     }
 
     do_return: {
+        uint32_t raw = vm->bytecode[vm->pc - 1];
+        uint8_t ret_reg = (raw >> 16) & 0xFF;
+        Value ret_val = regs[ret_reg];
         if (vm->call_depth == 0) {
             if (vm->scheduler.current_fiber == 0) {
                 // Exit program when main fiber completes
@@ -857,14 +1014,22 @@ void citrine_vm_run(CitrineVM* vm) {
                 CitrineFiber* curr = &vm->scheduler.fibers[vm->scheduler.current_fiber];
                 curr->state = FIBER_DEAD;
                 if (vm->scheduler.fiber_count > 0) vm->scheduler.fiber_count--;
-                scheduler_switch_next(vm, regs);
+                scheduler_switch_next(vm, spram);
+                reg_base = 0;
+                regs = spram;
                 DISPATCH();
             }
         }
         vm->call_depth--;
+        uint16_t caller_base = vm->call_stack[vm->call_depth].reg_base;
+        uint8_t caller_dest = vm->call_stack[vm->call_depth].dest_reg;
+        reg_base = caller_base;
+        regs = spram + reg_base;
+        regs[caller_dest] = ret_val;
         vm->pc = vm->call_stack[vm->call_depth].return_pc;
         DISPATCH();
     }
+
 
     do_call_native: {
         uint32_t raw = vm->bytecode[vm->pc - 1];
@@ -1088,6 +1253,26 @@ static void native_dispatch(CitrineVM* vm, uint16_t native_id, Value* args, uint
             out_ret->type = VAL_BOOL;
             out_ret->as.i = citrine_scheduler_fiber_alive(vm, (uint32_t)args[0].as.i);
             break;
+        case 70: // Log(msg) / puts / print
+        case 71: { // DebugLog(msg) / debug_puts
+            if (args[0].type == VAL_STRING && args[0].as.str) {
+                printf("%s\n", args[0].as.str);
+            } else if (args[0].type == VAL_INT32) {
+                printf("%d\n", args[0].as.i);
+            } else if (args[0].type == VAL_FLOAT32) {
+                printf("%g\n", args[0].as.f);
+            } else if (args[0].type == VAL_BOOL) {
+                printf("%s\n", args[0].as.i ? "true" : "false");
+            } else if (args[0].type == VAL_NIL) {
+                printf("nil\n");
+            } else {
+                char tmp[128];
+                citrine_value_to_str(args[0], tmp, sizeof(tmp));
+                printf("%s\n", tmp);
+            }
+            fflush(stdout);
+            break;
+        }
         case 80: // ChannelNew(capacity)
             out_ret->type = VAL_HANDLE;
             out_ret->as.handle = citrine_channel_create(vm, (uint32_t)args[0].as.i);
@@ -1217,6 +1402,179 @@ static void native_dispatch(CitrineVM* vm, uint16_t native_id, Value* args, uint
         case 111: // GLLoadIdentity()
             Citrine_GL_LoadIdentity();
             break;
+
+        case 120: { // ArrayNew(capacity)
+            uint32_t cap = (args[0].type == VAL_INT32 && args[0].as.i > 0) ? (uint32_t)args[0].as.i : 4;
+            CitrineArray* arr = citrine_array_new(cap, false);
+            out_ret->type = VAL_OBJECT;
+            out_ret->as.ptr = arr;
+            break;
+        }
+        case 121: { // ArrayGet(arr, index)
+            CitrineArray* arr = (CitrineArray*)args[0].as.ptr;
+            int32_t idx = (args[1].type == VAL_INT32) ? args[1].as.i : 0;
+            *out_ret = citrine_array_get(arr, idx);
+            break;
+        }
+        case 122: { // ArraySet(arr, index, val)
+            CitrineArray* arr = (CitrineArray*)args[0].as.ptr;
+            int32_t idx = (args[1].type == VAL_INT32) ? args[1].as.i : 0;
+            citrine_array_set(arr, idx, args[2]);
+            *out_ret = args[2];
+            break;
+        }
+        case 123: { // ArrayPush(arr, val)
+            CitrineArray* arr = (CitrineArray*)args[0].as.ptr;
+            citrine_array_push(arr, args[1]);
+            *out_ret = args[0];
+            break;
+        }
+        case 124: { // ArrayPop(arr)
+            CitrineArray* arr = (CitrineArray*)args[0].as.ptr;
+            *out_ret = citrine_array_pop(arr);
+            break;
+        }
+        case 125: { // ArraySize(arr)
+            CitrineArray* arr = (CitrineArray*)args[0].as.ptr;
+            out_ret->type = VAL_INT32;
+            out_ret->as.i = arr ? (int32_t)arr->size : 0;
+            break;
+        }
+        case 126: { // ArrayClear(arr)
+            CitrineArray* arr = (CitrineArray*)args[0].as.ptr;
+            if (arr) arr->size = 0;
+            out_ret->type = VAL_NIL;
+            break;
+        }
+
+        case 130: { // StaticArrayNew(size, [default_val])
+            uint32_t sz = (args[0].type == VAL_INT32 && args[0].as.i > 0) ? (uint32_t)args[0].as.i : 1;
+            CitrineArray* arr = citrine_array_new(sz, true);
+            if (arr) {
+                Value def_val = { .type = VAL_NIL, .flags = 0, .as = { .i = 0 } };
+                if (args[1].type != VAL_NIL) def_val = args[1];
+                for (uint32_t i = 0; i < sz; i++) arr->elements[i] = def_val;
+            }
+            out_ret->type = VAL_OBJECT;
+            out_ret->as.ptr = arr;
+            break;
+        }
+        case 131: { // StaticArrayGet(arr, index)
+            CitrineArray* arr = (CitrineArray*)args[0].as.ptr;
+            int32_t idx = (args[1].type == VAL_INT32) ? args[1].as.i : 0;
+            *out_ret = citrine_array_get(arr, idx);
+            break;
+        }
+        case 132: { // StaticArraySet(arr, index, val)
+            CitrineArray* arr = (CitrineArray*)args[0].as.ptr;
+            int32_t idx = (args[1].type == VAL_INT32) ? args[1].as.i : 0;
+            citrine_array_set(arr, idx, args[2]);
+            *out_ret = args[2];
+            break;
+        }
+        case 133: { // StaticArraySize(arr)
+            CitrineArray* arr = (CitrineArray*)args[0].as.ptr;
+            out_ret->type = VAL_INT32;
+            out_ret->as.i = arr ? (int32_t)arr->size : 0;
+            break;
+        }
+
+        case 140: { // MemoryIONew([capacity_or_str])
+            size_t cap = 64;
+            if (args[0].type == VAL_INT32 && args[0].as.i > 0) cap = (size_t)args[0].as.i;
+            CitrineMemoryIO* io = citrine_memory_io_new(cap);
+            if (args[0].type == VAL_STRING && args[0].as.str) {
+                citrine_memory_io_write(io, args[0].as.str, strlen(args[0].as.str));
+            }
+            out_ret->type = VAL_OBJECT;
+            out_ret->as.ptr = io;
+            break;
+        }
+        case 141: { // MemoryIOWriteByte(io, byte)
+            CitrineMemoryIO* io = (CitrineMemoryIO*)args[0].as.ptr;
+            citrine_memory_io_write_byte(io, (uint8_t)args[1].as.i);
+            out_ret->type = VAL_NIL;
+            break;
+        }
+        case 142: { // MemoryIOWrite(io, val)
+            CitrineMemoryIO* io = (CitrineMemoryIO*)args[0].as.ptr;
+            char tmp[128];
+            citrine_value_to_str(args[1], tmp, sizeof(tmp));
+            citrine_memory_io_write(io, tmp, strlen(tmp));
+            out_ret->type = VAL_NIL;
+            break;
+        }
+        case 143: { // MemoryIOPuts(io, val)
+            CitrineMemoryIO* io = (CitrineMemoryIO*)args[0].as.ptr;
+            char tmp[128];
+            citrine_value_to_str(args[1], tmp, sizeof(tmp));
+            citrine_memory_io_puts(io, tmp);
+            out_ret->type = VAL_NIL;
+            break;
+        }
+        case 144: { // MemoryIOToS(io)
+            CitrineMemoryIO* io = (CitrineMemoryIO*)args[0].as.ptr;
+            out_ret->type = VAL_STRING;
+            out_ret->as.str = citrine_memory_io_to_s(io);
+            break;
+        }
+        case 145: { // MemoryIORewind(io)
+            CitrineMemoryIO* io = (CitrineMemoryIO*)args[0].as.ptr;
+            if (io) io->pos = 0;
+            out_ret->type = VAL_NIL;
+            break;
+        }
+        case 146: { // MemoryIOPos(io)
+            CitrineMemoryIO* io = (CitrineMemoryIO*)args[0].as.ptr;
+            out_ret->type = VAL_INT32;
+            out_ret->as.i = io ? (int32_t)io->pos : 0;
+            break;
+        }
+        case 147: { // MemoryIOSize(io)
+            CitrineMemoryIO* io = (CitrineMemoryIO*)args[0].as.ptr;
+            out_ret->type = VAL_INT32;
+            out_ret->as.i = io ? (int32_t)io->size : 0;
+            break;
+        }
+        case 148: { // MemoryIOClear(io)
+            CitrineMemoryIO* io = (CitrineMemoryIO*)args[0].as.ptr;
+            if (io) {
+                io->size = 0;
+                io->pos = 0;
+                if (io->buffer) io->buffer[0] = '\0';
+            }
+            out_ret->type = VAL_NIL;
+            break;
+        }
+
+        case 150: { // ObjectNew(class_id, field_count)
+            uint32_t cid = (uint32_t)args[0].as.i;
+            uint32_t fcount = (uint32_t)args[1].as.i;
+            CitrineObject* obj = citrine_object_new(cid, fcount);
+            out_ret->type = VAL_OBJECT;
+            out_ret->as.ptr = obj;
+            break;
+        }
+        case 151: { // ObjectGetField(obj, field_idx)
+            CitrineObject* obj = (CitrineObject*)args[0].as.ptr;
+            uint32_t f_idx = (uint32_t)args[1].as.i;
+            if (obj && f_idx < obj->field_count) {
+                *out_ret = obj->fields[f_idx];
+            } else {
+                out_ret->type = VAL_NIL;
+            }
+            break;
+        }
+        case 152: { // ObjectSetField(obj, field_idx, val)
+            CitrineObject* obj = (CitrineObject*)args[0].as.ptr;
+            uint32_t f_idx = (uint32_t)args[1].as.i;
+            if (obj && f_idx < obj->field_count) {
+                obj->fields[f_idx] = args[2];
+            }
+            *out_ret = args[2];
+            break;
+        }
+
         default:
             break;
     }
