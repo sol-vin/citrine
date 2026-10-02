@@ -11,6 +11,7 @@ void Citrine_DrawRectangle(float x, float y, float w, float h, uint32_t color);
 void Citrine_DrawCircle(float cx, float cy, float radius, uint32_t color);
 void Citrine_DrawLine(float x1, float y1, float x2, float y2, uint32_t color);
 void Citrine_DrawTriangle(float x1, float y1, float x2, float y2, float x3, float y3, uint32_t color);
+void Citrine_DrawQuad(float x1, float y1, float x2, float y2, float x3, float y3, float x4, float y4, uint32_t color);
 void Citrine_DrawText(const char* text, float x, float y, int size, uint32_t color);
 
 uint32_t Citrine_LoadTexture(const char* path);

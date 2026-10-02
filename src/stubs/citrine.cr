@@ -174,6 +174,12 @@ module Citrine
   def self.draw_triangle(x1 : Number, y1 : Number, x2 : Number, y2 : Number, x3 : Number, y3 : Number, color : Color)
   end
 
+  def self.draw_quad(x1 : Number, y1 : Number, x2 : Number, y2 : Number, x3 : Number, y3 : Number, x4 : Number, y4 : Number, color : Color)
+    # Granular decomposition: quad decomposes into two triangles
+    draw_triangle(x1, y1, x2, y2, x3, y3, color)
+    draw_triangle(x1, y1, x3, y3, x4, y4, color)
+  end
+
   def self.draw_text(text : String, x : Number, y : Number, font_size : Int32, color : Color)
   end
 

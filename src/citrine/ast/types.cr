@@ -64,6 +64,29 @@ module Citrine
     PauseVideo      = 94
     StopVideo       = 95
     Panic           = 99
+    DrawQuad        = 100
+    GLBegin         = 101
+    GLEnd           = 102
+    GLVertex        = 103
+    GLColor         = 104
+    GLTexCoord      = 105
+    GLPushMatrix    = 106
+    GLPopMatrix     = 107
+    GLTranslate     = 108
+    GLRotate        = 109
+    GLScale         = 110
+    GLLoadIdentity  = 111
+  end
+
+  enum GLMode : UInt8
+    Points        = 0
+    Lines         = 1
+    LineStrip     = 2
+    LineLoop      = 3
+    Triangles     = 4
+    TriangleStrip = 5
+    TriangleFan   = 6
+    Quads         = 7
   end
 
   enum Button : UInt8

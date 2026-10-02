@@ -135,6 +135,20 @@ module Citrine
       end
     end
 
+    def self.quad(x1 : Float32, y1 : Float32, x2 : Float32, y2 : Float32, x3 : Float32, y3 : Float32, x4 : Float32, y4 : Float32)
+      if @@fill_enabled
+        # Granular decomposition: quad decomposes into two triangles
+        triangle(x1, y1, x2, y2, x3, y3)
+        triangle(x1, y1, x3, y3, x4, y4)
+      end
+      if @@stroke_enabled
+        line(x1, y1, x2, y2)
+        line(x2, y2, x3, y3)
+        line(x3, y3, x4, y4)
+        line(x4, y4, x1, y1)
+      end
+    end
+
     # 3D Primitives
     def self.box(x : Float32, y : Float32, z : Float32, w : Float32, h : Float32, d : Float32, color : Color? = nil)
       col = color || @@fill_color

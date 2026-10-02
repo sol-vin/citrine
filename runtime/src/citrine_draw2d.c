@@ -20,6 +20,12 @@ void Citrine_DrawTriangle(float x1, float y1, float x2, float y2, float x3, floa
     (void)x1; (void)y1; (void)x2; (void)y2; (void)x3; (void)y3; (void)color;
 }
 
+void Citrine_DrawQuad(float x1, float y1, float x2, float y2, float x3, float y3, float x4, float y4, uint32_t color) {
+    // Quad decomposed into two triangles: (1, 2, 3) and (1, 3, 4)
+    Citrine_DrawTriangle(x1, y1, x2, y2, x3, y3, color);
+    Citrine_DrawTriangle(x1, y1, x3, y3, x4, y4, color);
+}
+
 void Citrine_DrawText(const char* text, float x, float y, int size, uint32_t color) {
     (void)text; (void)x; (void)y; (void)size; (void)color;
 }

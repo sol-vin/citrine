@@ -3,6 +3,7 @@ require "./opcode"
 require "./register_alloc"
 require "./source_map"
 require "./budget_checker"
+require "./optimizer"
 require "../ast/types"
 require "../parser/dsl_parser"
 
@@ -59,6 +60,7 @@ module Citrine
     getter functions : Array(CompiledFunction)
     getter filename : String?
     property release_mode : Bool = false
+    property opt_level : Int32 = 1
 
     def initialize(@filename : String? = nil)
       @source_map = SourceMap.new
@@ -66,6 +68,7 @@ module Citrine
       @strings = [] of String
       @functions = [] of CompiledFunction
       @release_mode = false
+      @opt_level = 1
     end
 
     def compile(program : ParsedProgram) : Bytes
@@ -95,6 +98,15 @@ module Citrine
       main_fn.num_registers = allocator.max_registers
       main_fn.instructions = fn_instructions
       @functions << main_fn
+
+      # 2.5 Run Bytecode Optimizer Passes
+      effective_opt_level = @release_mode ? 2 : @opt_level
+      if effective_opt_level > 0
+        optimizer = BytecodeOptimizer.new(@constants, effective_opt_level)
+        @functions.each do |fn|
+          fn.instructions = optimizer.optimize(fn.instructions)
+        end
+      end
 
       # 3. Assemble binary bytecode (.cbc)
       serialize_bytecode
@@ -201,7 +213,7 @@ module Citrine
         if node.kind == :i32 || node.kind == :i64 || node.value.includes?(".") == false
           val = node.value.to_i32
           if val >= -32768 && val <= 32767
-            instructions << Instruction.encode_ab_imm(Opcode::LoadInt, dest, val.to_u16)
+            instructions << Instruction.encode_ab_imm(Opcode::LoadInt, dest, (val & 0xFFFF).to_u16)
           else
             const_idx = add_constant(ConstValue.new(ConstType::Int32, int_val: val))
             instructions << Instruction.encode_ab_imm(Opcode::LoadConst, dest, const_idx.to_u16)
@@ -488,9 +500,10 @@ module Citrine
         return dest
       end
 
-      # Native API Calls (Citrine.draw_rectangle, etc.)
-      if obj_str == "Citrine" || obj_str.empty?
-        if native_id = map_native_call(node.name)
+      # Native API Calls (Citrine.draw_rectangle, GL.begin, etc.)
+      is_gl_obj = obj_str == "Citrine::GL" || obj_str == "GL"
+      if obj_str == "Citrine" || obj_str.empty? || is_gl_obj
+        if native_id = map_native_call(node.name, is_gl_obj)
           if @release_mode && (native_id == NativeId::Log || native_id == NativeId::DebugLog || native_id == NativeId::SetDebugOverlay)
             instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
             return dest
@@ -647,7 +660,23 @@ module Citrine
       dest
     end
 
-    private def map_native_call(name : String) : NativeId?
+    private def map_native_call(name : String, is_gl : Bool = false) : NativeId?
+      if is_gl
+        case name
+        when "begin" then return NativeId::GLBegin
+        when "end" then return NativeId::GLEnd
+        when "vertex" then return NativeId::GLVertex
+        when "color" then return NativeId::GLColor
+        when "tex_coord" then return NativeId::GLTexCoord
+        when "push_matrix" then return NativeId::GLPushMatrix
+        when "pop_matrix" then return NativeId::GLPopMatrix
+        when "translate" then return NativeId::GLTranslate
+        when "rotate" then return NativeId::GLRotate
+        when "scale" then return NativeId::GLScale
+        when "load_identity" then return NativeId::GLLoadIdentity
+        end
+      end
+
       case name
       when "init_window" then NativeId::InitWindow
       when "close_window" then NativeId::CloseWindow
@@ -662,6 +691,18 @@ module Citrine
       when "draw_circle" then NativeId::DrawCircle
       when "draw_line" then NativeId::DrawLine
       when "draw_triangle" then NativeId::DrawTriangle
+      when "draw_quad" then NativeId::DrawQuad
+      when "gl_begin" then NativeId::GLBegin
+      when "gl_end" then NativeId::GLEnd
+      when "gl_vertex" then NativeId::GLVertex
+      when "gl_color" then NativeId::GLColor
+      when "gl_tex_coord" then NativeId::GLTexCoord
+      when "gl_push_matrix" then NativeId::GLPushMatrix
+      when "gl_pop_matrix" then NativeId::GLPopMatrix
+      when "gl_translate" then NativeId::GLTranslate
+      when "gl_rotate" then NativeId::GLRotate
+      when "gl_scale" then NativeId::GLScale
+      when "gl_load_identity" then NativeId::GLLoadIdentity
       when "draw_text" then NativeId::DrawText
       when "load_texture" then NativeId::LoadTexture
       when "draw_texture" then NativeId::DrawTexture
@@ -706,6 +747,14 @@ module Citrine
     private def resolve_constant_path(node : Crystal::Path) : ConstValue
       str = node.names.join("::")
       case str
+      when "GL::POINTS", "GLMode::Points", "Citrine::GL::POINTS", "Citrine::GL::Mode::Points" then ConstValue.new(ConstType::Int32, int_val: 0)
+      when "GL::LINES", "GLMode::Lines", "Citrine::GL::LINES", "Citrine::GL::Mode::Lines" then ConstValue.new(ConstType::Int32, int_val: 1)
+      when "GL::LINE_STRIP", "GLMode::LineStrip", "Citrine::GL::LINE_STRIP", "Citrine::GL::Mode::LineStrip" then ConstValue.new(ConstType::Int32, int_val: 2)
+      when "GL::LINE_LOOP", "GLMode::LineLoop", "Citrine::GL::LINE_LOOP", "Citrine::GL::Mode::LineLoop" then ConstValue.new(ConstType::Int32, int_val: 3)
+      when "GL::TRIANGLES", "GLMode::Triangles", "Citrine::GL::TRIANGLES", "Citrine::GL::Mode::Triangles" then ConstValue.new(ConstType::Int32, int_val: 4)
+      when "GL::TRIANGLE_STRIP", "GLMode::TriangleStrip", "Citrine::GL::TRIANGLE_STRIP", "Citrine::GL::Mode::TriangleStrip" then ConstValue.new(ConstType::Int32, int_val: 5)
+      when "GL::TRIANGLE_FAN", "GLMode::TriangleFan", "Citrine::GL::TRIANGLE_FAN", "Citrine::GL::Mode::TriangleFan" then ConstValue.new(ConstType::Int32, int_val: 6)
+      when "GL::QUADS", "GLMode::Quads", "Citrine::GL::QUADS", "Citrine::GL::Mode::Quads" then ConstValue.new(ConstType::Int32, int_val: 7)
       when "Button::Cross" then ConstValue.new(ConstType::Int32, int_val: Button::Cross.value.to_i32)
       when "Button::Circle" then ConstValue.new(ConstType::Int32, int_val: Button::Circle.value.to_i32)
       when "Button::Square" then ConstValue.new(ConstType::Int32, int_val: Button::Square.value.to_i32)

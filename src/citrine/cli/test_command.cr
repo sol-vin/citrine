@@ -15,12 +15,12 @@ module Citrine
         puts "======================================================================"
 
         spec_files = [] of String
-        if target_path && File.exists?(target_path)
+        if target_path && File.file?(target_path)
           spec_files << target_path
         elsif target_path && Dir.exists?(target_path)
-          spec_files = Dir.glob("#{target_path}/**/*_spec.cr")
+          spec_files = Dir.glob("#{target_path}/**/*_spec.cr").sort
         else
-          spec_files = Dir.glob("spec/**/*_spec.cr")
+          spec_files = Dir.glob("spec/**/*_spec.cr").sort
         end
 
         if spec_files.empty?
@@ -43,6 +43,13 @@ module Citrine
           output = IO::Memory.new
           error = IO::Memory.new
           status = Process.run("crystal", ["spec", spec_file], output: output, error: error)
+          if !status.success? && (error.to_s.includes?("LNK1104") || output.to_s.includes?("LNK1104"))
+            sleep 1.0.seconds
+            output = IO::Memory.new
+            error = IO::Memory.new
+            status = Process.run("crystal", ["spec", spec_file], output: output, error: error)
+          end
+
           if status.success?
             puts " [PASS]"
             passed_count += 1
@@ -55,6 +62,7 @@ module Citrine
             puts ("-" * 60) + "\n"
             failed_count += 1
           end
+          sleep 0.25.seconds
         end
 
         elapsed = (Time.instant - start_time).total_seconds

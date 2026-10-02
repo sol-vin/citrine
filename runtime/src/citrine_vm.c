@@ -11,6 +11,7 @@
 #include "../include/citrine_video.h"
 #include "../include/citrine_hud.h"
 #include "../include/citrine_panic.h"
+#include "../include/citrine_gl.h"
 
 #ifdef HOST_TEST_BUILD
 Value g_host_spram[1024];
@@ -133,6 +134,8 @@ CitrineVM* citrine_vm_create(const uint8_t* cbc_data, size_t cbc_size) {
     vm->level_arena.offset = 0;
 
     vm->watchdog_limit = 5000000; // 5M instructions per frame max
+
+    Citrine_GL_Init();
 
     return vm;
 }
@@ -973,6 +976,17 @@ static void native_dispatch(CitrineVM* vm, uint16_t native_id, Value* args, uint
                 (uint32_t)args[4].as.i
             );
             break;
+        case 23: // DrawTriangle(x1, y1, x2, y2, x3, y3, color)
+            Citrine_DrawTriangle(
+                (args[0].type == VAL_FLOAT32) ? args[0].as.f : (float)args[0].as.i,
+                (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i,
+                (args[2].type == VAL_FLOAT32) ? args[2].as.f : (float)args[2].as.i,
+                (args[3].type == VAL_FLOAT32) ? args[3].as.f : (float)args[3].as.i,
+                (args[4].type == VAL_FLOAT32) ? args[4].as.f : (float)args[4].as.i,
+                (args[5].type == VAL_FLOAT32) ? args[5].as.f : (float)args[5].as.i,
+                (uint32_t)args[6].as.i
+            );
+            break;
         case 24: // DrawText(text, x, y, size, color)
             Citrine_DrawText(
                 args[0].as.str ? args[0].as.str : "",
@@ -1127,6 +1141,81 @@ static void native_dispatch(CitrineVM* vm, uint16_t native_id, Value* args, uint
             break;
         case 99: // Panic(msg)
             citrine_vm_panic(vm, "%s", args[0].as.str ? args[0].as.str : "User Panic");
+            break;
+        case 100: // DrawQuad(x1, y1, x2, y2, x3, y3, x4, y4, color)
+            Citrine_DrawQuad(
+                (args[0].type == VAL_FLOAT32) ? args[0].as.f : (float)args[0].as.i,
+                (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i,
+                (args[2].type == VAL_FLOAT32) ? args[2].as.f : (float)args[2].as.i,
+                (args[3].type == VAL_FLOAT32) ? args[3].as.f : (float)args[3].as.i,
+                (args[4].type == VAL_FLOAT32) ? args[4].as.f : (float)args[4].as.i,
+                (args[5].type == VAL_FLOAT32) ? args[5].as.f : (float)args[5].as.i,
+                (args[6].type == VAL_FLOAT32) ? args[6].as.f : (float)args[6].as.i,
+                (args[7].type == VAL_FLOAT32) ? args[7].as.f : (float)args[7].as.i,
+                (uint32_t)args[8].as.i
+            );
+            break;
+        case 101: // GLBegin(mode)
+            Citrine_GL_Begin(args[0].as.i);
+            break;
+        case 102: // GLEnd()
+            Citrine_GL_End();
+            break;
+        case 103: { // GLVertex(x, y, [z])
+            float vx = (args[0].type == VAL_FLOAT32) ? args[0].as.f : (float)args[0].as.i;
+            float vy = (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i;
+            float vz = (args[2].type == VAL_FLOAT32) ? args[2].as.f : (float)args[2].as.i;
+            Citrine_GL_Vertex3f(vx, vy, vz);
+            break;
+        }
+        case 104: { // GLColor(color or r, g, b, [a])
+            if (args[0].type == VAL_COLOR || args[0].type == VAL_INT32) {
+                Citrine_GL_ColorHex((uint32_t)args[0].as.i);
+            } else {
+                float cr = (args[0].type == VAL_FLOAT32) ? args[0].as.f : (float)args[0].as.i / 255.0f;
+                float cg = (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i / 255.0f;
+                float cb = (args[2].type == VAL_FLOAT32) ? args[2].as.f : (float)args[2].as.i / 255.0f;
+                float ca = (args[3].type == VAL_FLOAT32) ? args[3].as.f : 1.0f;
+                Citrine_GL_Color4f(cr, cg, cb, ca);
+            }
+            break;
+        }
+        case 105: // GLTexCoord(u, v)
+            Citrine_GL_TexCoord2f(
+                (args[0].type == VAL_FLOAT32) ? args[0].as.f : (float)args[0].as.i,
+                (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i
+            );
+            break;
+        case 106: // GLPushMatrix()
+            Citrine_GL_PushMatrix();
+            break;
+        case 107: // GLPopMatrix()
+            Citrine_GL_PopMatrix();
+            break;
+        case 108: // GLTranslate(x, y, [z])
+            Citrine_GL_Translate(
+                (args[0].type == VAL_FLOAT32) ? args[0].as.f : (float)args[0].as.i,
+                (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i,
+                (args[2].type == VAL_FLOAT32) ? args[2].as.f : (float)args[2].as.i
+            );
+            break;
+        case 109: // GLRotate(deg, x, y, z)
+            Citrine_GL_Rotate(
+                (args[0].type == VAL_FLOAT32) ? args[0].as.f : (float)args[0].as.i,
+                (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i,
+                (args[2].type == VAL_FLOAT32) ? args[2].as.f : (float)args[2].as.i,
+                (args[3].type == VAL_FLOAT32) ? args[3].as.f : (float)args[3].as.i
+            );
+            break;
+        case 110: // GLScale(x, y, [z])
+            Citrine_GL_Scale(
+                (args[0].type == VAL_FLOAT32) ? args[0].as.f : (float)args[0].as.i,
+                (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i,
+                (args[2].type == VAL_FLOAT32) ? args[2].as.f : 1.0f
+            );
+            break;
+        case 111: // GLLoadIdentity()
+            Citrine_GL_LoadIdentity();
             break;
         default:
             break;
