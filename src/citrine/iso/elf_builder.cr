@@ -147,6 +147,139 @@ module Citrine
       end
     end
 
+    TEXT_SIZE = 4096_u32
+    RODATA_VADDR = 0x00100000_u32 + TEXT_SIZE
+
+    ZERO = 0
+    V0 = 2; V1 = 3
+    A0 = 4; A1 = 5; A2 = 6; A3 = 7
+    T0 = 8; T1 = 9; T2 = 10; T3 = 11; T4 = 12; T5 = 13; T6 = 14; T7 = 15
+    S0 = 16; S1 = 17; S2 = 18; S3 = 19; S4 = 20; S5 = 21; S6 = 22; S7 = 23
+    T8 = 24; T9 = 25
+    SP = 29; RA = 31
+
+    class MipsEmitter
+      property base_vaddr : UInt32
+      getter words = [] of UInt32
+      getter labels = {} of String => UInt32
+      getter fixups = [] of Tuple(Int32, String, Symbol)
+
+      def initialize(@base_vaddr = 0x00100000_u32)
+      end
+
+      def label(name : String)
+        @labels[name] = @base_vaddr + (@words.size.to_u32 * 4)
+      end
+
+      def emit(word : UInt32)
+        @words << word
+      end
+
+      def nop
+        emit(0x00000000_u32)
+      end
+
+      def lui(rt : Int32, imm : Int32)
+        emit((0x0F_u32 << 26) | (rt.to_u32 << 16) | ((imm & 0xFFFF).to_u32))
+      end
+
+      def ori(rt : Int32, rs : Int32, imm : Int32)
+        emit((0x0D_u32 << 26) | (rs.to_u32 << 21) | (rt.to_u32 << 16) | ((imm & 0xFFFF).to_u32))
+      end
+
+      def andi(rt : Int32, rs : Int32, imm : Int32)
+        emit((0x0C_u32 << 26) | (rs.to_u32 << 21) | (rt.to_u32 << 16) | ((imm & 0xFFFF).to_u32))
+      end
+
+      def addiu(rt : Int32, rs : Int32, imm : Int32)
+        emit((0x09_u32 << 26) | (rs.to_u32 << 21) | (rt.to_u32 << 16) | ((imm & 0xFFFF).to_u32))
+      end
+
+      def or_(rd : Int32, rs : Int32, rt : Int32)
+        emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x25_u32)
+      end
+
+      def dsll32(rd : Int32, rt : Int32, sa : Int32)
+        emit((rt.to_u32 << 16) | (rd.to_u32 << 11) | (sa.to_u32 << 6) | 0x3C_u32)
+      end
+
+      def lw(rt : Int32, offset : Int32, base : Int32)
+        emit((0x23_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
+      end
+
+      def sw(rt : Int32, offset : Int32, base : Int32)
+        emit((0x2B_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
+      end
+
+      def ld(rt : Int32, offset : Int32, base : Int32)
+        emit((0x37_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
+      end
+
+      def sd(rt : Int32, offset : Int32, base : Int32)
+        emit((0x3F_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
+      end
+
+      def jr(rs : Int32)
+        emit((rs.to_u32 << 21) | 0x08_u32)
+      end
+
+      def syscall_inst
+        emit(0x0000000C_u32)
+      end
+
+      def j(target_label : String)
+        @fixups << {@words.size, target_label, :j}
+        emit(0x08000000_u32)
+      end
+
+      def jal(target_label : String)
+        @fixups << {@words.size, target_label, :jal}
+        emit(0x0C000000_u32)
+      end
+
+      def bnez(rs : Int32, target_label : String)
+        @fixups << {@words.size, target_label, :bnez}
+        emit((0x05_u32 << 26) | (rs.to_u32 << 21))
+      end
+
+      def beqz(rs : Int32, target_label : String)
+        @fixups << {@words.size, target_label, :beqz}
+        emit((0x04_u32 << 26) | (rs.to_u32 << 21))
+      end
+
+      def resolve!
+        @fixups.each do |idx, label_name, type|
+          target_vaddr = @labels[label_name]? || raise "Unknown label: #{label_name}"
+          inst_vaddr = @base_vaddr + (idx.to_u32 * 4)
+
+          case type
+          when :j
+            @words[idx] = 0x08000000_u32 | ((target_vaddr >> 2) & 0x03FFFFFF_u32)
+          when :jal
+            @words[idx] = 0x0C000000_u32 | ((target_vaddr >> 2) & 0x03FFFFFF_u32)
+          when :bnez, :beqz
+            offset_bytes = target_vaddr.to_i32 - (inst_vaddr.to_i32 + 4)
+            offset_insts = offset_bytes // 4
+            @words[idx] = (@words[idx] & 0xFFFF0000_u32) | ((offset_insts & 0xFFFF).to_u32)
+          end
+        end
+      end
+
+      def pad_to(byte_size : Int32)
+        while @words.size * 4 < byte_size
+          nop
+        end
+      end
+
+      def to_slice : Bytes
+        io = IO::Memory.new(@words.size * 4)
+        @words.each do |w|
+          io.write_bytes(w, IO::ByteFormat::LittleEndian)
+        end
+        io.to_slice
+      end
+    end
+
     def self.build_default_runner_elf(cbc_bytes : Bytes? = nil) : Bytes
       builder = new
       builder.generate(cbc_bytes)
@@ -162,250 +295,179 @@ module Citrine
       env_qwc = (env_packet.size // 16).to_u16
       draw_qwc = (draw_packet.size // 16).to_u16
 
-      # Text code buffer
-      text_bytes = IO::Memory.new
-
-      # Function 0 (_start at 0x00100000, 32 bytes):
-      #   lui   $sp, 0x0200        # $sp = 0x02000000
-      #   addiu $sp, $sp, -16      # $sp = 0x01FFFFF0
-      #   lui   $t0, 0x7000        # $t0 = 0x70000000 (SPRAM base)
-      #   lui   $t1, 0xDEAD
-      #   ori   $t1, $t1, 0xBEEF   # $t1 = 0xDEADBEEF
-      #   sw    $t1, 0($t0)        # SPRAM canary
-      #   j     0x00100020         # jump to main
-      #   nop
-      text_bytes.write_bytes(0x3c1d0200_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x27bdfff0_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x3c087000_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x3c09dead_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x3529beef_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0xad090000_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x08040008_u32, IO::ByteFormat::LittleEndian) # j 0x00100020
-      text_bytes.write_bytes(0x00000000_u32, IO::ByteFormat::LittleEndian)
-
-      # Section layout:
-      # .text starts at 0x00100000, length will be padded to 1024 bytes (0x400)
-      # So .rodata starts at 0x00100400
-      rodata_vaddr = 0x00100400_u32
+      rodata_vaddr = RODATA_VADDR
       env_addr = rodata_vaddr
       draw_addr = env_addr + env_packet.size.to_u32
 
+      emitter = MipsEmitter.new(0x00100000_u32)
+
+      # Function 0 (_start at 0x00100000, 32 bytes):
+      emitter.label("_start")
+      emitter.lui(SP, 0x0200)
+      emitter.addiu(SP, SP, -16)
+      emitter.lui(T0, 0x7000)
+      emitter.lui(T1, 0xDEAD)
+      emitter.ori(T1, T1, 0xBEEF)
+      emitter.sw(T1, 0, T0)
+      emitter.j("main")
+      emitter.nop
+
       # Function 1 (main at 0x00100020):
-      #   addiu $sp, $sp, -32
-      #   sw    $ra, 28($sp)
-      #   jal   dma_reset (at 0x00100158) -> jump target 0x00100158 >> 2 = 0x040056
-      #   nop
-      text_bytes.write_bytes(0x27bdffe0_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0xafbf001c_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x0c040056_u32, IO::ByteFormat::LittleEndian) # jal 0x00100158
-      text_bytes.write_bytes(0x00000000_u32, IO::ByteFormat::LittleEndian)
+      emitter.label("main")
+      emitter.addiu(SP, SP, -32)
+      emitter.sw(RA, 28, SP)
+      emitter.jal("dma_reset")
+      emitter.nop
 
       # Reset GS: GS_CSR at 0x12001000
-      #   lui   $v1, 0x1200
-      #   ori   $v1, $v1, 0x1000
-      #   ori   $v0, $zero, 0x200
-      #   sd    $v0, 0($v1)
-      text_bytes.write_bytes(0x3c031200_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x34631000_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x34020200_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0xfc620000_u32, IO::ByteFormat::LittleEndian) # sd $v0, 0($v1)
+      emitter.lui(V1, 0x1200)
+      emitter.ori(V1, V1, 0x1000)
+      emitter.ori(V0, ZERO, 0x200)
+      emitter.sd(V0, 0, V1)
 
       # Syscall _GsPutIMR(0xff00)
-      #   ori   $v1, $zero, 0x71
-      #   lui   $a0, 0x0000
-      #   ori   $a0, $a0, 0xff00
-      #   syscall
-      #   nop
-      text_bytes.write_bytes(0x34030071_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x3c040000_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x3484ff00_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x0000000c_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x00000000_u32, IO::ByteFormat::LittleEndian)
+      emitter.ori(V1, ZERO, 0x71)
+      emitter.lui(A0, 0x0000)
+      emitter.ori(A0, A0, 0xff00)
+      emitter.syscall_inst
+      emitter.nop
 
       # Syscall _SetGsCrt(1, 2, 0) - Interlaced, NTSC, Field
-      #   ori   $v1, $zero, 0x02
-      #   ori   $a0, $zero, 1
-      #   ori   $a1, $zero, 2
-      #   ori   $a2, $zero, 0
-      #   syscall
-      #   nop
-      text_bytes.write_bytes(0x34030002_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x34040001_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x34050002_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x34060000_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x0000000c_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x00000000_u32, IO::ByteFormat::LittleEndian)
+      emitter.ori(V1, ZERO, 0x02)
+      emitter.ori(A0, ZERO, 1)
+      emitter.ori(A1, ZERO, 2)
+      emitter.ori(A2, ZERO, 0)
+      emitter.syscall_inst
+      emitter.nop
 
       # Configure GS registers:
-      #   lui   $v1, 0x1200
-      text_bytes.write_bytes(0x3c031200_u32, IO::ByteFormat::LittleEndian)
+      emitter.lui(V1, 0x1200)
 
-      # GS_PMODE at 0x12000000: 0xff62 (Circuit 2 enable, MMOD=1, AMOD=1, ALP=0xFF)
-      #   ori   $v0, $zero, 0xff62
-      #   sd    $v0, 0($v1)
-      text_bytes.write_bytes(0x3402ff62_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0xfc620000_u32, IO::ByteFormat::LittleEndian)
+      # GS_PMODE at 0x12000000: 0xff67 (Circuit 1 + Circuit 2 enable, CRTMD=1, MMOD=1, AMOD=1, ALP=0xFF)
+      emitter.ori(V0, ZERO, 0xff67)
+      emitter.sd(V0, 0, V1)
 
-      # GS_DISPFB2 at 0x12000090: 0x1400 (FBP=0, FBW=10 [640 px], PSM=0 [PSMCT32])
-      #   ori   $v0, $zero, 0x1400
-      #   sd    $v0, 0x90($v1)
-      text_bytes.write_bytes(0x34021400_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0xfc620090_u32, IO::ByteFormat::LittleEndian)
+      # GS_DISPFB1 at 0x12000070 and GS_DISPFB2 at 0x12000090: 0x1400 (FBP=0, FBW=10 [640 px], PSM=0 [PSMCT32])
+      emitter.ori(V0, ZERO, 0x1400)
+      emitter.sd(V0, 0x70, V1)
+      emitter.sd(V0, 0x90, V1)
 
-      # GS_DISPLAY2 at 0x120000A0: 0x001bf9ff01824290 (DX=656, DY=36, MAGH=3, MAGV=0, DW=2559, DH=447)
-      #   lui   $t1, 0x001b
-      #   ori   $t1, $t1, 0xf9ff
-      #   dsll32 $t1, $t1, 0
-      #   lui   $v0, 0x0182
-      #   ori   $v0, $v0, 0x4290
-      #   or    $t1, $t1, $v0
-      #   sd    $t1, 0xa0($v1)
-      text_bytes.write_bytes(0x3c09001b_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x3529f9ff_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x0009483c_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x3c020182_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x34424290_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x01224825_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0xfc6900a0_u32, IO::ByteFormat::LittleEndian)
+      # GS_DISPLAY1 at 0x12000080 and GS_DISPLAY2 at 0x120000A0: 0x001bf9ff01824290
+      emitter.lui(T1, 0x001b)
+      emitter.ori(T1, T1, 0xf9ff)
+      emitter.dsll32(T1, T1, 0)
+      emitter.lui(V0, 0x0182)
+      emitter.ori(V0, V0, 0x4290)
+      emitter.or_(T1, T1, V0)
+      emitter.sd(T1, 0x80, V1)
+      emitter.sd(T1, 0xa0, V1)
 
       # GS_BGCOLOR at 0x120000E0: 0x0018141f (Citrine dark navy)
-      #   lui   $v0, 0x0018
-      #   ori   $v0, $v0, 0x141f
-      #   sd    $v0, 0xe0($v1)
-      text_bytes.write_bytes(0x3c020018_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x3442141f_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0xfc6200e0_u32, IO::ByteFormat::LittleEndian)
+      emitter.lui(V0, 0x0018)
+      emitter.ori(V0, V0, 0x141f)
+      emitter.sd(V0, 0xe0, V1)
 
       # Send Environment Setup Packet (env_addr, env_qwc)
-      #   jal   dma02_wait (at 0x00100138 -> 0x0c04004e)
-      #   nop
-      #   lui   $t8, 0x1000
-      #   ori   $t8, $t8, 0xa000
-      #   lui   $t7, (env_addr >> 16)
-      #   ori   $t7, $t7, (env_addr & 0xFFFF)
-      #   sw    $t7, 0x10($t8)
-      #   ori   $t6, $zero, env_qwc
-      #   sw    $t6, 0x20($t8)
-      #   ori   $t6, $zero, 0x101
-      #   sw    $t6, 0x00($t8)
-      #   jal   dma02_wait
-      #   nop
-      text_bytes.write_bytes(0x0c04004e_u32, IO::ByteFormat::LittleEndian) # jal 0x00100138
-      text_bytes.write_bytes(0x00000000_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x3c181000_u32, IO::ByteFormat::LittleEndian) # lui $t8, 0x1000
-      text_bytes.write_bytes(0x3718a000_u32, IO::ByteFormat::LittleEndian) # ori $t8, $t8, 0xa000
-      text_bytes.write_bytes((0x3c0f0000_u32 | (env_addr >> 16)), IO::ByteFormat::LittleEndian) # lui $t7, hi
-      text_bytes.write_bytes((0x35ef0000_u32 | (env_addr & 0xFFFF)), IO::ByteFormat::LittleEndian) # ori $t7, lo
-      text_bytes.write_bytes(0xaf0f0010_u32, IO::ByteFormat::LittleEndian) # sw $t7, 0x10($t8)
-      text_bytes.write_bytes((0x340e0000_u32 | env_qwc), IO::ByteFormat::LittleEndian) # ori $t6, $zero, env_qwc
-      text_bytes.write_bytes(0xaf0e0020_u32, IO::ByteFormat::LittleEndian) # sw $t6, 0x20($t8)
-      text_bytes.write_bytes(0x340e0101_u32, IO::ByteFormat::LittleEndian) # ori $t6, $zero, 0x101
-      text_bytes.write_bytes(0xaf0e0000_u32, IO::ByteFormat::LittleEndian) # sw $t6, 0x00($t8)
-      text_bytes.write_bytes(0x0c04004e_u32, IO::ByteFormat::LittleEndian) # jal 0x00100138
-      text_bytes.write_bytes(0x00000000_u32, IO::ByteFormat::LittleEndian)
+      emitter.jal("dma02_wait")
+      emitter.nop
+      emitter.lui(T8, 0x1000)
+      emitter.ori(T8, T8, 0xa000)
+      emitter.lui(T7, (env_addr >> 16).to_i32)
+      emitter.ori(T7, T7, (env_addr & 0xFFFF).to_i32)
+      emitter.sw(T7, 0x10, T8)
+      emitter.ori(T6, ZERO, env_qwc.to_i32)
+      emitter.sw(T6, 0x20, T8)
+      emitter.ori(T6, ZERO, 0x101)
+      emitter.sw(T6, 0x00, T8)
+      emitter.jal("dma02_wait")
+      emitter.nop
 
-      # Frame Loop (at 0x001000DC):
-      #   jal   dma02_wait (0x00100138)
-      #   nop
-      #   lui   $t8, 0x1000
-      #   ori   $t8, $t8, 0xa000
-      #   lui   $t7, (draw_addr >> 16)
-      #   ori   $t7, $t7, (draw_addr & 0xFFFF)
-      #   sw    $t7, 0x10($t8)
-      #   ori   $t6, $zero, draw_qwc
-      #   sw    $t6, 0x20($t8)
-      #   ori   $t6, $zero, 0x101
-      #   sw    $t6, 0x00($t8)
-      #   jal   dma02_wait
-      #   nop
-      #
-      # VSync Wait (GS_CSR bit 3):
-      #   lui   $v1, 0x1200
-      #   ori   $v1, $v1, 0x1000
-      #   ori   $v0, $zero, 8
-      #   sw    $v0, 0($v1)
-      # vsync_spin:
-      #   lw    $v0, 0($v1)
-      #   andi  $v0, $v0, 8
-      #   beqz  $v0, -3 (vsync_spin)
-      #   nop
-      #   j     0x001000dc (frame_loop)
-      #   nop
-      text_bytes.write_bytes(0x0c04004e_u32, IO::ByteFormat::LittleEndian) # jal 0x00100138
-      text_bytes.write_bytes(0x00000000_u32, IO::ByteFormat::LittleEndian)
-      text_bytes.write_bytes(0x3c181000_u32, IO::ByteFormat::LittleEndian) # lui $t8, 0x1000
-      text_bytes.write_bytes(0x3718a000_u32, IO::ByteFormat::LittleEndian) # ori $t8, $t8, 0xa000
-      text_bytes.write_bytes((0x3c0f0000_u32 | (draw_addr >> 16)), IO::ByteFormat::LittleEndian) # lui $t7, hi
-      text_bytes.write_bytes((0x35ef0000_u32 | (draw_addr & 0xFFFF)), IO::ByteFormat::LittleEndian) # ori $t7, lo
-      text_bytes.write_bytes(0xaf0f0010_u32, IO::ByteFormat::LittleEndian) # sw $t7, 0x10($t8)
-      text_bytes.write_bytes((0x340e0000_u32 | draw_qwc), IO::ByteFormat::LittleEndian) # ori $t6, $zero, draw_qwc
-      text_bytes.write_bytes(0xaf0e0020_u32, IO::ByteFormat::LittleEndian) # sw $t6, 0x20($t8)
-      text_bytes.write_bytes(0x340e0101_u32, IO::ByteFormat::LittleEndian) # ori $t6, $zero, 0x101
-      text_bytes.write_bytes(0xaf0e0000_u32, IO::ByteFormat::LittleEndian) # sw $t6, 0x00($t8)
-      text_bytes.write_bytes(0x0c04004e_u32, IO::ByteFormat::LittleEndian) # jal 0x00100138
-      text_bytes.write_bytes(0x00000000_u32, IO::ByteFormat::LittleEndian)
+      # Frame Loop:
+      emitter.label("frame_loop")
+      emitter.jal("dma02_wait")
+      emitter.nop
+      emitter.lui(T8, 0x1000)
+      emitter.ori(T8, T8, 0xa000)
+      emitter.lui(T7, (draw_addr >> 16).to_i32)
+      emitter.ori(T7, T7, (draw_addr & 0xFFFF).to_i32)
+      emitter.sw(T7, 0x10, T8)
+      emitter.ori(T6, ZERO, draw_qwc.to_i32)
+      emitter.sw(T6, 0x20, T8)
+      emitter.ori(T6, ZERO, 0x101)
+      emitter.sw(T6, 0x00, T8)
+      emitter.jal("dma02_wait")
+      emitter.nop
 
-      # VSync wait loop
-      text_bytes.write_bytes(0x3c031200_u32, IO::ByteFormat::LittleEndian) # lui $v1, 0x1200
-      text_bytes.write_bytes(0x34631000_u32, IO::ByteFormat::LittleEndian) # ori $v1, $v1, 0x1000
-      text_bytes.write_bytes(0x34020008_u32, IO::ByteFormat::LittleEndian) # ori $v0, $zero, 8
-      text_bytes.write_bytes(0xac620000_u32, IO::ByteFormat::LittleEndian) # sw $v0, 0($v1)
-      text_bytes.write_bytes(0x8c620000_u32, IO::ByteFormat::LittleEndian) # lw $v0, 0($v1)
-      text_bytes.write_bytes(0x30420008_u32, IO::ByteFormat::LittleEndian) # andi $v0, $v0, 8
-      text_bytes.write_bytes(0x1040fffd_u32, IO::ByteFormat::LittleEndian) # beqz $v0, -3
-      text_bytes.write_bytes(0x00000000_u32, IO::ByteFormat::LittleEndian) # nop
-      text_bytes.write_bytes(0x08040037_u32, IO::ByteFormat::LittleEndian) # j 0x001000dc (frame_loop)
-      text_bytes.write_bytes(0x00000000_u32, IO::ByteFormat::LittleEndian) # nop
+      # VSync wait loop (GS_CSR bit 3):
+      emitter.lui(V1, 0x1200)
+      emitter.ori(V1, V1, 0x1000)
+      emitter.ori(V0, ZERO, 8)
+      emitter.sd(V0, 0, V1)        # Clear VSINT with 64-bit store
+      emitter.lui(T0, 0x0002)       # Timeout counter (~131072 iterations)
 
-      # Subroutine dma02_wait at 0x00100138 (32 bytes):
-      text_bytes.write_bytes(0x3c181000_u32, IO::ByteFormat::LittleEndian) # lui $t8, 0x1000
-      text_bytes.write_bytes(0x3718a000_u32, IO::ByteFormat::LittleEndian) # ori $t8, $t8, 0xa000
-      text_bytes.write_bytes(0x8f190000_u32, IO::ByteFormat::LittleEndian) # lw $t9, 0($t8)
-      text_bytes.write_bytes(0x33390100_u32, IO::ByteFormat::LittleEndian) # andi $t9, $t9, 0x100
-      text_bytes.write_bytes(0x1720fffd_u32, IO::ByteFormat::LittleEndian) # bnez $t9, -3
-      text_bytes.write_bytes(0x00000000_u32, IO::ByteFormat::LittleEndian) # nop
-      text_bytes.write_bytes(0x03e00008_u32, IO::ByteFormat::LittleEndian) # jr $ra
-      text_bytes.write_bytes(0x00000000_u32, IO::ByteFormat::LittleEndian) # nop
+      emitter.label("vsync_spin")
+      emitter.ld(V0, 0, V1)        # 64-bit load from GS_CSR
+      emitter.andi(V0, V0, 8)
+      emitter.bnez(V0, "vsync_done")
+      emitter.addiu(T0, T0, -1)     # branch delay slot: decrement counter
+      emitter.bnez(T0, "vsync_spin")
+      emitter.nop                  # branch delay slot
 
-      # Subroutine dma_reset at 0x00100158 (84 bytes):
-      text_bytes.write_bytes(0x3c181000_u32, IO::ByteFormat::LittleEndian) # lui $t8, 0x1000
-      text_bytes.write_bytes(0x3718a000_u32, IO::ByteFormat::LittleEndian) # ori $t8, $t8, 0xa000
-      text_bytes.write_bytes(0xaf000000_u32, IO::ByteFormat::LittleEndian) # sw $zero, 0($t8)
-      text_bytes.write_bytes(0xaf000010_u32, IO::ByteFormat::LittleEndian) # sw $zero, 0x10($t8)
-      text_bytes.write_bytes(0xaf000030_u32, IO::ByteFormat::LittleEndian) # sw $zero, 0x30($t8)
-      text_bytes.write_bytes(0xaf000040_u32, IO::ByteFormat::LittleEndian) # sw $zero, 0x40($t8)
-      text_bytes.write_bytes(0xaf000050_u32, IO::ByteFormat::LittleEndian) # sw $zero, 0x50($t8)
-      text_bytes.write_bytes(0x3c0f1000_u32, IO::ByteFormat::LittleEndian) # lui $t7, 0x1000
-      text_bytes.write_bytes(0x35efe000_u32, IO::ByteFormat::LittleEndian) # ori $t7, $t7, 0xe000
-      text_bytes.write_bytes(0x340eff1f_u32, IO::ByteFormat::LittleEndian) # ori $t6, $zero, 0xff1f
-      text_bytes.write_bytes(0xaf0e0010_u32, IO::ByteFormat::LittleEndian) # sw $t6, 0x10($t7)
-      text_bytes.write_bytes(0xaf000000_u32, IO::ByteFormat::LittleEndian) # sw $zero, 0($t7)
-      text_bytes.write_bytes(0xaf000020_u32, IO::ByteFormat::LittleEndian) # sw $zero, 0x20($t7)
-      text_bytes.write_bytes(0xaf000030_u32, IO::ByteFormat::LittleEndian) # sw $zero, 0x30($t7)
-      text_bytes.write_bytes(0xaf000040_u32, IO::ByteFormat::LittleEndian) # sw $zero, 0x40($t7)
-      text_bytes.write_bytes(0xaf000050_u32, IO::ByteFormat::LittleEndian) # sw $zero, 0x50($t7)
-      text_bytes.write_bytes(0x8f0e0000_u32, IO::ByteFormat::LittleEndian) # lw $t6, 0($t7)
-      text_bytes.write_bytes(0x35ce0001_u32, IO::ByteFormat::LittleEndian) # ori $t6, $t6, 1
-      text_bytes.write_bytes(0xaf0e0000_u32, IO::ByteFormat::LittleEndian) # sw $t6, 0($t7)
-      text_bytes.write_bytes(0x03e00008_u32, IO::ByteFormat::LittleEndian) # jr $ra
-      text_bytes.write_bytes(0x00000000_u32, IO::ByteFormat::LittleEndian) # nop
+      emitter.label("vsync_done")
+      emitter.j("frame_loop")
+      emitter.nop
 
-      # Native API stubs (Citrine_VM_Run, etc. starting at 0x001001AC)
-      stub_start = text_bytes.pos.to_u32 + 0x00100000_u32
+      # Subroutine dma02_wait:
+      emitter.label("dma02_wait")
+      emitter.lui(T8, 0x1000)
+      emitter.ori(T8, T8, 0xa000)
+      emitter.label("dma02_wait_loop")
+      emitter.lw(T9, 0, T8)
+      emitter.andi(T9, T9, 0x100)
+      emitter.bnez(T9, "dma02_wait_loop")
+      emitter.nop
+      emitter.jr(RA)
+      emitter.nop
+
+      # Subroutine dma_reset:
+      emitter.label("dma_reset")
+      emitter.lui(T8, 0x1000)
+      emitter.ori(T8, T8, 0xa000)
+      emitter.sw(ZERO, 0, T8)
+      emitter.sw(ZERO, 0x10, T8)
+      emitter.sw(ZERO, 0x30, T8)
+      emitter.sw(ZERO, 0x40, T8)
+      emitter.sw(ZERO, 0x50, T8)
+      emitter.lui(T7, 0x1000)
+      emitter.ori(T7, T7, 0xe000)
+      emitter.ori(T6, ZERO, 0xff1f)
+      emitter.sw(T6, 0x10, T7)
+      emitter.sw(ZERO, 0, T7)
+      emitter.sw(ZERO, 0x20, T7)
+      emitter.sw(ZERO, 0x30, T7)
+      emitter.sw(ZERO, 0x40, T7)
+      emitter.sw(ZERO, 0x50, T7)
+      emitter.lw(T6, 0, T7)
+      emitter.ori(T6, T6, 1)
+      emitter.sw(T6, 0, T7)
+      emitter.jr(RA)
+      emitter.nop
+
+      # Native API stubs (Citrine_VM_Run, etc.)
+      stub_start = 0x00100000_u32 + (emitter.words.size.to_u32 * 4)
       60.times do
-        text_bytes.write_bytes(0x27bdffe0_u32, IO::ByteFormat::LittleEndian) # addiu $sp, $sp, -32
-        text_bytes.write_bytes(0xafbf001c_u32, IO::ByteFormat::LittleEndian) # sw $ra, 28($sp)
-        text_bytes.write_bytes(0x24020000_u32, IO::ByteFormat::LittleEndian) # li $v0, 0
-        text_bytes.write_bytes(0x8fbf001c_u32, IO::ByteFormat::LittleEndian) # lw $ra, 28($sp)
-        text_bytes.write_bytes(0x03e00008_u32, IO::ByteFormat::LittleEndian) # jr $ra
-        text_bytes.write_bytes(0x27bd0020_u32, IO::ByteFormat::LittleEndian) # addiu $sp, $sp, 32
+        emitter.addiu(SP, SP, -32)
+        emitter.sw(RA, 28, SP)
+        emitter.ori(V0, ZERO, 0)
+        emitter.lw(RA, 28, SP)
+        emitter.jr(RA)
+        emitter.addiu(SP, SP, 32)
       end
 
-      # Pad .text to 1024 bytes (0x400)
-      while text_bytes.pos < 1024
-        text_bytes.write_bytes(0x00000000_u32, IO::ByteFormat::LittleEndian)
-      end
-      text_data = text_bytes.to_slice
+      # Pad .text to 4096 bytes (0x1000)
+      emitter.pad_to(TEXT_SIZE.to_i32)
+      emitter.resolve!
+      text_data = emitter.to_slice
 
       # .rodata segment
       rodata_bytes = IO::Memory.new
@@ -432,10 +494,10 @@ module Citrine
       }
 
       symbols = [
-        SymbolEntry.new("_start", 0x00100000_u32, 32_u32, STT_FUNC, STB_GLOBAL, 1_u16),
-        SymbolEntry.new("main", 0x00100020_u32, 280_u32, STT_FUNC, STB_GLOBAL, 1_u16),
-        SymbolEntry.new("dma02_wait", 0x00100138_u32, 32_u32, STT_FUNC, STB_GLOBAL, 1_u16),
-        SymbolEntry.new("dma_reset", 0x00100158_u32, 84_u32, STT_FUNC, STB_GLOBAL, 1_u16),
+        SymbolEntry.new("_start", emitter.labels["_start"], (emitter.labels["main"] - emitter.labels["_start"]), STT_FUNC, STB_GLOBAL, 1_u16),
+        SymbolEntry.new("main", emitter.labels["main"], (emitter.labels["dma02_wait"] - emitter.labels["main"]), STT_FUNC, STB_GLOBAL, 1_u16),
+        SymbolEntry.new("dma02_wait", emitter.labels["dma02_wait"], (emitter.labels["dma_reset"] - emitter.labels["dma02_wait"]), STT_FUNC, STB_GLOBAL, 1_u16),
+        SymbolEntry.new("dma_reset", emitter.labels["dma_reset"], (stub_start - emitter.labels["dma_reset"]), STT_FUNC, STB_GLOBAL, 1_u16),
         SymbolEntry.new("Citrine_VM_Run", stub_start, 24_u32, STT_FUNC, STB_GLOBAL, 1_u16),
         SymbolEntry.new("Citrine_InitWindow", stub_start + 24, 24_u32, STT_FUNC, STB_GLOBAL, 1_u16),
         SymbolEntry.new("Citrine_CloseWindow", stub_start + 48, 24_u32, STT_FUNC, STB_GLOBAL, 1_u16),
@@ -665,29 +727,65 @@ module Citrine
     end
 
     private def build_env_packet : Bytes
-      mem = IO::Memory.new(160)
-      mem.write_bytes(0x1000000000008009_u64, IO::ByteFormat::LittleEndian)
+      mem = IO::Memory.new(224)
+      # GIFTag: NLOOP=13, EOP=1, PRE=0, PRIM=0, FLG=PACKED(0), NREG=1, REGS=0x0E (A+D)
+      mem.write_bytes(0x100000000000800d_u64, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x0e_u64, IO::ByteFormat::LittleEndian)
+
+      # 1. FRAME_1 (0x4C): FBP=0, FBW=10 (640), PSM=0 (PSMCT32), FBMSK=0
       mem.write_bytes(0x000a0000_u64, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x4c_u64, IO::ByteFormat::LittleEndian)
+
+      # 2. FRAME_2 (0x4D): FBP=0, FBW=10 (640), PSM=0 (PSMCT32), FBMSK=0
+      mem.write_bytes(0x000a0000_u64, IO::ByteFormat::LittleEndian)
+      mem.write_bytes(0x4d_u64, IO::ByteFormat::LittleEndian)
+
+      # 3. ZBUF_1 (0x4E): ZBP=140, PSM=0, ZMSK=0
       mem.write_bytes(0x0000008c_u64, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x4e_u64, IO::ByteFormat::LittleEndian)
+
+      # 4. ZBUF_2 (0x4F): ZBP=140, PSM=0, ZMSK=0
+      mem.write_bytes(0x0000008c_u64, IO::ByteFormat::LittleEndian)
+      mem.write_bytes(0x4f_u64, IO::ByteFormat::LittleEndian)
+
+      # 5. XYOFFSET_1 (0x18): OFX=1728*16, OFY=1936*16
       xyoff = (30976_u64 << 32) | 27648_u64
       mem.write_bytes(xyoff, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x18_u64, IO::ByteFormat::LittleEndian)
+
+      # 6. XYOFFSET_2 (0x19)
+      mem.write_bytes(xyoff, IO::ByteFormat::LittleEndian)
+      mem.write_bytes(0x19_u64, IO::ByteFormat::LittleEndian)
+
+      # 7. SCISSOR_1 (0x40): X0=0, X1=639, Y0=0, Y1=447
       sciss = (447_u64 << 48) | (639_u64 << 16)
       mem.write_bytes(sciss, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x40_u64, IO::ByteFormat::LittleEndian)
+
+      # 8. SCISSOR_2 (0x41)
+      mem.write_bytes(sciss, IO::ByteFormat::LittleEndian)
+      mem.write_bytes(0x41_u64, IO::ByteFormat::LittleEndian)
+
+      # 9. PRMODECONT (0x1A): 1
       mem.write_bytes(1_u64, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x1a_u64, IO::ByteFormat::LittleEndian)
+
+      # 10. COLCLAMP (0x46): 1
       mem.write_bytes(1_u64, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x46_u64, IO::ByteFormat::LittleEndian)
+
+      # 11. DTHE (0x45): 0
       mem.write_bytes(0_u64, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x45_u64, IO::ByteFormat::LittleEndian)
-      mem.write_bytes(0x70000_u64, IO::ByteFormat::LittleEndian)
-      mem.write_bytes(0x47_u64, IO::ByteFormat::LittleEndian)
+
+      # 12. TEST_1 (0x47): ZTE=1, ZTST=1 (Pass ALWAYS)
       mem.write_bytes(0x30000_u64, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x47_u64, IO::ByteFormat::LittleEndian)
+
+      # 13. TEST_2 (0x48): ZTE=1, ZTST=1 (Pass ALWAYS)
+      mem.write_bytes(0x30000_u64, IO::ByteFormat::LittleEndian)
+      mem.write_bytes(0x48_u64, IO::ByteFormat::LittleEndian)
+
       mem.to_slice
     end
 

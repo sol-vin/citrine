@@ -4,6 +4,17 @@ module Citrine
   module CLI
     class RunCommand
       def self.run(args : Array(String))
+        if args.includes?("--help") || args.includes?("-h")
+          puts "Usage: citrine run [file.cr | file.cbc | game.iso] [options]"
+          puts ""
+          puts "Options:"
+          puts "  --watch   Watch source file and hot-reload bytecode and ISO on save"
+          puts "  --batch   Run PCSX2 in headless / batch mode"
+          puts "  --host    Run in local desktop host simulator (citrine_host_runner.exe)"
+          puts "  --help    Display this help message"
+          return
+        end
+
         watch = args.includes?("--watch")
         batch = args.includes?("--batch")
         host_sim = args.includes?("--host")
