@@ -130,9 +130,14 @@ module Citrine
         args << "-earlyconsolelog"
         args << "-batch" if batch_mode
         args << abs_iso
-        # Spawn process asynchronously so terminal remains free and PCSX2 window opens
-        Process.new(pcsx2, args)
-        puts "[Citrine] PCSX2 process started successfully."
+        if batch_mode
+          proc = Process.new(pcsx2, args)
+          proc.wait
+        else
+          puts "[Citrine] PCSX2 process running. (Close PCSX2 or press Ctrl+C to exit)..."
+          proc = Process.new(pcsx2, args)
+          proc.wait
+        end
       else
         puts "[Citrine] PCSX2 not found in standard paths. Disc image ready at #{output_iso}."
         puts "[Citrine] Set PCSX2_PATH or open #{output_iso} manually in PCSX2."
