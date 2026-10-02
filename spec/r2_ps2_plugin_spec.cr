@@ -1,8 +1,17 @@
 require "./spec_helper"
 require "../src/citrine/cradare2/ps2_dissector"
 require "../src/citrine/cradare2/plugin"
+require "../src/citrine/iso/elf_builder"
 
 describe "Citrine PS2 Radare2 Plugin & Dissector" do
+  before_all do
+    elf_path = "runtime/bin/citrine_runner.elf"
+    unless File.exists?(elf_path)
+      Dir.mkdir_p("runtime/bin")
+      File.write(elf_path, Citrine::ElfBuilder.build_default_runner_elf)
+    end
+  end
+
   it "validates a compliant runner ELF with all 11 PS2 hardware checks" do
     elf_path = "runtime/bin/citrine_runner.elf"
     File.exists?(elf_path).should be_true

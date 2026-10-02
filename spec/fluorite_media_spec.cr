@@ -3,7 +3,11 @@ require "../src/citrine/importers/fluorite_media"
 
 describe "Citrine Media Pipeline (Fluorite & FFmpeg)" do
   it "detects FFmpeg installation" do
-    Citrine::Importers::FluoriteMedia.ffmpeg_installed?.should be_true
+    if Process.find_executable("ffmpeg")
+      Citrine::Importers::FluoriteMedia.ffmpeg_installed?.should be_true
+    else
+      Citrine::Importers::FluoriteMedia.ffmpeg_installed?.should be_false
+    end
   end
 
   it "configures Video presets with 15 FPS downsampling for PS2 IPU" do

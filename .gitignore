@@ -10,6 +10,7 @@
 *.cbc
 *.cbcsym
 *.elf
+!runtime/bin/citrine_runner.elf
 *.iso
 *.o
 *.a

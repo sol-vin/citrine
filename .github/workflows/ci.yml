@@ -87,9 +87,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: citrine-${{ matrix.os }}
-          path: |
-            bin/citrine
-            bin/citrine.exe
+          path: bin/citrine*
           if-no-files-found: error
 
   pages:
