@@ -70,26 +70,26 @@ jobs:
           $logsDir = "$HOME\Documents\PCSX2\logs"
           New-Item -ItemType Directory -Force -Path $logsDir
 
-          $iniContent = @"
-[UI]
-SetupWizardIncomplete = false
-
-[Folders]
-Bios = $biosDir
-Logs = $logsDir
-
-[Logging]
-EnableSystemConsole = true
-EnableFileLogging = true
-EnableEEConsole = true
-EnableIOPConsole = true
-
-[EmuCore]
-EnableFastBoot = true
-"@
-          $iniContent | Set-Content -Path "$inisDir\PCSX2.ini" -Force
+          $iniLines = @(
+            "[UI]",
+            "SetupWizardIncomplete = false",
+            "",
+            "[Folders]",
+            "Bios = $biosDir",
+            "Logs = $logsDir",
+            "",
+            "[Logging]",
+            "EnableSystemConsole = true",
+            "EnableFileLogging = true",
+            "EnableEEConsole = true",
+            "EnableIOPConsole = true",
+            "",
+            "[EmuCore]",
+            "EnableFastBoot = true"
+          )
+          $iniLines | Set-Content -Path "$inisDir\PCSX2.ini" -Force
           New-Item -ItemType Directory -Force -Path "C:\Program Files\PCSX2\inis"
-          $iniContent | Set-Content -Path "C:\Program Files\PCSX2\inis\PCSX2.ini" -Force
+          $iniLines | Set-Content -Path "C:\Program Files\PCSX2\inis\PCSX2.ini" -Force
 
           if ($env:PCSX2_BIOS_URL) {
             Write-Host "Downloading PS2 BIOS from secure URL..."
