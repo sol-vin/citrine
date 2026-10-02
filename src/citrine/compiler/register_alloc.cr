@@ -41,6 +41,28 @@ module Citrine
       end
     end
 
+    def alloc_contiguous(count : Int32) : UInt8
+      return 0_u8 if count <= 0
+
+      # Try to find 'count' consecutive registers in free_temps
+      if @free_temps.size >= count
+        sorted = @free_temps.uniq.sort
+        (0..sorted.size - count).each do |start_idx|
+          candidate = sorted[start_idx]
+          if (1...count).all? { |k| sorted[start_idx + k] == candidate + k }
+            count.times do |k|
+              @free_temps.delete((candidate + k).to_u8)
+            end
+            return candidate
+          end
+        end
+      end
+
+      base = @next_reg.to_u8
+      count.times { alloc_raw }
+      base
+    end
+
     def free_temp(reg : UInt8)
       # Do not free if it's a declared local variable
       unless @local_map.values.includes?(reg)

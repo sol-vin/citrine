@@ -16,3 +16,8 @@ runner.compile_game("examples/05_hello_world/main.cr", "examples/05_hello_world/
 runner.build_iso("examples/05_hello_world/main.cbc", "examples/05_hello_world/game.iso")
 puts "Rebuilt examples/05_hello_world/game.iso."
 
+# Recompile 02_shapes_and_text
+runner.compile_game("examples/02_shapes_and_text/main.cr", "examples/02_shapes_and_text/main.cbc")
+runner.build_iso("examples/02_shapes_and_text/main.cbc", "examples/02_shapes_and_text/game.iso")
+puts "Rebuilt examples/02_shapes_and_text/game.iso."
+

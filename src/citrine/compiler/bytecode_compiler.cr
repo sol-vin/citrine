@@ -491,7 +491,20 @@ module Citrine
 
           # Compile args into sequential registers
           arg_regs = node.args.map { |a| compile_node(a, allocator, instructions, fn) }
-          base_reg = arg_regs.first? || 0_u8
+          base_reg = if arg_regs.empty?
+                       0_u8
+                     elsif arg_regs.size == 1
+                       arg_regs[0]
+                     elsif (0...arg_regs.size - 1).all? { |i| arg_regs[i + 1] == arg_regs[i] + 1 }
+                       arg_regs[0]
+                     else
+                       seq_base = allocator.alloc_contiguous(arg_regs.size)
+                       arg_regs.each_with_index do |src, i|
+                         dst = (seq_base + i).to_u8
+                         instructions << Instruction.encode_abc(Opcode::Move, dst, src, 0_u8)
+                       end
+                       seq_base
+                     end
 
           # Instruction: OP_CALL_NATIVE dest, base_reg, argc | imm16: native_id
           instr_val = (Opcode::CallNative.value.to_u32 << 24) |
@@ -500,6 +513,11 @@ module Citrine
                       native_id.value.to_u32
           instructions << Instruction.new(instr_val)
           arg_regs.each { |r| allocator.free_temp(r) }
+          if !arg_regs.empty? && base_reg != arg_regs[0]
+            arg_regs.size.times do |i|
+              allocator.free_temp((base_reg + i).to_u8)
+            end
+          end
           return dest
         end
       end

@@ -133,6 +133,9 @@ module Citrine
       enum Type
         Clear
         Rect
+        Circle
+        Line
+        Triangle
         Text
       end
       getter type : Type
@@ -140,10 +143,32 @@ module Citrine
       getter y1 : Int32
       getter x2 : Int32
       getter y2 : Int32
+      getter x3 : Int32
+      getter y3 : Int32
+      getter radius : Int32
       getter color : UInt32
       getter text : String
 
-      def initialize(@type : Type, @x1 : Int32 = 0, @y1 : Int32 = 0, @x2 : Int32 = 0, @y2 : Int32 = 0, @color : UInt32 = 0_u32, @text : String = "")
+      def initialize(
+        @type : Type,
+        @x1 : Int32 = 0,
+        @y1 : Int32 = 0,
+        @x2 : Int32 = 0,
+        @y2 : Int32 = 0,
+        @x3 : Int32 = 0,
+        @y3 : Int32 = 0,
+        @radius : Int32 = 0,
+        @color : UInt32 = 0_u32,
+        @text : String = ""
+      )
+      end
+    end
+
+    struct Phase
+      getter commands : Array(DrawCommand)
+      getter delay_frames : UInt32
+
+      def initialize(@commands : Array(DrawCommand), @delay_frames : UInt32 = 0_u32)
       end
     end
 
@@ -247,6 +272,16 @@ module Citrine
         emit((0x04_u32 << 26) | (rs.to_u32 << 21))
       end
 
+      def bne(rs : Int32, rt : Int32, target_label : String)
+        @fixups << {@words.size, target_label, :bne}
+        emit((0x05_u32 << 26) | (rs.to_u32 << 21) | (rt.to_u32 << 16))
+      end
+
+      def beq(rs : Int32, rt : Int32, target_label : String)
+        @fixups << {@words.size, target_label, :beq}
+        emit((0x04_u32 << 26) | (rs.to_u32 << 21) | (rt.to_u32 << 16))
+      end
+
       def resolve!
         @fixups.each do |idx, label_name, type|
           target_vaddr = @labels[label_name]? || raise "Unknown label: #{label_name}"
@@ -257,7 +292,7 @@ module Citrine
             @words[idx] = 0x08000000_u32 | ((target_vaddr >> 2) & 0x03FFFFFF_u32)
           when :jal
             @words[idx] = 0x0C000000_u32 | ((target_vaddr >> 2) & 0x03FFFFFF_u32)
-          when :bnez, :beqz
+          when :bnez, :beqz, :bne, :beq
             offset_bytes = target_vaddr.to_i32 - (inst_vaddr.to_i32 + 4)
             offset_insts = offset_bytes // 4
             @words[idx] = (@words[idx] & 0xFFFF0000_u32) | ((offset_insts & 0xFFFF).to_u32)
@@ -286,22 +321,29 @@ module Citrine
     end
 
     def generate(cbc_bytes : Bytes? = nil) : Bytes
-      draw_commands = parse_cbc(cbc_bytes)
+      phases = parse_cbc(cbc_bytes)
 
       # Build GIF Packets
       env_packet = build_env_packet
-      draw_packet = build_draw_packet(draw_commands)
+      phase_packets = phases.map { |p| build_draw_packet(p.commands) }
+      phase_qwcs = phase_packets.map { |pkt| (pkt.size // 16).to_u16 }
 
       env_qwc = (env_packet.size // 16).to_u16
-      draw_qwc = (draw_packet.size // 16).to_u16
 
       rodata_vaddr = RODATA_VADDR
       env_addr = rodata_vaddr
-      draw_addr = env_addr + env_packet.size.to_u32
+      curr_addr = env_addr + env_packet.size.to_u32
+
+      phase_addrs = [] of UInt32
+      phase_packets.each do |pkt|
+        phase_addrs << curr_addr
+        curr_addr += pkt.size.to_u32
+      end
 
       emitter = MipsEmitter.new(0x00100000_u32)
 
       # Function 0 (_start at 0x00100000, 32 bytes):
+      phase0_delay = phases[0].delay_frames
       emitter.label("_start")
       emitter.lui(SP, 0x0200)
       emitter.addiu(SP, SP, -16)
@@ -309,6 +351,11 @@ module Citrine
       emitter.lui(T1, 0xDEAD)
       emitter.ori(T1, T1, 0xBEEF)
       emitter.sw(T1, 0, T0)
+      emitter.sw(ZERO, 4, T0)       # frame counter = 0
+      emitter.sw(ZERO, 8, T0)       # phase index = 0
+      emitter.lui(T1, (phase0_delay >> 16).to_i32)
+      emitter.ori(T1, T1, (phase0_delay & 0xFFFF).to_i32)
+      emitter.sw(T1, 12, T0)      # phase frames remaining
       emitter.j("main")
       emitter.nop
 
@@ -353,12 +400,12 @@ module Citrine
       emitter.sd(V0, 0x70, V1)
       emitter.sd(V0, 0x90, V1)
 
-      # GS_DISPLAY1 at 0x12000080 and GS_DISPLAY2 at 0x120000A0: 0x001bf9ff01824290 (NTSC Field mode dy=36 centered)
+      # GS_DISPLAY1 at 0x12000080 and GS_DISPLAY2 at 0x120000A0: 0x001bf9ff01832290 (NTSC Field mode dy=50 centered)
       emitter.lui(T1, 0x001b)
       emitter.ori(T1, T1, 0xf9ff)
       emitter.dsll32(T1, T1, 0)
-      emitter.lui(V0, 0x0182)
-      emitter.ori(V0, V0, 0x4290)
+      emitter.lui(V0, 0x0183)
+      emitter.ori(V0, V0, 0x2290)
       emitter.or_(T1, T1, V0)
       emitter.sd(T1, 0x80, V1)
       emitter.sd(T1, 0xa0, V1)
@@ -389,17 +436,38 @@ module Citrine
       emitter.addiu(T1, T1, 1)
       emitter.sw(T1, 4, T0)
 
+      if phases.size == 1
+        emitter.lui(T7, (phase_addrs[0] >> 16).to_i32)
+        emitter.ori(T7, T7, (phase_addrs[0] & 0xFFFF).to_i32)
+        emitter.ori(T6, ZERO, phase_qwcs[0].to_i32)
+      else
+        emitter.lw(T2, 8, T0) # phase index
+        phases.each_with_index do |phase, i|
+          if i < phases.size - 1
+            emitter.ori(T3, ZERO, i)
+            emitter.bne(T2, T3, "check_phase_#{i + 1}")
+            emitter.nop
+          end
+          emitter.lui(T7, (phase_addrs[i] >> 16).to_i32)
+          emitter.ori(T7, T7, (phase_addrs[i] & 0xFFFF).to_i32)
+          emitter.ori(T6, ZERO, phase_qwcs[i].to_i32)
+          if i < phases.size - 1
+            emitter.j("send_dma")
+            emitter.nop
+            emitter.label("check_phase_#{i + 1}")
+          end
+        end
+        emitter.label("send_dma")
+      end
+
       emitter.jal("dma02_wait")
       emitter.nop
       emitter.lui(T8, 0x1000)
       emitter.ori(T8, T8, 0xa000)
-      emitter.lui(T7, (draw_addr >> 16).to_i32)
-      emitter.ori(T7, T7, (draw_addr & 0xFFFF).to_i32)
       emitter.sw(T7, 0x10, T8)
-      emitter.ori(T6, ZERO, draw_qwc.to_i32)
       emitter.sw(T6, 0x20, T8)
-      emitter.ori(T6, ZERO, 0x101)
-      emitter.sw(T6, 0x00, T8)
+      emitter.ori(T5, ZERO, 0x101)
+      emitter.sw(T5, 0x00, T8)
       emitter.jal("dma02_wait")
       emitter.nop
 
@@ -408,17 +476,58 @@ module Citrine
       emitter.ori(V1, V1, 0x1000)
       emitter.ori(V0, ZERO, 8)
       emitter.sd(V0, 0, V1)        # Clear VSINT with 64-bit store
-      emitter.lui(T0, 0x0002)       # Timeout counter (~131072 iterations)
+      emitter.lui(T1, 0x0002)       # Timeout counter (~131072 iterations)
 
       emitter.label("vsync_spin")
       emitter.ld(V0, 0, V1)        # 64-bit load from GS_CSR
       emitter.andi(V0, V0, 8)
       emitter.bnez(V0, "vsync_done")
-      emitter.addiu(T0, T0, -1)     # branch delay slot: decrement counter
-      emitter.bnez(T0, "vsync_spin")
+      emitter.addiu(T1, T1, -1)     # branch delay slot: decrement counter
+      emitter.bnez(T1, "vsync_spin")
       emitter.nop                  # branch delay slot
 
       emitter.label("vsync_done")
+
+      if phases.size > 1
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T4, 12, T0) # frames remaining
+        emitter.beqz(T4, "loop_continue")
+        emitter.nop
+        emitter.addiu(T4, T4, -1)
+        emitter.sw(T4, 12, T0)
+        emitter.bnez(T4, "loop_continue")
+        emitter.nop
+
+        # Timer hit 0! Advance to next phase
+        emitter.lw(T2, 8, T0) # phase index
+        emitter.addiu(T2, T2, 1)
+        emitter.ori(T3, ZERO, phases.size)
+        emitter.bne(T2, T3, "phase_clamped")
+        emitter.nop
+        emitter.addiu(T2, T3, -1) # clamp to last phase
+
+        emitter.label("phase_clamped")
+        emitter.sw(T2, 8, T0)
+
+        phases.each_with_index do |phase, i|
+          if i < phases.size - 1
+            emitter.ori(T3, ZERO, i)
+            emitter.bne(T2, T3, "check_delay_#{i + 1}")
+            emitter.nop
+          end
+          emitter.lui(T4, (phase.delay_frames >> 16).to_i32)
+          emitter.ori(T4, T4, (phase.delay_frames & 0xFFFF).to_i32)
+          emitter.sw(T4, 12, T0)
+          if i < phases.size - 1
+            emitter.j("loop_continue")
+            emitter.nop
+            emitter.label("check_delay_#{i + 1}")
+          end
+        end
+
+        emitter.label("loop_continue")
+      end
+
       emitter.j("frame_loop")
       emitter.nop
 
@@ -477,7 +586,9 @@ module Citrine
       # .rodata segment
       rodata_bytes = IO::Memory.new
       rodata_bytes.write(env_packet)
-      rodata_bytes.write(draw_packet)
+      phase_packets.each do |pkt|
+        rodata_bytes.write(pkt)
+      end
       rodata_bytes.write("Citrine PS2 Virtual Machine runtime v0.1.0\0".to_slice)
       rodata_bytes.write("Emotion Engine R5900 / Graphic Synthesizer\0".to_slice)
       rodata_data = rodata_bytes.to_slice
@@ -795,32 +906,29 @@ module Citrine
 
     private def build_draw_packet(commands : Array(DrawCommand)) : Bytes
       body = IO::Memory.new
-      quad_count = 0
 
       commands.each do |cmd|
+        r = (cmd.color & 0xFF).to_u8
+        g = ((cmd.color >> 8) & 0xFF).to_u8
+        b = ((cmd.color >> 16) & 0xFF).to_u8
         case cmd.type
         when DrawCommand::Type::Clear
-          r = (cmd.color & 0xFF).to_u8
-          g = ((cmd.color >> 8) & 0xFF).to_u8
-          b = ((cmd.color >> 16) & 0xFF).to_u8
           emit_quad(body, 0, 0, 640, 448, r, g, b)
-          quad_count += 1
         when DrawCommand::Type::Rect
-          r = (cmd.color & 0xFF).to_u8
-          g = ((cmd.color >> 8) & 0xFF).to_u8
-          b = ((cmd.color >> 16) & 0xFF).to_u8
           emit_quad(body, cmd.x1, cmd.y1, cmd.x2, cmd.y2, r, g, b)
-          quad_count += 1
+        when DrawCommand::Type::Circle
+          emit_circle(body, cmd.x1, cmd.y1, cmd.radius, r, g, b)
+        when DrawCommand::Type::Line
+          emit_line(body, cmd.x1, cmd.y1, cmd.x2, cmd.y2, r, g, b)
+        when DrawCommand::Type::Triangle
+          emit_triangle(body, cmd.x1, cmd.y1, cmd.x2, cmd.y2, cmd.x3, cmd.y3, r, g, b)
         when DrawCommand::Type::Text
-          r = (cmd.color & 0xFF).to_u8
-          g = ((cmd.color >> 8) & 0xFF).to_u8
-          b = ((cmd.color >> 16) & 0xFF).to_u8
-          scale = cmd.x2 > 18 ? 2 : 1
-          quad_count += emit_text(body, cmd.text, cmd.x1, cmd.y1, scale, r, g, b)
+          scale = cmd.x2 >= 20 ? 2 : 1
+          emit_text(body, cmd.text, cmd.x1, cmd.y1, scale, r, g, b)
         end
       end
 
-      total_items = (quad_count * 4).to_u32
+      total_items = (body.pos // 16).to_u32
       packet = IO::Memory.new
       gif_tag = (1_u64 << 60) | (1_u64 << 15) | (total_items.to_u64 & 0x7FFF)
       packet.write_bytes(gif_tag, IO::ByteFormat::LittleEndian)
@@ -843,6 +951,59 @@ module Citrine
       gs_y2 = (y2 << 4) & 0xFFFF
       io.write_bytes((gs_y2.to_u64 << 16) | gs_x2.to_u64, IO::ByteFormat::LittleEndian)
       io.write_bytes(5_u64, IO::ByteFormat::LittleEndian)    # Register 0x05 = XYZ2 (queue and kick draw)
+    end
+
+    private def emit_line(io : IO::Memory, x1 : Int32, y1 : Int32, x2 : Int32, y2 : Int32, r : UInt8, g : UInt8, b : UInt8, a : UInt8 = 0x80_u8)
+      emit_single_line(io, x1, y1, x2, y2, r, g, b, a)
+      if (x2 - x1).abs > (y2 - y1).abs
+        emit_single_line(io, x1, y1 + 1, x2, y2 + 1, r, g, b, a)
+      else
+        emit_single_line(io, x1 + 1, y1, x2 + 1, y2, r, g, b, a)
+      end
+    end
+
+    private def emit_single_line(io : IO::Memory, x1 : Int32, y1 : Int32, x2 : Int32, y2 : Int32, r : UInt8, g : UInt8, b : UInt8, a : UInt8 = 0x80_u8)
+      io.write_bytes(1_u64, IO::ByteFormat::LittleEndian)
+      io.write_bytes(0_u64, IO::ByteFormat::LittleEndian) # PRIM (0x00) = Line (1)
+      rgbaq = (0x3F800000_u64 << 32) | (a.to_u64 << 24) | (b.to_u64 << 16) | (g.to_u64 << 8) | r.to_u64
+      io.write_bytes(rgbaq, IO::ByteFormat::LittleEndian)
+      io.write_bytes(1_u64, IO::ByteFormat::LittleEndian) # RGBAQ (0x01)
+      gs_x1 = (x1 << 4) & 0xFFFF
+      gs_y1 = (y1 << 4) & 0xFFFF
+      io.write_bytes((gs_y1.to_u64 << 16) | gs_x1.to_u64, IO::ByteFormat::LittleEndian)
+      io.write_bytes(0x0d_u64, IO::ByteFormat::LittleEndian) # XYZ3 (0x0D)
+      gs_x2 = (x2 << 4) & 0xFFFF
+      gs_y2 = (y2 << 4) & 0xFFFF
+      io.write_bytes((gs_y2.to_u64 << 16) | gs_x2.to_u64, IO::ByteFormat::LittleEndian)
+      io.write_bytes(5_u64, IO::ByteFormat::LittleEndian)    # XYZ2 (0x05)
+    end
+
+    private def emit_circle(io : IO::Memory, cx : Int32, cy : Int32, radius : Int32, r : UInt8, g : UInt8, b : UInt8, a : UInt8 = 0x80_u8)
+      segments = 24
+      segments.times do |i|
+        a1 = (i.to_f64 / segments) * 2.0 * Math::PI
+        a2 = ((i + 1).to_f64 / segments) * 2.0 * Math::PI
+        px1 = (cx + radius * Math.cos(a1)).round.to_i
+        py1 = (cy + radius * Math.sin(a1)).round.to_i
+        px2 = (cx + radius * Math.cos(a2)).round.to_i
+        py2 = (cy + radius * Math.sin(a2)).round.to_i
+
+        emit_triangle(io, cx, cy, px1, py1, px2, py2, r, g, b, a)
+      end
+    end
+
+    private def emit_triangle(io : IO::Memory, x1 : Int32, y1 : Int32, x2 : Int32, y2 : Int32, x3 : Int32, y3 : Int32, r : UInt8, g : UInt8, b : UInt8, a : UInt8 = 0x80_u8)
+      io.write_bytes(3_u64, IO::ByteFormat::LittleEndian)
+      io.write_bytes(0_u64, IO::ByteFormat::LittleEndian) # PRIM (0x00) = Triangle (3)
+      rgbaq = (0x3F800000_u64 << 32) | (a.to_u64 << 24) | (b.to_u64 << 16) | (g.to_u64 << 8) | r.to_u64
+      io.write_bytes(rgbaq, IO::ByteFormat::LittleEndian)
+      io.write_bytes(1_u64, IO::ByteFormat::LittleEndian) # RGBAQ (0x01)
+      io.write_bytes(((y1 << 4).to_u64 << 16) | (x1 << 4).to_u64, IO::ByteFormat::LittleEndian)
+      io.write_bytes(0x0d_u64, IO::ByteFormat::LittleEndian) # XYZ3 (0x0D)
+      io.write_bytes(((y2 << 4).to_u64 << 16) | (x2 << 4).to_u64, IO::ByteFormat::LittleEndian)
+      io.write_bytes(0x0d_u64, IO::ByteFormat::LittleEndian) # XYZ3 (0x0D)
+      io.write_bytes(((y3 << 4).to_u64 << 16) | (x3 << 4).to_u64, IO::ByteFormat::LittleEndian)
+      io.write_bytes(5_u64, IO::ByteFormat::LittleEndian)    # XYZ2 (0x05)
     end
 
     private def emit_text(io : IO::Memory, text : String, start_x : Int32, start_y : Int32, scale : Int32, r : UInt8, g : UInt8, b : UInt8) : Int32
@@ -893,7 +1054,7 @@ module Citrine
       quad_count
     end
 
-    def parse_cbc(cbc_bytes : Bytes?) : Array(DrawCommand)
+    def parse_cbc(cbc_bytes : Bytes?) : Array(Phase)
       if cbc_bytes && cbc_bytes.size > 20 && String.new(cbc_bytes[0..3]) == "CBC1"
         begin
           io = IO::Memory.new(cbc_bytes)
@@ -915,7 +1076,7 @@ module Citrine
             case ctype
             when 2 # Int32
               v = io.read_bytes(Int32, IO::ByteFormat::LittleEndian)
-              constants << CVal.new(ctype, v.to_u32)
+              constants << CVal.new(ctype, (v.to_i64 & 0xFFFFFFFF_u64).to_u32)
             when 5 # Color
               v = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
               constants << CVal.new(ctype, v)
@@ -924,7 +1085,7 @@ module Citrine
               constants << CVal.new(ctype, 0_u32, strings[s_idx]? || "")
             when 3 # Float32
               f = io.read_bytes(Float32, IO::ByteFormat::LittleEndian)
-              constants << CVal.new(ctype, f.to_i32.to_u32)
+              constants << CVal.new(ctype, (f.to_i32.to_i64 & 0xFFFFFFFF_u64).to_u32)
             when 4 # Vec2
               io.read_bytes(Float32, IO::ByteFormat::LittleEndian)
               io.read_bytes(Float32, IO::ByteFormat::LittleEndian)
@@ -958,72 +1119,190 @@ module Citrine
               instructions << io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
             end
 
-            regs = Array(UInt32).new(32, 0_u32)
-            commands = [] of DrawCommand
+            regs = Array(Int64).new(256, 0_i64)
+            current_commands = [] of DrawCommand
+            phases = [] of Phase
+            pc = 0
+            max_steps = 10000
+            steps = 0
+            first_frame_done = false
 
-            instructions.each do |instr|
+            while pc >= 0 && pc < instructions.size && steps < max_steps && !first_frame_done
+              steps += 1
+              instr = instructions[pc]
               opcode = (instr >> 24) & 0xFF
               dst = ((instr >> 16) & 0xFF).to_i
               a = ((instr >> 8) & 0xFF).to_i
               b = (instr & 0xFF).to_i
-              imm16 = instr & 0xFFFF
+              imm16 = (instr & 0xFFFF).to_i64
+              val16 = (instr & 0xFFFF).to_i32
+              imm16_signed = (val16 >= 0x8000 ? val16 - 0x10000 : val16).to_i64
+
+              pc += 1
 
               case opcode
+              when 0 # Nop
               when 1 # Move
-                regs[dst] = regs[a] if dst < 32 && a < 32
+                regs[dst] = regs[a]
+              when 2 # LoadNil
+                regs[dst] = 0_i64
+              when 3 # LoadBool
+                regs[dst] = imm16
               when 4 # LoadInt
-                regs[dst] = imm16.to_u32 if dst < 32
+                regs[dst] = imm16
               when 5 # LoadConst
-                regs[dst] = imm16.to_u32 if dst < 32
+                regs[dst] = imm16
+              when 10 # Add
+                regs[dst] = regs[a] + regs[b]
+              when 11 # Sub
+                regs[dst] = regs[a] - regs[b]
+              when 12 # Mul
+                regs[dst] = regs[a] * regs[b]
+              when 13 # Div
+                regs[dst] = regs[b] != 0 ? (regs[a] // regs[b]) : 0_i64
+              when 14 # Mod
+                regs[dst] = regs[b] != 0 ? (regs[a] % regs[b]) : 0_i64
+              when 15 # Neg
+                regs[dst] = -regs[a]
+              when 30 # Eq
+                regs[dst] = (regs[a] == regs[b]) ? 1_i64 : 0_i64
+              when 31 # Ne
+                regs[dst] = (regs[a] != regs[b]) ? 1_i64 : 0_i64
+              when 32 # Lt
+                regs[dst] = (regs[a] < regs[b]) ? 1_i64 : 0_i64
+              when 33 # Le
+                regs[dst] = (regs[a] <= regs[b]) ? 1_i64 : 0_i64
+              when 34 # Gt
+                regs[dst] = (regs[a] > regs[b]) ? 1_i64 : 0_i64
+              when 35 # Ge
+                regs[dst] = (regs[a] >= regs[b]) ? 1_i64 : 0_i64
+              when 40 # Jump
+                target_pc = pc + imm16_signed
+                if imm16_signed < 0 && target_pc >= 0 && target_pc < instructions.size
+                  target_instr = instructions[target_pc]
+                  target_opcode = (target_instr >> 24) & 0xFF
+                  target_native = target_instr & 0xFF
+                  if target_opcode == 52 && target_native == 3
+                    if phases.empty?
+                      phases << Phase.new(current_commands.dup, 0_u32)
+                      first_frame_done = true
+                    end
+                  end
+                end
+                pc += imm16_signed
+              when 41 # JumpIfTrue
+                pc += imm16_signed if regs[dst] != 0
+              when 42 # JumpIfFalse
+                pc += imm16_signed if regs[dst] == 0
+              when 51 # Return
+                break
+              when 70 # Halt
+                break
               when 52 # CallNative
                 base = a
                 native_id = b
-                step = (base + 1 < 32 && regs[base + 1] != 0) ? 1 : -1
 
                 case native_id
+                when 3 # WindowOpen
+                  regs[dst] = 1_i64
+                when 40, 41, 42 # ButtonDown, ButtonPressed, ButtonReleased
+                  regs[dst] = 0_i64
+                when 11 # EndDrawing
+                  if current_commands.size > 0
+                    phases << Phase.new(current_commands.dup, 0_u32)
+                    first_frame_done = true
+                  end
                 when 12 # ClearBackground
                   c_idx = regs[base].to_i
                   color = constants[c_idx]?.try(&.u32_val) || 0_u32
-                  commands << DrawCommand.new(DrawCommand::Type::Clear, color: color)
+                  current_commands << DrawCommand.new(DrawCommand::Type::Clear, color: color)
                 when 20 # DrawRectangle
                   x = regs[base].to_i
-                  y = regs[base + step].to_i
-                  w = regs[base + 2 * step].to_i
-                  h = regs[base + 3 * step].to_i
-                  c_idx = regs[base + 4 * step].to_i
+                  y = regs[base + 1].to_i
+                  w = regs[base + 2].to_i
+                  h = regs[base + 3].to_i
+                  c_idx = regs[base + 4].to_i
                   color = constants[c_idx]?.try(&.u32_val) || 0xFFFFFFFF_u32
-                  commands << DrawCommand.new(DrawCommand::Type::Rect, x, y, x + w, y + h, color: color)
+                  current_commands << DrawCommand.new(DrawCommand::Type::Rect, x, y, x + w, y + h, color: color)
+                when 21 # DrawCircle
+                  cx = regs[base].to_i
+                  cy = regs[base + 1].to_i
+                  radius = regs[base + 2].to_i
+                  c_idx = regs[base + 3].to_i
+                  color = constants[c_idx]?.try(&.u32_val) || 0xFFFFFFFF_u32
+                  current_commands << DrawCommand.new(DrawCommand::Type::Circle, cx, cy, 0, 0, 0, 0, radius: radius, color: color)
+                when 22 # DrawLine
+                  x1 = regs[base].to_i
+                  y1 = regs[base + 1].to_i
+                  x2 = regs[base + 2].to_i
+                  y2 = regs[base + 3].to_i
+                  c_idx = regs[base + 4].to_i
+                  color = constants[c_idx]?.try(&.u32_val) || 0xFFFFFFFF_u32
+                  current_commands << DrawCommand.new(DrawCommand::Type::Line, x1, y1, x2, y2, color: color)
+                when 23 # DrawTriangle
+                  x1 = regs[base].to_i
+                  y1 = regs[base + 1].to_i
+                  x2 = regs[base + 2].to_i
+                  y2 = regs[base + 3].to_i
+                  x3 = regs[base + 4].to_i
+                  y3 = regs[base + 5].to_i
+                  c_idx = regs[base + 6].to_i
+                  color = constants[c_idx]?.try(&.u32_val) || 0xFFFFFFFF_u32
+                  current_commands << DrawCommand.new(DrawCommand::Type::Triangle, x1, y1, x2, y2, x3, y3, color: color)
                 when 24 # DrawText
                   t_idx = regs[base].to_i
                   text = constants[t_idx]?.try(&.str_val) || ""
-                  x = regs[base + step].to_i
-                  y = regs[base + 2 * step].to_i
-                  size = regs[base + 3 * step].to_i
-                  c_idx = regs[base + 4 * step].to_i
+                  x = regs[base + 1].to_i
+                  y = regs[base + 2].to_i
+                  size = regs[base + 3].to_i
+                  c_idx = regs[base + 4].to_i
                   color = constants[c_idx]?.try(&.u32_val) || 0xFFFFFFFF_u32
-                  commands << DrawCommand.new(DrawCommand::Type::Text, x, y, size, 0, color: color, text: text)
+                  current_commands << DrawCommand.new(DrawCommand::Type::Text, x, y, size, 0, color: color, text: text)
+                when 65 # Sleep(seconds)
+                  sec = regs[base].to_i
+                  sec = 1 if sec <= 0
+                  delay_frames = (sec * 60).to_u32
+                  phases << Phase.new(current_commands.dup, delay_frames)
+                  if phases.size >= 4
+                    first_frame_done = true
+                  end
                 when 70 # Log / puts / print
                   t_idx = regs[base].to_i
                   text = constants[t_idx]?.try(&.str_val) || ""
-                  if commands.empty?
-                    commands << DrawCommand.new(DrawCommand::Type::Clear, color: 0xFF000000_u32)
+                  if current_commands.empty?
+                    current_commands << DrawCommand.new(DrawCommand::Type::Clear, color: 0xFF000000_u32)
                   end
-                  y_pos = 60 + (commands.count { |c| c.type == DrawCommand::Type::Text } * 28)
-                  commands << DrawCommand.new(DrawCommand::Type::Text, 60, y_pos, 20, 0, color: 0xFFFFFFFF_u32, text: text)
+                  y_pos = 60 + (current_commands.count { |c| c.type == DrawCommand::Type::Text } * 28)
+                  current_commands << DrawCommand.new(DrawCommand::Type::Text, 60, y_pos, 20, 0, color: 0xFFFFFFFF_u32, text: text)
                 end
               end
             end
 
-            return commands if commands.size > 0
+            if phases.empty?
+              if current_commands.empty?
+                current_commands = [
+                  DrawCommand.new(DrawCommand::Type::Clear, color: 0xFF000000_u32),
+                  DrawCommand.new(DrawCommand::Type::Text, 60, 60, 20, 0, color: 0xFFFFFFFF_u32, text: "Hello, world!")
+                ]
+              end
+              phases << Phase.new(current_commands, 0_u32)
+            elsif current_commands.size > phases.last.commands.size
+              phases << Phase.new(current_commands.dup, 0_u32)
+            end
+
+            return phases if phases.size > 0
           end
         rescue ex
+          STDERR.puts "[parse_cbc Exception] #{ex.class}: #{ex.message}\n#{ex.backtrace.join("\n")}"
         end
       end
 
       # Default Citrine PS2 fallback screen
       [
-        DrawCommand.new(DrawCommand::Type::Clear, color: 0xFF000000_u32),
-        DrawCommand.new(DrawCommand::Type::Text, 60, 60, 20, 0, color: 0xFFFFFFFF_u32, text: "Hello, world!")
+        Phase.new([
+          DrawCommand.new(DrawCommand::Type::Clear, color: 0xFF000000_u32),
+          DrawCommand.new(DrawCommand::Type::Text, 60, 60, 20, 0, color: 0xFFFFFFFF_u32, text: "Hello, world!")
+        ], 0_u32)
       ]
     end
   end
