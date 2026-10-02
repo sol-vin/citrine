@@ -1066,12 +1066,12 @@ module Citrine
     private def emit_circle(io : IO::Memory, cx : Int32, cy : Int32, radius : Int32, r : UInt8, g : UInt8, b : UInt8, a : UInt8 = 0x80_u8)
       segments = 24
       segments.times do |i|
-        a1 = (i.to_f64 / segments) * 2.0 * Math::PI
-        a2 = ((i + 1).to_f64 / segments) * 2.0 * Math::PI
-        px1 = (cx + radius * Math.cos(a1)).round.to_i
-        py1 = (cy + radius * Math.sin(a1)).round.to_i
-        px2 = (cx + radius * Math.cos(a2)).round.to_i
-        py2 = (cy + radius * Math.sin(a2)).round.to_i
+        a1 = (i.to_f64 / segments) * 2.0 * ::Math::PI
+        a2 = ((i + 1).to_f64 / segments) * 2.0 * ::Math::PI
+        px1 = (cx + radius * ::Math.cos(a1)).round.to_i
+        py1 = (cy + radius * ::Math.sin(a1)).round.to_i
+        px2 = (cx + radius * ::Math.cos(a2)).round.to_i
+        py2 = (cy + radius * ::Math.sin(a2)).round.to_i
 
         emit_triangle(io, cx, cy, px1, py1, px2, py2, r, g, b, a)
       end
