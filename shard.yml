@@ -1,0 +1,19 @@
+name: citrine
+version: 0.1.0
+
+authors:
+  - sol-vin <ian@sol-vin.com>
+
+description: |
+  Crystal Virtual Machine & Raylib-style Game Development Toolkit for the Sony PlayStation 2 (PS2).
+  Compiles Crystal game code into compact Citrine Bytecode (.cbc) and executes on the PS2 Emotion Engine
+  with 128-bit QWORD values, 16KB Scratchpad RAM (SPRAM) register windows, zero-GC memory arenas,
+  built-in safety analyzers, performance HUD, and cradare2 debugging.
+
+license: MIT
+
+targets:
+  citrine:
+    main: src/citrine.cr
+
+crystal: ">= 1.10.0"

@@ -1,0 +1,2 @@
+# Pre-compiled PS2 runner ELF binary directory
+# citrine_runner.elf is built here using `make -C runtime`

@@ -1,0 +1,48 @@
+name: Citrine CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test & Build Citrine Toolkit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Crystal
+        uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: 1.14.0
+
+      - name: Install Shards
+        run: shards install --ignore-crystal-version
+
+      - name: Run Specs
+        run: crystal spec --error-trace
+
+      - name: Build Citrine CLI
+        run: |
+          mkdir -p bin
+          crystal build src/citrine.cr -o bin/citrine --release --no-debug
+
+      - name: Verify Example Bytecode Compilation
+        run: |
+          ./bin/citrine compile examples/01_hello_pad/main.cr -o examples/01_hello_pad/game.cbc
+          ./bin/citrine compile examples/02_shapes_and_text/main.cr -o examples/02_shapes_and_text/game.cbc
+          ./bin/citrine compile examples/03_entity_fibers/main.cr -o examples/03_entity_fibers/game.cbc
+          ./bin/citrine compile examples/04_safety_and_panic/main.cr -o examples/04_safety_and_panic/game.cbc
+
+      - name: Verify Disassembly of Examples
+        run: |
+          ./bin/citrine disasm examples/01_hello_pad/game.cbc
+          ./bin/citrine disasm examples/02_shapes_and_text/game.cbc
+
+      - name: Verify C Runtime Syntax
+        run: |
+          gcc -Wall -Wextra -std=c99 -fsyntax-only -DHOST_TEST_BUILD -Iruntime/include runtime/src/citrine_vm.c

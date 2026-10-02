@@ -1,0 +1,26 @@
+# Crystal artifacts
+/bin/
+/lib/
+/shard.lock
+*.dwarf
+*.pdb
+
+# Build output
+/build/
+*.cbc
+*.cbcsym
+*.elf
+*.iso
+*.o
+*.a
+*.exe
+
+# Testing / Scratch
+/scratch/
+/tmp/
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
