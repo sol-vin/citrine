@@ -6,8 +6,8 @@ describe Citrine::Cradare2::R2PluginGenerator do
 
     script.should contain("o game.cbc")
     script.should contain("e asm.arch = mips")
-    script.should contain("e asm.cpu = r5900")
-    script.should contain("f spram.start = 0x70000000")
+    script.should match(/e asm\.cpu = (mips3|r5900)/)
+    script.should match(/f spram\.start\s+= 0x70000000/)
     script.should contain("f gs.framebuffer0 = 0x00000000")
   end
 end

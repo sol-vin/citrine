@@ -343,8 +343,9 @@ module Citrine
       # Configure GS registers:
       emitter.lui(V1, 0x1200)
 
-      # GS_PMODE at 0x12000000: 0x0005 (Circuit 1 enable, Circuit 2 disable, CRTMD=1, MMOD=0 [pure direct scanout], AMOD=0, ALP=0)
-      emitter.ori(V0, ZERO, 0x0005)
+      # GS_PMODE at 0x12000000: 0xff65 (Circuit 1 enable, CRTMD=1, MMOD=1, AMOD=1, ALP=0xFF)
+      emitter.lui(V0, 0x0000)
+      emitter.ori(V0, V0, 0xff65)
       emitter.sd(V0, 0, V1)
 
       # GS_DISPFB1 at 0x12000070 and GS_DISPFB2 at 0x12000090: 0x1400 (FBP=0, FBW=10 [640 px], PSM=0 [PSMCT32])
@@ -352,12 +353,12 @@ module Citrine
       emitter.sd(V0, 0x70, V1)
       emitter.sd(V0, 0x90, V1)
 
-      # GS_DISPLAY1 at 0x12000080 and GS_DISPLAY2 at 0x120000A0: 0x001bf9ff01832290 (NTSC Field mode dy=50)
+      # GS_DISPLAY1 at 0x12000080 and GS_DISPLAY2 at 0x120000A0: 0x001bf9ff01824290 (NTSC Field mode dy=36 centered)
       emitter.lui(T1, 0x001b)
       emitter.ori(T1, T1, 0xf9ff)
       emitter.dsll32(T1, T1, 0)
-      emitter.lui(V0, 0x0183)
-      emitter.ori(V0, V0, 0x2290)
+      emitter.lui(V0, 0x0182)
+      emitter.ori(V0, V0, 0x4290)
       emitter.or_(T1, T1, V0)
       emitter.sd(T1, 0x80, V1)
       emitter.sd(T1, 0xa0, V1)
@@ -382,6 +383,12 @@ module Citrine
 
       # Frame Loop:
       emitter.label("frame_loop")
+      # Increment frame counter in SPRAM at 0x70000004
+      emitter.lui(T0, 0x7000)
+      emitter.lw(T1, 4, T0)
+      emitter.addiu(T1, T1, 1)
+      emitter.sw(T1, 4, T0)
+
       emitter.jal("dma02_wait")
       emitter.nop
       emitter.lui(T8, 0x1000)
@@ -775,12 +782,12 @@ module Citrine
       mem.write_bytes(0_u64, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x45_u64, IO::ByteFormat::LittleEndian)
 
-      # 12. TEST_1 (0x47): All pixel tests disabled (draw unconditionally)
-      mem.write_bytes(0_u64, IO::ByteFormat::LittleEndian)
+      # 12. TEST_1 (0x47): ZTE=1, ZTST=1 (ALLPASS - unconditional pass)
+      mem.write_bytes(0x00030000_u64, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x47_u64, IO::ByteFormat::LittleEndian)
 
-      # 13. TEST_2 (0x48): All pixel tests disabled
-      mem.write_bytes(0_u64, IO::ByteFormat::LittleEndian)
+      # 13. TEST_2 (0x48): ZTE=1, ZTST=1 (ALLPASS)
+      mem.write_bytes(0x00030000_u64, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x48_u64, IO::ByteFormat::LittleEndian)
 
       mem.to_slice
@@ -831,11 +838,11 @@ module Citrine
       gs_x1 = (x1 << 4) & 0xFFFF
       gs_y1 = (y1 << 4) & 0xFFFF
       io.write_bytes((gs_y1.to_u64 << 16) | gs_x1.to_u64, IO::ByteFormat::LittleEndian)
-      io.write_bytes(5_u64, IO::ByteFormat::LittleEndian)
+      io.write_bytes(0x0d_u64, IO::ByteFormat::LittleEndian) # Register 0x0D = XYZ3 (queue without kick)
       gs_x2 = (x2 << 4) & 0xFFFF
       gs_y2 = (y2 << 4) & 0xFFFF
       io.write_bytes((gs_y2.to_u64 << 16) | gs_x2.to_u64, IO::ByteFormat::LittleEndian)
-      io.write_bytes(5_u64, IO::ByteFormat::LittleEndian)
+      io.write_bytes(5_u64, IO::ByteFormat::LittleEndian)    # Register 0x05 = XYZ2 (queue and kick draw)
     end
 
     private def emit_text(io : IO::Memory, text : String, start_x : Int32, start_y : Int32, scale : Int32, r : UInt8, g : UInt8, b : UInt8) : Int32
