@@ -177,15 +177,15 @@ module Citrine
 
             # If panic was detected, terminate gracefully
             if @last_panic_message
-              process.terminate
-              status = process.wait
+              kill_process_tree(process)
+              status = process.wait rescue nil
               break
             end
           end
 
           unless process.terminated?
-            process.terminate
-            status = process.wait
+            kill_process_tree(process)
+            status = process.wait rescue nil
           end
         else
           # Interactive wait until user closes PCSX2
@@ -195,6 +195,15 @@ module Citrine
         stop_tailing = true
         @is_running = false
         status
+      end
+
+      private def kill_process_tree(process : Process)
+        return if process.terminated?
+        {% if flag?(:windows) %}
+          Process.run("taskkill", ["/F", "/T", "/PID", process.pid.to_s]) rescue nil
+        {% else %}
+          process.terminate rescue nil
+        {% end %}
       end
 
       private def check_for_faults(line : String)

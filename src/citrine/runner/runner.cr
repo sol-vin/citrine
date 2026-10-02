@@ -71,9 +71,12 @@ module Citrine
     end
 
     def build_iso(cbc_path : String, output_iso_path : String, extra_files : Hash(String, Bytes) = {} of String => Bytes) : String
-      ensure_runner_elf
-      elf_data = File.read(@runner_elf_path).to_slice
       cbc_data = File.read(cbc_path).to_slice
+      elf_data = if @runner_elf_path != "runtime/bin/citrine_runner.elf" && File.exists?(@runner_elf_path)
+                   File.read(@runner_elf_path).to_slice
+                 else
+                   ElfBuilder.build_default_runner_elf(cbc_data)
+                 end
       IsoBuilder.build(output_iso_path, cbc_data, elf_data, extra_files)
       output_iso_path
     end

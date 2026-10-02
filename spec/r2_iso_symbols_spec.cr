@@ -17,12 +17,13 @@ describe "Radare2 & PS2 ELF / ISO Symbol Inspection" do
     machine.should eq(8_u16)
 
     temp_elf = File.tempfile("citrine_test_elf", ".elf")
+    temp_elf.close
     File.write(temp_elf.path, elf_bytes)
 
     # Inspect using radare2 if r2 binary is available
     if Process.find_executable("r2")
       output = IO::Memory.new
-      Process.run("r2", ["-q", "-c", "is", temp_elf.path], output: output)
+      Process.run("r2", ["-q", "-c", "is", temp_elf.path], input: Process::Redirect::Close, output: output)
       symbols_text = output.to_s
 
       symbols_text.should contain("Citrine_VM_Run")
@@ -37,7 +38,7 @@ describe "Radare2 & PS2 ELF / ISO Symbol Inspection" do
 
       # Inspect sections
       sec_out = IO::Memory.new
-      Process.run("r2", ["-q", "-c", "iS", temp_elf.path], output: sec_out)
+      Process.run("r2", ["-q", "-c", "iS", temp_elf.path], input: Process::Redirect::Close, output: sec_out)
       sec_text = sec_out.to_s
       sec_text.should contain(".text")
       sec_text.should contain(".rodata")
@@ -52,6 +53,7 @@ describe "Radare2 & PS2 ELF / ISO Symbol Inspection" do
   it "packages Citrine bytecode into a valid ISO9660 image and verifies disc layout with r2" do
     sample_cbc = Bytes[0x43, 0x42, 0x43, 0x31, 0x01, 0x00, 0x00, 0x00] # CBC1 header
     temp_iso = File.tempfile("citrine_test", ".iso")
+    temp_iso.close
     Citrine::IsoBuilder.build(temp_iso.path, sample_cbc)
 
     iso_bytes = File.read(temp_iso.path).to_slice
@@ -88,7 +90,7 @@ describe "Radare2 & PS2 ELF / ISO Symbol Inspection" do
     # Inspect the ISO image with radare2
     if Process.find_executable("r2")
       output = IO::Memory.new
-      Process.run("r2", ["-q", "-c", "izz", temp_iso.path], output: output)
+      Process.run("r2", ["-q", "-c", "izz", temp_iso.path], input: Process::Redirect::Close, output: output)
       iso_strings = output.to_s
 
       iso_strings.should contain("CD001")

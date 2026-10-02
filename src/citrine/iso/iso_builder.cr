@@ -15,7 +15,7 @@ module Citrine
     end
 
     def build(output_path : String, cbc_bytes : Bytes, elf_bytes : Bytes? = nil, extra_files : Hash(String, Bytes) = {} of String => Bytes)
-      elf_data = elf_bytes || ElfBuilder.build_default_runner_elf
+      elf_data = elf_bytes || ElfBuilder.build_default_runner_elf(cbc_bytes)
 
       # Standard PS2 boot configuration
       system_cnf = "BOOT2 = cdrom0:\\CITRINE.ELF;1\r\nVER = 1.00\r\nVMODE = NTSC\r\n".to_slice

@@ -101,7 +101,7 @@ module Citrine
 
       def boot_pcsx2(timeout : ::Time::Span = 4.seconds) : Ps2ExecutionResult
         bytes, sm = compile
-        temp_iso = "tmp_spec_test.iso"
+        temp_iso = "tmp_spec_#{@name.gsub(/[^a-zA-Z0-9_]/, "_")}.iso"
         IsoBuilder.build(temp_iso, bytes)
 
         bridge = Debugger::Pcsx2Bridge.new
@@ -110,16 +110,19 @@ module Citrine
         panic_msg : String? = nil
         crash_rep : Debugger::CrashReport? = nil
 
-        status = bridge.spawn_pcsx2(temp_iso, batch: true, timeout: timeout) do |line|
-          lines << line
-          if rep = Debugger::CrashAnalyzer.analyze(line, sm)
-            panic_found = true
-            panic_msg = rep.message
-            crash_rep = rep
+        status : Process::Status? = nil
+        begin
+          status = bridge.spawn_pcsx2(temp_iso, batch: true, timeout: timeout) do |line|
+            lines << line
+            if rep = Debugger::CrashAnalyzer.analyze(line, sm)
+              panic_found = true
+              panic_msg = rep.message
+              crash_rep = rep
+            end
           end
+        ensure
+          File.delete(temp_iso) if File.exists?(temp_iso)
         end
-
-        File.delete(temp_iso) if File.exists?(temp_iso)
         canary_ok = !lines.any? { |l| l.includes?("SPRAM Stack Canary Corrupted") }
 
         Ps2ExecutionResult.new(
