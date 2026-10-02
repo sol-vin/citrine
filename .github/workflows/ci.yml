@@ -33,14 +33,15 @@ jobs:
       - name: Install Shards
         run: shards install --ignore-crystal-version
 
-      - name: Run Specs
-        run: crystal spec --error-trace
-
       - name: Build Citrine CLI
         shell: bash
         run: |
           mkdir -p bin
           crystal build src/citrine.cr -o bin/citrine --release --no-debug
+
+      - name: Run Specs
+        shell: bash
+        run: ./bin/citrine test
 
       - name: Verify All 16 Examples Bytecode Compilation (.cbc)
         shell: bash

@@ -39,13 +39,20 @@ module Citrine
           print "Running #{file_rel.ljust(45)} ... "
           STDOUT.flush
 
-          # Run spec process
-          status = Process.run("crystal", ["spec", spec_file])
+          # Run spec process with output capture for failure reporting
+          output = IO::Memory.new
+          error = IO::Memory.new
+          status = Process.run("crystal", ["spec", spec_file], output: output, error: error)
           if status.success?
             puts " [PASS]"
             passed_count += 1
           else
             puts " [FAIL]"
+            puts "\n" + ("-" * 60)
+            puts "Failure Output for #{file_rel}:"
+            puts output.to_s
+            puts error.to_s
+            puts ("-" * 60) + "\n"
             failed_count += 1
           end
         end
