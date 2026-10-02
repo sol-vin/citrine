@@ -92,6 +92,69 @@ typedef struct {
     uint8_t  dest_reg;
 } CallFrame;
 
+// Concurrency Scheduler Definitions
+typedef enum {
+    FIBER_FREE         = 0,
+    FIBER_READY        = 1,
+    FIBER_RUNNING      = 2,
+    FIBER_SLEEPING     = 3,
+    FIBER_WAITING_CHAN = 4,
+    FIBER_DEAD         = 5
+} FiberState;
+
+#define CITRINE_DEFAULT_MAX_FIBERS 64
+#define CITRINE_FIBER_STACK_MAX 16
+#define CITRINE_FIBER_REGS_MAX 64
+
+typedef struct {
+    uint32_t   id;
+    FiberState state;
+    uint32_t   pc;
+    uint8_t    call_depth;
+    CallFrame  call_stack[CITRINE_FIBER_STACK_MAX];
+    uint8_t    reg_count;
+    Value      saved_regs[CITRINE_FIBER_REGS_MAX];
+    float      sleep_timer;        // Seconds remaining
+    uint32_t   waiting_chan_id;    // Channel ID waiting on
+    bool       waiting_send;       // true if waiting to send, false if waiting to recv
+    Value      pending_send_val;   // Buffered value for pending send
+} CitrineFiber;
+
+#define CITRINE_DEFAULT_MAX_CHANNELS 32
+#define CITRINE_CHANNEL_BUFFER_CAP 32
+
+typedef struct {
+    uint32_t id;
+    bool     active;
+    uint32_t head;
+    uint32_t tail;
+    uint32_t count;
+    uint32_t capacity;
+    Value    buffer[CITRINE_CHANNEL_BUFFER_CAP];
+} CitrineChannel;
+
+typedef struct {
+    uint32_t        max_fibers;
+    CitrineFiber    fibers[CITRINE_DEFAULT_MAX_FIBERS];
+    uint32_t        current_fiber;
+    uint32_t        fiber_count;
+    uint32_t        next_fiber_id;
+
+    uint32_t        max_channels;
+    CitrineChannel  channels[CITRINE_DEFAULT_MAX_CHANNELS];
+    uint32_t        channel_count;
+    uint32_t        next_channel_id;
+} CitrineScheduler;
+
+// Compiled Function Header
+typedef struct {
+    uint32_t name_idx;
+    uint8_t  argc;
+    uint8_t  num_registers;
+    uint32_t code_offset;
+    uint32_t instruction_count;
+} CitrineFunction;
+
 // Zero-GC Arena Allocator
 typedef struct {
     uint8_t* buffer;
@@ -108,11 +171,18 @@ typedef struct {
     CallFrame       call_stack[64];
     uint32_t        call_depth;
     
+    // Function table
+    CitrineFunction* functions;
+    uint32_t        num_functions;
+
     // Constant & String pools
     Value*          constant_pool;
     uint32_t        num_constants;
     char**          string_pool;
     uint32_t        num_strings;
+
+    // Concurrency Scheduler
+    CitrineScheduler scheduler;
 
     // Memory Arenas
     Arena           frame_arena;    // Reset every frame at EndDrawing
@@ -134,6 +204,22 @@ void       citrine_vm_destroy(CitrineVM* vm);
 bool       citrine_vm_step(CitrineVM* vm);
 void       citrine_vm_run(CitrineVM* vm);
 void       citrine_vm_panic(CitrineVM* vm, const char* format, ...);
+
+// Concurrency Scheduler API
+uint32_t   citrine_scheduler_spawn(CitrineVM* vm, uint32_t func_idx, Value* args, uint8_t argc);
+void       citrine_scheduler_yield(CitrineVM* vm);
+void       citrine_scheduler_sleep(CitrineVM* vm, float seconds);
+void       citrine_scheduler_tick(CitrineVM* vm, float dt);
+uint32_t   citrine_scheduler_current_fiber(CitrineVM* vm);
+bool       citrine_scheduler_fiber_alive(CitrineVM* vm, uint32_t fiber_id);
+
+// Channel API
+uint32_t   citrine_channel_create(CitrineVM* vm, uint32_t capacity);
+bool       citrine_channel_send(CitrineVM* vm, uint32_t chan_id, Value val);
+bool       citrine_channel_receive(CitrineVM* vm, uint32_t chan_id, Value* out_val);
+bool       citrine_channel_try_receive(CitrineVM* vm, uint32_t chan_id, Value* out_val);
+uint32_t   citrine_channel_count(CitrineVM* vm, uint32_t chan_id);
+uint32_t   citrine_channel_capacity(CitrineVM* vm, uint32_t chan_id);
 
 #ifdef __cplusplus
 }

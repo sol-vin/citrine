@@ -1,0 +1,62 @@
+id: CONCURRENCY
+title: Cooperative Concurrency & CSP Channels
+summary: Microsecond coroutines, bounded CSP channels, zero dynamic allocation, and safety on the PS2 Emotion Engine.
+track: 07_concurrency
+overview: |
+  Citrine implements a high-performance, cooperative fiber scheduler and CSP (Communicating Sequential Processes)
+  channel architecture tailored specifically for the PlayStation 2 Emotion Engine. With zero dynamic heap allocations,
+  deterministic context switches, and static register budgeting, Citrine allows developers to write clean, concurrent
+  game entity code and background worker pools without risking frame drops or garbage collection stalls.
+related_sources:
+  - "runtime/include/citrine_vm.h"
+  - "runtime/src/citrine_vm.c"
+  - "src/citrine/compiler/bytecode_compiler.cr"
+  - "src/citrine/compiler/budget_checker.cr"
+  - "src/stubs/citrine.cr"
+sections:
+  - id: fiber_architecture
+    title: Fiber Architecture & Context Switching
+    summary: Zero-GC cooperative fibers with pre-allocated register state.
+    content: |
+      The Citrine scheduler supports up to 64 concurrent fibers (configurable up to 256). Each fiber has:
+      - 64 pre-allocated 128-bit QWORD saved registers (`Value saved_regs[64]`).
+      - Call frame stack for nested subroutines up to 16 depth.
+      - Cooperative yielding via `Citrine.yield` or `Citrine.sleep(seconds)`.
+
+      ```crystal
+      # Spawning autonomous entity fibers
+      Citrine.spawn do
+        while true
+          # AI logic or background task
+          Citrine.yield
+        end
+      end
+      ```
+
+      Context switches occur in sub-microsecond cycles by swapping the Emotion Engine SPRAM register window.
+  - id: csp_channels
+    title: Bounded CSP Channels
+    summary: Lock-free ring buffer communication between fibers.
+    content: |
+      Fibers communicate without shared mutable state using CSP channels:
+      ```crystal
+      channel = Citrine::Channel(Int32).new(32)
+
+      Citrine.spawn do
+        channel.send(42)
+      end
+
+      # In main thread or worker:
+      if msg = channel.try_receive
+        puts "Received: #{msg}"
+      end
+      ```
+      All channel message buffers are pre-allocated statically in a 32-element ring buffer. Sending or receiving never triggers heap allocation.
+  - id: safety_and_pitfalls
+    title: Safety Checker, Watchdogs & Pitfalls
+    summary: Hardware limits, watchdog timeouts, and common concurrency pitfalls.
+    content: |
+      **Critical Pitfalls to Avoid:**
+      1. **Tight Non-Yielding Loops:** A fiber that loops without calling `Citrine.yield` or `Citrine.sleep` will starve all other fibers. Citrine enforces an **Instruction Watchdog** of 5,000,000 instructions per frame—exceeding this triggers a hardware panic.
+      2. **Channel Capacity Exceeded:** Sending to a full channel with `channel.send` when full will yield the fiber until a slot is freed.
+      3. **SPRAM Register Overflow:** The static budget checker verifies that maximum concurrent fibers multiplied by peak register footprints fit within safe Emotion Engine memory boundaries.

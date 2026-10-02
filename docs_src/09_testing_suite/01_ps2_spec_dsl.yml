@@ -1,0 +1,46 @@
+id: TESTING_SUITE
+title: PS2 Hardware Testing Suite & Spec DSL
+summary: Automated PCSX2 testing suite with hardware matchers, SPRAM corruption detection, and crash symbolication.
+track: 09_testing_suite
+overview: |
+  Citrine introduces a first-class testing suite DSL (`Citrine::Spec`) designed specifically for PlayStation 2 development.
+  The test runner executes tests by compiling code into bytecode, building a bootable ISO, and supervising PCSX2 execution
+  in headless batch mode with millisecond assertion checks.
+related_sources:
+  - "src/citrine/spec/ps2_spec.cr"
+  - "src/citrine/cli/test_command.cr"
+  - "src/citrine/debugger/pcsx2_bridge.cr"
+  - "src/citrine/debugger/crash_analyzer.cr"
+sections:
+  - id: spec_dsl
+    title: Hardware Assertion Matchers
+    summary: Matchers for boot cleanliness, SPRAM canaries, and hardware panics.
+    content: |
+      Tests use custom hardware matchers:
+      - `should_boot_cleanly`: Asserts that the game initializes without VM panic or kernel exception.
+      - `should_preserve_spram`: Asserts that the SPRAM stack canary (`0xDEADBEEF`) remains uncorrupted.
+      - `should_have_output(text)`: Validates that EEConsole logs contain expected telemetry.
+      - `should_panic_with(msg)`: Validates deliberate panic paths (e.g. testing error boundaries).
+
+      ```crystal
+      require "citrine/spec/ps2_spec"
+
+      ps2_spec "Player Movement & SPRAM Safety" do |t|
+        t.target("examples/01_hello_pad/main.cr")
+        result = t.boot_pcsx2(timeout: 2.seconds)
+        result.should_boot_cleanly
+        result.should_preserve_spram
+      end
+      ```
+  - id: test_command
+    title: Running Tests
+    summary: The citrine test CLI command.
+    content: |
+      Execute test suites individually or across entire directories:
+      ```bash
+      # Run all PS2 specs
+      citrine test spec/ps2/
+
+      # Run an individual spec
+      citrine test spec/ps2/examples_ps2_spec.cr
+      ```

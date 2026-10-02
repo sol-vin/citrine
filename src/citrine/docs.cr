@@ -9,7 +9,7 @@ module Citrine
   #
   # ## Learning Tracks & Topic Index
   #
-  # The documentation is paced into 6 distinct tracks:
+  # The documentation is paced into 9 distinct tracks:
   #
   # ### 1. Getting started (`A_GETTING_STARTED`)
   # <table>
@@ -119,6 +119,60 @@ module Citrine
   #   </tbody>
   # </table>
   #
+  # ### 7. Concurrency (`G_CONCURRENCY`)
+  # <table>
+  #   <thead>
+  #     <tr>
+  #       <th>Submodule</th>
+  #       <th>Title</th>
+  #       <th>Description</th>
+  #     </tr>
+  #   </thead>
+  #   <tbody>
+  #     <tr>
+  #       <td><code>CONCURRENCY</code></td>
+  #       <td><strong>Cooperative Concurrency & CSP Channels</strong></td>
+  #       <td>Microsecond coroutines, bounded CSP channels, zero dynamic allocation, and safety on the PS2 Emotion Engine.</td>
+  #     </tr>
+  #   </tbody>
+  # </table>
+  #
+  # ### 8. Media pipeline (`H_MEDIA_PIPELINE`)
+  # <table>
+  #   <thead>
+  #     <tr>
+  #       <th>Submodule</th>
+  #       <th>Title</th>
+  #       <th>Description</th>
+  #     </tr>
+  #   </thead>
+  #   <tbody>
+  #     <tr>
+  #       <td><code>MEDIA_PIPELINE</code></td>
+  #       <td><strong>Flourite Universal Media Pipeline</strong></td>
+  #       <td>FFmpeg-powered transcoding for PS2 IPU video streaming, SPU2 ADPCM audio, and GS CLUT paletted textures.</td>
+  #     </tr>
+  #   </tbody>
+  # </table>
+  #
+  # ### 9. Testing suite (`I_TESTING_SUITE`)
+  # <table>
+  #   <thead>
+  #     <tr>
+  #       <th>Submodule</th>
+  #       <th>Title</th>
+  #       <th>Description</th>
+  #     </tr>
+  #   </thead>
+  #   <tbody>
+  #     <tr>
+  #       <td><code>TESTING_SUITE</code></td>
+  #       <td><strong>PS2 Hardware Testing Suite & Spec DSL</strong></td>
+  #       <td>Automated PCSX2 testing suite with hardware matchers, SPRAM corruption detection, and crash symbolication.</td>
+  #     </tr>
+  #   </tbody>
+  # </table>
+  #
   module Docs
     # **Quick-Start Commands**: Essential commands for building, running, and testing.
     #
@@ -153,6 +207,15 @@ module Citrine
     # ##### 6. Debugging (`F_DEBUGGING`)
     # - `F_DEBUGGING::DEBUGGING`: **Debugging with Radare2 & PCSX2** &mdash; Disassembly, SPRAM memory inspection, GDB stub debugging, and symbol exploration.
     #
+    # ##### 7. Concurrency (`G_CONCURRENCY`)
+    # - `G_CONCURRENCY::CONCURRENCY`: **Cooperative Concurrency & CSP Channels** &mdash; Microsecond coroutines, bounded CSP channels, zero dynamic allocation, and safety on the PS2 Emotion Engine.
+    #
+    # ##### 8. Media pipeline (`H_MEDIA_PIPELINE`)
+    # - `H_MEDIA_PIPELINE::MEDIA_PIPELINE`: **Flourite Universal Media Pipeline** &mdash; FFmpeg-powered transcoding for PS2 IPU video streaming, SPU2 ADPCM audio, and GS CLUT paletted textures.
+    #
+    # ##### 9. Testing suite (`I_TESTING_SUITE`)
+    # - `I_TESTING_SUITE::TESTING_SUITE`: **PS2 Hardware Testing Suite & Spec DSL** &mdash; Automated PCSX2 testing suite with hardware matchers, SPRAM corruption detection, and crash symbolication.
+    #
     def self.topic_02_reading_paths : Nil; end
 
     # **Master Table of Contents**: Complete hierarchical topic index.
@@ -177,6 +240,15 @@ module Citrine
     # ##### `F_DEBUGGING`
     # - `F_DEBUGGING::DEBUGGING`: **Debugging with Radare2 & PCSX2** &mdash; Disassembly, SPRAM memory inspection, GDB stub debugging, and symbol exploration.
     #
+    # ##### `G_CONCURRENCY`
+    # - `G_CONCURRENCY::CONCURRENCY`: **Cooperative Concurrency & CSP Channels** &mdash; Microsecond coroutines, bounded CSP channels, zero dynamic allocation, and safety on the PS2 Emotion Engine.
+    #
+    # ##### `H_MEDIA_PIPELINE`
+    # - `H_MEDIA_PIPELINE::MEDIA_PIPELINE`: **Flourite Universal Media Pipeline** &mdash; FFmpeg-powered transcoding for PS2 IPU video streaming, SPU2 ADPCM audio, and GS CLUT paletted textures.
+    #
+    # ##### `I_TESTING_SUITE`
+    # - `I_TESTING_SUITE::TESTING_SUITE`: **PS2 Hardware Testing Suite & Spec DSL** &mdash; Automated PCSX2 testing suite with hardware matchers, SPRAM corruption detection, and crash symbolication.
+    #
     def self.topic_03_table_of_contents : Nil; end
 
     # :nodoc:
@@ -194,6 +266,9 @@ require "./docs/c_virtual_machine/virtual_machine"
 require "./docs/d_raylib_api/raylib_api"
 require "./docs/e_asset_pipeline/asset_pipeline"
 require "./docs/f_debugging/debugging"
+require "./docs/g_concurrency/concurrency"
+require "./docs/h_media_pipeline/media_pipeline"
+require "./docs/i_testing_suite/testing_suite"
 
 alias CitrineDocs = ::Citrine::Docs
 {% end %}

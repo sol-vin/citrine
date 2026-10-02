@@ -42,11 +42,26 @@ module Citrine
     ButtonReleased  = 42
     GetAnalog       = 43
     SetRumble       = 44
-    LoadSound       = 50
-    PlaySound       = 51
-    StopSound       = 52
+    LoadSound       = 35
+    PlaySound       = 36
+    StopSound       = 37
     SetDebugOverlay = 60
+    Sleep           = 65
+    FiberId         = 66
+    FiberAlive      = 67
     Log             = 70
+    ChannelNew      = 80
+    ChannelSend     = 81
+    ChannelReceive  = 82
+    ChannelTryReceive = 83
+    ChannelCount    = 84
+    ChannelCapacity = 85
+    LoadVideo       = 90
+    PlayVideo       = 91
+    DrawVideoFrame  = 92
+    VideoFinished   = 93
+    PauseVideo      = 94
+    StopVideo       = 95
     Panic           = 99
   end
 

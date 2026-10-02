@@ -145,6 +145,10 @@ module Citrine
         TextureAsset.new(texture.width, texture.height, GSColorFormat::PSMT8, indices, palette)
       end
 
+      def self.to_paletted_8bit(texture : TextureAsset) : TextureAsset
+        to_psmt8(texture)
+      end
+
       # Serializes to Citrine Binary Texture (.cbt) for PS2
       def self.export_cbt(texture : TextureAsset) : Bytes
         io = IO::Memory.new

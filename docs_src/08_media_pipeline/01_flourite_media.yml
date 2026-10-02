@@ -1,0 +1,51 @@
+id: MEDIA_PIPELINE
+title: Flourite Universal Media Pipeline
+summary: FFmpeg-powered transcoding for PS2 IPU video streaming, SPU2 ADPCM audio, and GS CLUT paletted textures.
+track: 08_media_pipeline
+overview: |
+  Citrine integrates Flourite (`sol-vin/flourite`), modern Crystal bindings for FFmpeg, to provide a zero-effort
+  media import pipeline. Any sound file (MP3, WAV, FLAC, OGG, AAC), video format (MP4, MKV, AVI, MOV), or image
+  can be transcoded into optimized PlayStation 2 native hardware formats with a single command.
+related_sources:
+  - "src/citrine/importers/flourite_media.cr"
+  - "src/citrine/cli/import_command.cr"
+  - "runtime/include/citrine_video.h"
+  - "runtime/include/citrine_audio.h"
+sections:
+  - id: video_optimization
+    title: 15 FPS Video Downsampling & The DVD Video Track Trick
+    summary: Optimizing FMVs to stream under 4x DVD-ROM transfer limits.
+    content: |
+      The PS2 DVD-ROM drive reads at 4x speed (~5.28 MB/s), but sustained real-time video streaming must not
+      starve the Emotion Engine or IOP DMA buffers.
+      - **15 FPS Downsampling:** Downsampling 30/60 FPS video to 15 FPS reduces data rates by 50-75% (to ~1.8 MB/s),
+        allowing smooth MPEG-2 streaming to the IPU without disc read stuttering.
+      - **The DVD Video Track Trick:** Using `--dvd-track`, Citrine generates a sector-aligned MPEG-2 Program Stream
+        (2048 bytes/sector) with GOP boundaries. This stream can be mapped into raw, unlisted DVD sectors outside
+        the ISO9660 directory structure and streamed directly using low-level `sceCdRead` LBA sector calls,
+        protecting FMVs from casual inspection and eliminating filesystem traversal overhead.
+
+      ```bash
+      citrine import video intro.mp4 -o assets/intro.pss --fps 15 --dvd-track
+      ```
+  - id: spu2_audio
+    title: SPU2 4-Bit ADPCM (VAG) Encoding
+    summary: 4:1 hardware compression saving 75% sound RAM.
+    content: |
+      The PS2 Sound Processing Unit 2 (SPU2) features 2MB of dedicated sound memory. Citrine uses Flourite to resample
+      audio to 22.05kHz mono/stereo and encodes it into 16-byte Sony ADPCM blocks (28 4-bit nibbles per block).
+      This achieves 4:1 compression over 16-bit PCM, saving 75% of SPU2 RAM.
+      ```bash
+      citrine import audio bgm.mp3 -o assets/bgm.vag --rate 22050 --loop
+      ```
+  - id: gs_clut_textures
+    title: GS Paletted CLUT Textures
+    summary: CLUT8 and CLUT4 color quantization for 4MB GS eDRAM.
+    content: |
+      The Graphics Synthesizer has only 4MB of embedded memory. 32-bit RGBA textures rapidly consume VRAM.
+      Citrine converts images to paletted indexed textures:
+      - **CLUT8 (PSMT8):** 1 byte per pixel + 256 color palette (75% VRAM savings).
+      - **CLUT4 (PSMT4):** 0.5 bytes per pixel + 16 color palette (87.5% VRAM savings).
+      ```bash
+      citrine import texture hero.png -o assets/hero.cbt --clut 8
+      ```

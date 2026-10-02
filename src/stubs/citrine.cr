@@ -106,16 +106,14 @@ struct Texture
   end
 end
 
-class Fiber
-  property id : UInt32
-
-  def initialize(@id : UInt32)
-  end
-
-  def resume
-    # Resumes execution in Citrine-VM
-  end
+def spawn(&block) : Citrine::Fiber
+  Citrine.spawn(&block)
 end
+
+def sleep(seconds : Number)
+  Citrine.sleep(seconds)
+end
+
 
 module Citrine
   # Display & Window Management
@@ -238,12 +236,187 @@ module Citrine
   def self.stop_sound(sound_id : UInt32)
   end
 
-  # Coroutines / Fibers
-  def self.spawn(&block) : Fiber
-    Fiber.new(1_u32)
+  # Video (IPU MPEG-2 / PSS)
+  def self.load_video(path : String) : UInt32
+    1_u32
+  end
+
+  def self.play_video(video_id : UInt32, loop : Bool = false) : Bool
+    true
+  end
+
+  def self.draw_video_frame(video_id : UInt32, x : Number, y : Number, width : Number, height : Number)
+  end
+
+  def self.video_finished?(video_id : UInt32) : Bool
+    false
+  end
+
+  def self.pause_video(video_id : UInt32)
+  end
+
+  def self.stop_video(video_id : UInt32)
+  end
+
+  # Coroutines & Concurrency
+  # Fiber Class
+  class Fiber
+    property id : UInt32
+
+    def initialize(@id : UInt32 = 0_u32)
+    end
+
+    def self.yield
+      Citrine.yield
+    end
+
+    def self.current_id : UInt32
+      Citrine.fiber_id
+    end
+
+    def self.alive?(id : UInt32) : Bool
+      Citrine.fiber_alive?(id)
+    end
+
+    def alive? : Bool
+      Citrine.fiber_alive?(@id)
+    end
+
+    def resume
+    end
+  end
+
+  def self.spawn(&block) : Citrine::Fiber
+    Citrine::Fiber.new(1_u32)
   end
 
   def self.yield
+  end
+
+  def self.sleep(seconds : Number)
+  end
+
+  def self.fiber_id : UInt32
+    0_u32
+  end
+
+  def self.fiber_alive?(id : UInt32) : Bool
+    true
+  end
+
+  # Channel Native Primitives & Citrine::Channel Class
+  class Channel(T)
+    getter capacity : Int32
+    getter handle : UInt32
+
+    def initialize(@capacity : Int32 = 32)
+      @handle = Citrine.channel_new(@capacity)
+    end
+
+    def send(value : T) : Bool
+      Citrine.channel_send(@handle, value)
+    end
+
+    def receive : T?
+      Citrine.channel_receive(@handle).as?(T)
+    end
+
+    def try_receive : T?
+      Citrine.channel_try_receive(@handle).as?(T)
+    end
+
+    def size : Int32
+      Citrine.channel_count(@handle)
+    end
+
+    def count : Int32
+      size
+    end
+
+    def empty? : Bool
+      size == 0
+    end
+
+    def full? : Bool
+      size >= @capacity
+    end
+  end
+
+  def self.channel_new(capacity : Int32 = 32) : UInt32
+    1_u32
+  end
+
+  def self.channel_send(handle : UInt32, value) : Bool
+    true
+  end
+
+  def self.channel_receive(handle : UInt32)
+    nil
+  end
+
+  def self.channel_try_receive(handle : UInt32)
+    nil
+  end
+
+  def self.channel_count(handle : UInt32) : Int32
+    0
+  end
+
+  def self.channel_capacity(handle : UInt32) : Int32
+    32
+  end
+
+  # High-level Concurrency Helpers
+  module Concurrency
+    class WorkerPool(T)
+      getter in_channel : Citrine::Channel(T)
+      getter worker_fibers : Array(Citrine::Fiber)
+
+      def initialize(worker_count : Int32, capacity : Int32 = 32, &block : T -> Nil)
+        @in_channel = Citrine::Channel(T).new(capacity)
+        @worker_fibers = [] of Citrine::Fiber
+        worker_count.times do
+          fib = Citrine.spawn do
+            while true
+              if item = @in_channel.receive
+                block.call(item)
+              else
+                Citrine.yield
+              end
+            end
+          end
+          @worker_fibers << fib
+        end
+      end
+
+      def post(item : T) : Bool
+        @in_channel.send(item)
+      end
+
+      def active_workers : Int32
+        @worker_fibers.count(&.alive?)
+      end
+    end
+
+    def self.fan_out(input_channel : Citrine::Channel(T), worker_count : Int32, &worker_block : T -> Nil) forall T
+      worker_count.times do
+        Citrine.spawn do
+          while true
+            if item = input_channel.receive
+              worker_block.call(item)
+            else
+              Citrine.yield
+            end
+          end
+        end
+      end
+    end
+
+    def self.broadcast(channels : Array(Citrine::Channel(T)), value : T) forall T
+      channels.each do |ch|
+        ch.send(value)
+      end
+    end
   end
 
   # Diagnostics & Safety

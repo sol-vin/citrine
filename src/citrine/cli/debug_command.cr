@@ -1,22 +1,143 @@
 require "../cradare2/plugin"
 require "../compiler/source_map"
+require "../parser/dsl_parser"
+require "../compiler/bytecode_compiler"
+require "../iso/elf_builder"
+require "../iso/iso_builder"
+require "../debugger/pcsx2_bridge"
+require "../debugger/crash_analyzer"
 
 module Citrine
   module CLI
     class DebugCommand
       def self.run(args : Array(String))
-        target_cbc = args.find { |a| a.ends_with?(".cbc") } || "game.cbc"
+        target = args.reject(&.starts_with?("-")).first?
+
+        is_ci = args.includes?("--ci") || args.includes?("--batch")
+        with_r2 = args.includes?("--r2")
+        no_break = args.includes?("--no-break") || args.includes?("--run")
         port = 1234
         if idx = args.index("--port")
           port = args[idx + 1]?.try(&.to_i?) || 1234
         end
 
-        puts "[Citrine Debugger] Preparing radare2 debugging session for #{target_cbc} (port #{port})..."
+        timeout_sec = 10.0
+        if idx = args.index("--timeout")
+          timeout_sec = args[idx + 1]?.try(&.to_f?) || 10.0
+        end
 
-        # Generate custom radare2 script
-        sym_file = target_cbc.gsub(/\.cbc$/, ".cbcsym")
+        iso_path, source_map = prepare_target(target)
+
+        puts "[Citrine Debugger] Target ISO: #{iso_path}"
+        bridge = Debugger::Pcsx2Bridge.new
+
+        unless bridge.pcsx2_path
+          puts "\n[Citrine Debugger] Warning: PCSX2 executable not found in standard paths."
+          puts "You can still run radare2 GDB client manually against port #{port}:"
+          generate_r2_script(iso_path, port, source_map)
+          return
+        end
+
+        puts "[Citrine Debugger] Using PCSX2 at: #{bridge.pcsx2_path}"
+        bridge.ensure_logging_configured
+
+        if with_r2
+          generate_r2_script(iso_path, port, source_map)
+          puts "[Citrine Debugger] radare2 script 'citrine_r2.rc' prepared."
+        end
+
+        puts "[Citrine Debugger] Launching PCSX2 in supervised debug mode..."
+        if is_ci
+          puts "[Citrine Debugger] Running in headless CI verification mode (timeout: #{timeout_sec}s)..."
+        end
+
+        crash_detected = false
+        timeout = is_ci ? timeout_sec.seconds : nil
+
+        bridge.spawn_pcsx2(
+          iso_path: iso_path,
+          batch: is_ci,
+          debugger_gui: !no_break && !is_ci,
+          timeout: timeout
+        ) do |line|
+          if line.includes?("[Citrine") || line.includes?("PANIC") || line.includes?("Watchdog") || line.includes?("Exception")
+            puts " [PS2 EE] #{line}"
+          end
+
+          if report = Debugger::CrashAnalyzer.analyze(line, source_map)
+            crash_detected = true
+            STDERR.puts report.render
+          end
+        end
+
+        if crash_detected
+          STDERR.puts "\n[Citrine Debugger] FAILED: Hardware crash or panic detected during execution."
+          exit(1) if is_ci
+        elsif is_ci
+          puts "\n[Citrine Debugger] PASSED: No hardware crashes or panics detected (#{timeout_sec}s test run clean)."
+        end
+      end
+
+      private def self.prepare_target(target : String?) : Tuple(String, SourceMap?)
+        # If target is nil, look for main.cr, game.cbc, or game.iso in current directory
+        resolved = target
+        unless resolved
+          if File.exists?("main.cr")
+            resolved = "main.cr"
+          elsif File.exists?("game.iso")
+            resolved = "game.iso"
+          elsif File.exists?("game.cbc")
+            resolved = "game.cbc"
+          else
+            resolved = "main.cr"
+          end
+        end
+
+        source_map : SourceMap? = nil
+
+        if resolved.ends_with?(".cr")
+          puts "[Citrine Debugger] Compiling Crystal source: #{resolved}..."
+          source = File.read(resolved)
+          parser = DslParser.new(resolved)
+          program = parser.parse(source)
+
+          compiler = BytecodeCompiler.new(resolved)
+          cbc_bytes = compiler.compile(program)
+          source_map = compiler.source_map
+
+          cbc_path = resolved.gsub(/\.cr$/, ".cbc")
+          sym_path = resolved.gsub(/\.cr$/, ".cbcsym")
+          File.write(cbc_path, cbc_bytes)
+          source_map.save(sym_path)
+
+          iso_path = resolved.gsub(/\.cr$/, ".iso")
+          puts "[Citrine Debugger] Packaging bootable ISO: #{iso_path}..."
+          IsoBuilder.build(iso_path, cbc_bytes)
+          return {iso_path, source_map}
+
+        elsif resolved.ends_with?(".cbc")
+          cbc_bytes = File.read(resolved).to_slice
+          sym_path = resolved.gsub(/\.cbc$/, ".cbcsym")
+          if File.exists?(sym_path)
+            source_map = SourceMap.from_file(sym_path)
+          end
+
+          iso_path = resolved.gsub(/\.cbc$/, ".iso")
+          IsoBuilder.build(iso_path, cbc_bytes)
+          return {iso_path, source_map}
+
+        else
+          # Assume ISO
+          sym_path = resolved.gsub(/\.iso$/, ".cbcsym")
+          if File.exists?(sym_path)
+            source_map = SourceMap.from_file(sym_path)
+          end
+          return {resolved, source_map}
+        end
+      end
+
+      private def self.generate_r2_script(target : String, port : Int32, source_map : SourceMap?)
         rc_path = "citrine_r2.rc"
-
         io = IO::Memory.new
         io.puts "#!/usr/bin/env r2 -i"
         io.puts "# Auto-generated Citrine PS2 Radare2 Script"
@@ -32,35 +153,19 @@ module Citrine
         io.puts "f gs.fb1      = 0x00080000"
         io.puts "f gs.zbuf     = 0x00100000"
 
-        # Macros for Emotion Engine & SPRAM inspection
-        io.puts "\n# Custom Macro: (spram <idx>) to inspect 16-byte Value in SPRAM"
+        io.puts "\n# Macros for Emotion Engine & SPRAM inspection"
         io.puts "(spram idx, px 16 @ 0x70000000 + ($0 * 16))"
         io.puts "(ee_regs, dr)"
 
-        # Load Source Map symbols
-        if File.exists?(sym_file)
-          sm = SourceMap.from_file(sym_file)
+        if source_map
           io.puts "\n# Crystal Source Map Markers"
-          sm.locations.each do |offset, loc|
+          source_map.locations.each do |offset, loc|
             addr = offset * 4
             io.puts "CC #{File.basename(loc.file)}:#{loc.line} @ #{addr}"
           end
         end
 
         File.write(rc_path, io.to_s)
-        puts "[Citrine Debugger] Generated #{rc_path}."
-
-        # Check if radare2 is installed
-        r2_bin = Process.find_executable("r2") || Process.find_executable("radare2")
-        if r2_bin
-          puts "[Citrine Debugger] Launching radare2 connected to gdb://127.0.0.1:#{port}..."
-          puts "Tip: In radare2, type 'V' for Visual Mode, 'dr' for registers, or '.(spram 0)' to inspect SPRAM R0."
-          Process.run(r2_bin, ["-d", "gdb://127.0.0.1:#{port}", "-i", rc_path])
-        else
-          puts "[Citrine Debugger] 'r2' (radare2) executable not found in PATH."
-          puts "You can connect manually by running:"
-          puts "  r2 -d gdb://127.0.0.1:#{port} -i #{rc_path}"
-        end
       end
     end
   end

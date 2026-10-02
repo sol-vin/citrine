@@ -8,6 +8,7 @@
 #include "../include/citrine_draw3d.h"
 #include "../include/citrine_input.h"
 #include "../include/citrine_audio.h"
+#include "../include/citrine_video.h"
 #include "../include/citrine_hud.h"
 #include "../include/citrine_panic.h"
 
@@ -82,15 +83,19 @@ CitrineVM* citrine_vm_create(const uint8_t* cbc_data, size_t cbc_size) {
         }
     }
 
-    // Read function table to locate entrypoint (main is the last function)
+    // Read function table
+    vm->num_functions = num_funcs;
+    if (num_funcs > 0) {
+        vm->functions = (CitrineFunction*)calloc(num_funcs, sizeof(CitrineFunction));
+    }
     uint32_t main_code_offset = 0;
     for (uint32_t i = 0; i < num_funcs; i++) {
-        ptr += 4; // name_idx
-        ptr += 1; // argc
-        ptr += 1; // num_registers
-        uint32_t offset = *(uint32_t*)ptr; ptr += 4;
-        ptr += 4; // count
-        main_code_offset = offset;
+        vm->functions[i].name_idx = *(uint32_t*)ptr; ptr += 4;
+        vm->functions[i].argc = *ptr++;
+        vm->functions[i].num_registers = *ptr++;
+        vm->functions[i].code_offset = *(uint32_t*)ptr; ptr += 4;
+        vm->functions[i].instruction_count = *(uint32_t*)ptr; ptr += 4;
+        main_code_offset = vm->functions[i].code_offset;
     }
 
     // Bytecode instructions start here
@@ -102,6 +107,21 @@ CitrineVM* citrine_vm_create(const uint8_t* cbc_data, size_t cbc_size) {
     vm->spram_regs = SPRAM_BASE;
     memset(vm->spram_regs, 0, sizeof(Value) * MAX_SPRAM_REGISTERS);
     vm->spram_regs[1023].flags = SPRAM_CANARY_VALUE; // SPRAM Stack Canary
+
+    // Initialize Concurrency Scheduler
+    vm->scheduler.max_fibers = CITRINE_DEFAULT_MAX_FIBERS;
+    vm->scheduler.max_channels = CITRINE_DEFAULT_MAX_CHANNELS;
+    vm->scheduler.next_fiber_id = 1;
+    vm->scheduler.current_fiber = 0;
+    vm->scheduler.fiber_count = 1;
+    vm->scheduler.next_channel_id = 1;
+
+    CitrineFiber* main_fib = &vm->scheduler.fibers[0];
+    main_fib->id = 0;
+    main_fib->state = FIBER_RUNNING;
+    main_fib->pc = main_code_offset;
+    main_fib->reg_count = (num_funcs > 0) ? vm->functions[num_funcs - 1].num_registers : 32;
+    main_fib->call_depth = 0;
 
     // Initialize Memory Arenas
     vm->frame_arena.capacity = 512 * 1024; // 512 KB
@@ -119,6 +139,7 @@ CitrineVM* citrine_vm_create(const uint8_t* cbc_data, size_t cbc_size) {
 
 void citrine_vm_destroy(CitrineVM* vm) {
     if (!vm) return;
+    if (vm->functions) free(vm->functions);
     if (vm->frame_arena.buffer) free(vm->frame_arena.buffer);
     if (vm->level_arena.buffer) free(vm->level_arena.buffer);
     if (vm->string_pool) {
@@ -131,6 +152,12 @@ void citrine_vm_destroy(CitrineVM* vm) {
     free(vm);
 }
 
+bool citrine_vm_step(CitrineVM* vm) {
+    if (!vm || vm->panic_triggered) return false;
+    citrine_vm_run(vm);
+    return !vm->panic_triggered;
+}
+
 void citrine_vm_panic(CitrineVM* vm, const char* format, ...) {
     vm->panic_triggered = true;
     va_list args;
@@ -140,6 +167,305 @@ void citrine_vm_panic(CitrineVM* vm, const char* format, ...) {
 
     fprintf(stderr, "\n[CITRINE PANIC] %s (at PC: %04u)\n", vm->panic_message, vm->pc);
     Citrine_Panic_Trigger(vm, "Citrine-VM Hardware Panic", vm->panic_message, "unknown", 0);
+}
+
+// ----------------------------------------------------------------------------
+// Citrine Concurrency Scheduler & Channel Subsystem
+// ----------------------------------------------------------------------------
+
+void citrine_scheduler_tick(CitrineVM* vm, float dt) {
+    if (!vm) return;
+    for (uint32_t i = 0; i < vm->scheduler.max_fibers; i++) {
+        CitrineFiber* fib = &vm->scheduler.fibers[i];
+        if (fib->state == FIBER_SLEEPING) {
+            fib->sleep_timer -= dt;
+            if (fib->sleep_timer <= 0.0f) {
+                fib->sleep_timer = 0.0f;
+                fib->state = FIBER_READY;
+            }
+        }
+    }
+}
+
+uint32_t citrine_scheduler_spawn(CitrineVM* vm, uint32_t func_idx, Value* args, uint8_t argc) {
+    if (!vm || func_idx >= vm->num_functions) return 0;
+
+    for (uint32_t i = 1; i < vm->scheduler.max_fibers; i++) {
+        CitrineFiber* fib = &vm->scheduler.fibers[i];
+        if (fib->state == FIBER_FREE || fib->state == FIBER_DEAD) {
+            fib->id = vm->scheduler.next_fiber_id++;
+            fib->state = FIBER_READY;
+            fib->pc = vm->functions[func_idx].code_offset;
+            fib->call_depth = 0;
+            fib->reg_count = vm->functions[func_idx].num_registers;
+            fib->sleep_timer = 0.0f;
+            fib->waiting_chan_id = 0;
+            fib->waiting_send = false;
+            memset(fib->saved_regs, 0, sizeof(fib->saved_regs));
+            if (args && argc > 0) {
+                uint8_t copy_count = argc;
+                if (copy_count > CITRINE_FIBER_REGS_MAX) copy_count = CITRINE_FIBER_REGS_MAX;
+                memcpy(fib->saved_regs, args, copy_count * sizeof(Value));
+            }
+            vm->scheduler.fiber_count++;
+            return fib->id;
+        }
+    }
+
+    citrine_vm_panic(vm, "Max concurrent fibers limit (%u) exceeded", vm->scheduler.max_fibers);
+    return 0;
+}
+
+void citrine_scheduler_sleep(CitrineVM* vm, float seconds) {
+    if (!vm) return;
+    CitrineFiber* curr = &vm->scheduler.fibers[vm->scheduler.current_fiber];
+    curr->sleep_timer = seconds;
+    curr->state = FIBER_SLEEPING;
+}
+
+uint32_t citrine_scheduler_current_fiber(CitrineVM* vm) {
+    if (!vm) return 0;
+    return vm->scheduler.fibers[vm->scheduler.current_fiber].id;
+}
+
+bool citrine_scheduler_fiber_alive(CitrineVM* vm, uint32_t fiber_id) {
+    if (!vm) return false;
+    for (uint32_t i = 0; i < vm->scheduler.max_fibers; i++) {
+        if (vm->scheduler.fibers[i].id == fiber_id) {
+            FiberState s = vm->scheduler.fibers[i].state;
+            return (s != FIBER_FREE && s != FIBER_DEAD);
+        }
+    }
+    return false;
+}
+
+static void scheduler_switch_next(CitrineVM* vm, Value* regs) {
+    uint32_t curr_idx = vm->scheduler.current_fiber;
+    CitrineFiber* curr = &vm->scheduler.fibers[curr_idx];
+
+    // If current fiber was running, set it back to ready unless it sleeping/waiting/dead
+    if (curr->state == FIBER_RUNNING) {
+        curr->state = FIBER_READY;
+    }
+
+    // Save current fiber execution context
+    curr->pc = vm->pc;
+    curr->call_depth = vm->call_depth;
+    for (uint32_t i = 0; i < vm->call_depth && i < CITRINE_FIBER_STACK_MAX; i++) {
+        curr->call_stack[i] = vm->call_stack[i];
+    }
+    uint8_t count = curr->reg_count;
+    if (count > CITRINE_FIBER_REGS_MAX) count = CITRINE_FIBER_REGS_MAX;
+    if (count > 0) {
+        memcpy(curr->saved_regs, regs, count * sizeof(Value));
+    }
+
+    // Round-robin selection of next ready fiber
+    uint32_t next_idx = curr_idx;
+    bool found = false;
+    for (uint32_t i = 1; i <= vm->scheduler.max_fibers; i++) {
+        uint32_t candidate = (curr_idx + i) % vm->scheduler.max_fibers;
+        if (vm->scheduler.fibers[candidate].state == FIBER_READY) {
+            next_idx = candidate;
+            found = true;
+            break;
+        }
+    }
+
+    if (!found) {
+        // If current fiber can still run, keep running
+        if (curr->state == FIBER_READY) {
+            curr->state = FIBER_RUNNING;
+            return;
+        }
+
+        // All active fibers are sleeping or waiting; find shortest sleep timer
+        float min_sleep = 999999.0f;
+        for (uint32_t i = 0; i < vm->scheduler.max_fibers; i++) {
+            if (vm->scheduler.fibers[i].state == FIBER_SLEEPING) {
+                if (vm->scheduler.fibers[i].sleep_timer < min_sleep) {
+                    min_sleep = vm->scheduler.fibers[i].sleep_timer;
+                }
+            }
+        }
+
+        if (min_sleep < 999999.0f && min_sleep > 0.0f) {
+            citrine_scheduler_tick(vm, min_sleep);
+            for (uint32_t i = 0; i < vm->scheduler.max_fibers; i++) {
+                if (vm->scheduler.fibers[i].state == FIBER_READY) {
+                    next_idx = i;
+                    found = true;
+                    break;
+                }
+            }
+        }
+
+        if (!found) {
+            // No runnable fibers left
+            return;
+        }
+    }
+
+    // Switch to next fiber
+    CitrineFiber* next = &vm->scheduler.fibers[next_idx];
+    vm->scheduler.current_fiber = next_idx;
+    next->state = FIBER_RUNNING;
+    vm->pc = next->pc;
+    vm->call_depth = next->call_depth;
+    for (uint32_t i = 0; i < next->call_depth && i < CITRINE_FIBER_STACK_MAX; i++) {
+        vm->call_stack[i] = next->call_stack[i];
+    }
+    uint8_t next_count = next->reg_count;
+    if (next_count > CITRINE_FIBER_REGS_MAX) next_count = CITRINE_FIBER_REGS_MAX;
+    if (next_count > 0) {
+        memcpy(regs, next->saved_regs, next_count * sizeof(Value));
+    }
+}
+
+void citrine_scheduler_yield(CitrineVM* vm) {
+    if (!vm) return;
+    scheduler_switch_next(vm, vm->spram_regs);
+}
+
+// ----------------------------------------------------------------------------
+// Channel Ring Buffer API
+// ----------------------------------------------------------------------------
+
+uint32_t citrine_channel_create(CitrineVM* vm, uint32_t capacity) {
+    if (!vm) return 0;
+    if (capacity == 0 || capacity > CITRINE_CHANNEL_BUFFER_CAP) {
+        capacity = CITRINE_CHANNEL_BUFFER_CAP;
+    }
+
+    for (uint32_t i = 0; i < vm->scheduler.max_channels; i++) {
+        CitrineChannel* ch = &vm->scheduler.channels[i];
+        if (!ch->active) {
+            ch->active = true;
+            ch->id = vm->scheduler.next_channel_id++;
+            ch->head = 0;
+            ch->tail = 0;
+            ch->count = 0;
+            ch->capacity = capacity;
+            vm->scheduler.channel_count++;
+            return ch->id;
+        }
+    }
+
+    citrine_vm_panic(vm, "Max concurrent channels (%u) exceeded", vm->scheduler.max_channels);
+    return 0;
+}
+
+static CitrineChannel* find_channel(CitrineVM* vm, uint32_t chan_id) {
+    if (!vm) return NULL;
+    for (uint32_t i = 0; i < vm->scheduler.max_channels; i++) {
+        if (vm->scheduler.channels[i].active && vm->scheduler.channels[i].id == chan_id) {
+            return &vm->scheduler.channels[i];
+        }
+    }
+    return NULL;
+}
+
+bool citrine_channel_send(CitrineVM* vm, uint32_t chan_id, Value val) {
+    CitrineChannel* ch = find_channel(vm, chan_id);
+    if (!ch) return false;
+
+    if (ch->count < ch->capacity) {
+        ch->buffer[ch->tail] = val;
+        ch->tail = (ch->tail + 1) % ch->capacity;
+        ch->count++;
+
+        // Wake any fiber waiting to receive
+        for (uint32_t i = 0; i < vm->scheduler.max_fibers; i++) {
+            CitrineFiber* f = &vm->scheduler.fibers[i];
+            if (f->state == FIBER_WAITING_CHAN && f->waiting_chan_id == chan_id && !f->waiting_send) {
+                f->state = FIBER_READY;
+                f->waiting_chan_id = 0;
+            }
+        }
+        return true;
+    } else {
+        // Channel is full: block current fiber
+        CitrineFiber* curr = &vm->scheduler.fibers[vm->scheduler.current_fiber];
+        curr->state = FIBER_WAITING_CHAN;
+        curr->waiting_chan_id = chan_id;
+        curr->waiting_send = true;
+        curr->pending_send_val = val;
+        return false;
+    }
+}
+
+bool citrine_channel_receive(CitrineVM* vm, uint32_t chan_id, Value* out_val) {
+    CitrineChannel* ch = find_channel(vm, chan_id);
+    if (!ch) {
+        if (out_val) out_val->type = VAL_NIL;
+        return false;
+    }
+
+    if (ch->count > 0) {
+        if (out_val) *out_val = ch->buffer[ch->head];
+        ch->head = (ch->head + 1) % ch->capacity;
+        ch->count--;
+
+        // Wake any fiber waiting to send
+        for (uint32_t i = 0; i < vm->scheduler.max_fibers; i++) {
+            CitrineFiber* f = &vm->scheduler.fibers[i];
+            if (f->state == FIBER_WAITING_CHAN && f->waiting_chan_id == chan_id && f->waiting_send) {
+                ch->buffer[ch->tail] = f->pending_send_val;
+                ch->tail = (ch->tail + 1) % ch->capacity;
+                ch->count++;
+                f->state = FIBER_READY;
+                f->waiting_chan_id = 0;
+                f->waiting_send = false;
+                break;
+            }
+        }
+        return true;
+    } else {
+        // Channel empty: block current fiber
+        CitrineFiber* curr = &vm->scheduler.fibers[vm->scheduler.current_fiber];
+        curr->state = FIBER_WAITING_CHAN;
+        curr->waiting_chan_id = chan_id;
+        curr->waiting_send = false;
+        if (out_val) out_val->type = VAL_NIL;
+        return false;
+    }
+}
+
+bool citrine_channel_try_receive(CitrineVM* vm, uint32_t chan_id, Value* out_val) {
+    CitrineChannel* ch = find_channel(vm, chan_id);
+    if (!ch || ch->count == 0) {
+        if (out_val) out_val->type = VAL_NIL;
+        return false;
+    }
+
+    if (out_val) *out_val = ch->buffer[ch->head];
+    ch->head = (ch->head + 1) % ch->capacity;
+    ch->count--;
+
+    // Wake any fiber waiting to send
+    for (uint32_t i = 0; i < vm->scheduler.max_fibers; i++) {
+        CitrineFiber* f = &vm->scheduler.fibers[i];
+        if (f->state == FIBER_WAITING_CHAN && f->waiting_chan_id == chan_id && f->waiting_send) {
+            ch->buffer[ch->tail] = f->pending_send_val;
+            ch->tail = (ch->tail + 1) % ch->capacity;
+            ch->count++;
+            f->state = FIBER_READY;
+            f->waiting_chan_id = 0;
+            f->waiting_send = false;
+            break;
+        }
+    }
+    return true;
+}
+
+uint32_t citrine_channel_count(CitrineVM* vm, uint32_t chan_id) {
+    CitrineChannel* ch = find_channel(vm, chan_id);
+    return ch ? ch->count : 0;
+}
+
+uint32_t citrine_channel_capacity(CitrineVM* vm, uint32_t chan_id) {
+    CitrineChannel* ch = find_channel(vm, chan_id);
+    return ch ? ch->capacity : 0;
 }
 
 void citrine_vm_run(CitrineVM* vm) {
@@ -520,8 +846,17 @@ void citrine_vm_run(CitrineVM* vm) {
 
     do_return: {
         if (vm->call_depth == 0) {
-            // Exit program
-            return;
+            if (vm->scheduler.current_fiber == 0) {
+                // Exit program when main fiber completes
+                return;
+            } else {
+                // Background fiber completed
+                CitrineFiber* curr = &vm->scheduler.fibers[vm->scheduler.current_fiber];
+                curr->state = FIBER_DEAD;
+                if (vm->scheduler.fiber_count > 0) vm->scheduler.fiber_count--;
+                scheduler_switch_next(vm, regs);
+                DISPATCH();
+            }
         }
         vm->call_depth--;
         vm->pc = vm->call_stack[vm->call_depth].return_pc;
@@ -534,13 +869,40 @@ void citrine_vm_run(CitrineVM* vm) {
         uint8_t base = (raw >> 8) & 0xFF;
         uint16_t native_id = raw & 0xFF; // bottom 8 or 16 bits
         native_dispatch(vm, native_id, &regs[base], 0, &regs[dst]);
+        if (vm->scheduler.fibers[vm->scheduler.current_fiber].state != FIBER_RUNNING) {
+            scheduler_switch_next(vm, regs);
+        }
         DISPATCH();
     }
 
-    do_spawn_fiber:
-    do_yield:
-    do_resume_fiber:
+    do_spawn_fiber: {
+        uint32_t raw = vm->bytecode[vm->pc - 1];
+        uint8_t dst = (raw >> 16) & 0xFF;
+        uint16_t func_idx = raw & 0xFFFF;
+        uint8_t argc = (func_idx < vm->num_functions) ? vm->functions[func_idx].argc : 0;
+        uint32_t fib_id = citrine_scheduler_spawn(vm, func_idx, &regs[dst + 1], argc);
+        regs[dst].type = VAL_INT32;
+        regs[dst].as.i = (int32_t)fib_id;
         DISPATCH();
+    }
+
+    do_yield: {
+        scheduler_switch_next(vm, regs);
+        DISPATCH();
+    }
+
+    do_resume_fiber: {
+        uint32_t raw = vm->bytecode[vm->pc - 1];
+        uint8_t target_reg = (raw >> 16) & 0xFF;
+        uint32_t fib_id = (uint32_t)regs[target_reg].as.i;
+        for (uint32_t i = 0; i < vm->scheduler.max_fibers; i++) {
+            if (vm->scheduler.fibers[i].id == fib_id && vm->scheduler.fibers[i].state != FIBER_DEAD) {
+                vm->scheduler.fibers[i].state = FIBER_READY;
+                break;
+            }
+        }
+        DISPATCH();
+    }
 
     do_halt:
         return;
@@ -574,6 +936,7 @@ static void native_dispatch(CitrineVM* vm, uint16_t native_id, Value* args, uint
             break;
         case 10: // BeginDrawing()
             Citrine_BeginDrawing();
+            citrine_scheduler_tick(vm, Citrine_GetDeltaTime());
             break;
         case 11: // EndDrawing()
             Citrine_EndDrawing();
@@ -675,6 +1038,16 @@ static void native_dispatch(CitrineVM* vm, uint16_t native_id, Value* args, uint
                 (uint32_t)args[3].as.i
             );
             break;
+        case 35: // LoadSound(path)
+            out_ret->type = VAL_HANDLE;
+            out_ret->as.handle = Citrine_LoadSound(args[0].as.str);
+            break;
+        case 36: // PlaySound(id)
+            Citrine_PlaySound(args[0].as.handle);
+            break;
+        case 37: // StopSound(id)
+            Citrine_StopSound(args[0].as.handle);
+            break;
         case 40: // ButtonDown(btn)
             out_ret->type = VAL_BOOL;
             out_ret->as.i = Citrine_ButtonDown(args[0].as.i);
@@ -689,6 +1062,68 @@ static void native_dispatch(CitrineVM* vm, uint16_t native_id, Value* args, uint
             break;
         case 60: // SetDebugOverlay(bool)
             Citrine_HUD_SetVisible(args[0].as.i != 0);
+            break;
+        case 65: // Sleep(seconds)
+            citrine_scheduler_sleep(vm, (args[0].type == VAL_FLOAT32) ? args[0].as.f : (float)args[0].as.i);
+            break;
+        case 66: // FiberId()
+            out_ret->type = VAL_INT32;
+            out_ret->as.i = citrine_scheduler_current_fiber(vm);
+            break;
+        case 67: // FiberAlive(id)
+            out_ret->type = VAL_BOOL;
+            out_ret->as.i = citrine_scheduler_fiber_alive(vm, (uint32_t)args[0].as.i);
+            break;
+        case 80: // ChannelNew(capacity)
+            out_ret->type = VAL_HANDLE;
+            out_ret->as.handle = citrine_channel_create(vm, (uint32_t)args[0].as.i);
+            break;
+        case 81: { // ChannelSend(chan, val)
+            bool ok = citrine_channel_send(vm, args[0].as.handle, args[1]);
+            out_ret->type = VAL_BOOL;
+            out_ret->as.i = ok ? 1 : 0;
+            break;
+        }
+        case 82: // ChannelReceive(chan)
+            citrine_channel_receive(vm, args[0].as.handle, out_ret);
+            break;
+        case 83: // ChannelTryReceive(chan)
+            citrine_channel_try_receive(vm, args[0].as.handle, out_ret);
+            break;
+        case 84: // ChannelCount(chan)
+            out_ret->type = VAL_INT32;
+            out_ret->as.i = citrine_channel_count(vm, args[0].as.handle);
+            break;
+        case 85: // ChannelCapacity(chan)
+            out_ret->type = VAL_INT32;
+            out_ret->as.i = citrine_channel_capacity(vm, args[0].as.handle);
+            break;
+        case 90: // LoadVideo(path)
+            out_ret->type = VAL_HANDLE;
+            out_ret->as.handle = Citrine_LoadVideo(args[0].as.str);
+            break;
+        case 91: // PlayVideo(id, loop)
+            out_ret->type = VAL_BOOL;
+            out_ret->as.i = Citrine_PlayVideo(args[0].as.handle, args[1].as.i != 0) ? 1 : 0;
+            break;
+        case 92: // DrawVideoFrame(id, x, y, w, h)
+            Citrine_DrawVideoFrame(
+                args[0].as.handle,
+                (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i,
+                (args[2].type == VAL_FLOAT32) ? args[2].as.f : (float)args[2].as.i,
+                (args[3].type == VAL_FLOAT32) ? args[3].as.f : (float)args[3].as.i,
+                (args[4].type == VAL_FLOAT32) ? args[4].as.f : (float)args[4].as.i
+            );
+            break;
+        case 93: // VideoFinished(id)
+            out_ret->type = VAL_BOOL;
+            out_ret->as.i = Citrine_VideoFinished(args[0].as.handle) ? 1 : 0;
+            break;
+        case 94: // PauseVideo(id)
+            Citrine_PauseVideo(args[0].as.handle);
+            break;
+        case 95: // StopVideo(id)
+            Citrine_StopVideo(args[0].as.handle);
             break;
         case 99: // Panic(msg)
             citrine_vm_panic(vm, "%s", args[0].as.str ? args[0].as.str : "User Panic");

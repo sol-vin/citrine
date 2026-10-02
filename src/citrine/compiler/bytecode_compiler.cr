@@ -340,6 +340,7 @@ module Citrine
       fn : CompiledFunction
     ) : UInt8
       dest = allocator.alloc_temp
+      obj_str = node.obj ? node.obj.to_s : ""
       # Binary and Unary Operators
       if ["+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">="].includes?(node.name) && node.obj && node.args.size == 1
         left_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
@@ -377,8 +378,104 @@ module Citrine
         return dest
       end
 
+      # Concurrency: spawn
+      if (node.name == "spawn" || ((obj_str == "Citrine" || obj_str == "Fiber") && node.name == "spawn")) && node.block
+        return compile_spawn(node, allocator, instructions, fn)
+      end
+
+      # Concurrency: yield
+      if node.name == "yield" && (obj_str.empty? || obj_str == "Citrine" || obj_str == "Fiber")
+        instructions << Instruction.encode_abc(Opcode::Yield, 0_u8, 0_u8, 0_u8)
+        return dest
+      end
+
+      # Concurrency: Channel.new(cap)
+      if (obj_str.includes?("Channel") || node.name == "channel_new") && (node.name == "new" || node.name == "channel_new")
+        cap_reg = if node.args.size > 0
+                    compile_node(node.args[0], allocator, instructions, fn)
+                  else
+                    r = allocator.alloc_temp
+                    instructions << Instruction.encode_ab_imm(Opcode::LoadInt, r, 32_u16)
+                    r
+                  end
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (cap_reg.to_u32 << 8) |
+                    NativeId::ChannelNew.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(cap_reg)
+        return dest
+      end
+
+      # Concurrency: ch.send(val)
+      if node.name == "send" && node.obj && node.args.size == 1
+        ch_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+        val_reg = compile_node(node.args[0], allocator, instructions, fn)
+        arg0 = allocator.alloc_temp
+        arg1 = allocator.alloc_temp
+        instructions << Instruction.encode_abc(Opcode::Move, arg0, ch_reg, 0_u8)
+        instructions << Instruction.encode_abc(Opcode::Move, arg1, val_reg, 0_u8)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (arg0.to_u32 << 8) |
+                    NativeId::ChannelSend.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(ch_reg)
+        allocator.free_temp(val_reg)
+        allocator.free_temp(arg0)
+        allocator.free_temp(arg1)
+        return dest
+      end
+
+      # Concurrency: ch.receive
+      if node.name == "receive" && node.obj
+        ch_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (ch_reg.to_u32 << 8) |
+                    NativeId::ChannelReceive.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(ch_reg)
+        return dest
+      end
+
+      # Concurrency: ch.try_receive
+      if node.name == "try_receive" && node.obj
+        ch_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (ch_reg.to_u32 << 8) |
+                    NativeId::ChannelTryReceive.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(ch_reg)
+        return dest
+      end
+
+      # Concurrency: ch.size / ch.count
+      if (node.name == "size" || node.name == "count") && node.obj && node.args.empty?
+        ch_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (ch_reg.to_u32 << 8) |
+                    NativeId::ChannelCount.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(ch_reg)
+        return dest
+      end
+
+      # Concurrency: ch.capacity
+      if node.name == "capacity" && node.obj && node.args.empty?
+        ch_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (ch_reg.to_u32 << 8) |
+                    NativeId::ChannelCapacity.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(ch_reg)
+        return dest
+      end
+
       # Native API Calls (Citrine.draw_rectangle, etc.)
-      obj_str = node.obj ? node.obj.to_s : ""
       if obj_str == "Citrine" || obj_str.empty?
         if native_id = map_native_call(node.name)
           # Compile args into sequential registers
@@ -392,16 +489,6 @@ module Citrine
                       native_id.value.to_u32
           instructions << Instruction.new(instr_val)
           arg_regs.each { |r| allocator.free_temp(r) }
-          return dest
-        end
-
-        if node.name == "spawn" && node.block
-          # Fiber spawning
-          # TODO: compile block as separate function
-          instructions << Instruction.encode_abc(Opcode::SpawnFiber, dest, 0_u8, 0_u8)
-          return dest
-        elsif node.name == "yield"
-          instructions << Instruction.encode_abc(Opcode::Yield, 0_u8, 0_u8, 0_u8)
           return dest
         end
       end
@@ -480,6 +567,50 @@ module Citrine
       dest
     end
 
+    private def compile_spawn(
+      node : Crystal::Call,
+      allocator : RegisterAllocator,
+      instructions : Array(Instruction),
+      fn : CompiledFunction
+    ) : UInt8
+      dest = allocator.alloc_temp
+      block = node.block
+      unless block
+        instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+        return dest
+      end
+
+      arg_names = block.args.map(&.name)
+      fiber_fn_name = "__fiber_#{@functions.size}"
+      fiber_fn = CompiledFunction.new(fiber_fn_name, arg_names.size.to_u8)
+      fiber_allocator = RegisterAllocator.new(arg_names)
+      fiber_instructions = [] of Instruction
+
+      arg_names.each_with_index do |name, idx|
+        @source_map.record_register(fiber_fn_name, idx, name)
+      end
+
+      # Compile fiber body
+      ret_reg = compile_node(block.body, fiber_allocator, fiber_instructions, fiber_fn)
+      fiber_instructions << Instruction.encode_abc(Opcode::Return, ret_reg, 0_u8, 0_u8)
+      fiber_fn.num_registers = fiber_allocator.max_registers
+      fiber_fn.instructions = fiber_instructions
+
+      func_idx = @functions.size
+      @functions << fiber_fn
+
+      # Evaluate arguments to pass into the fiber (sequential registers after dest)
+      node.args.each_with_index do |arg, i|
+        reg = compile_node(arg, allocator, instructions, fn)
+        target_reg = dest + 1_u8 + i.to_u8
+        instructions << Instruction.encode_abc(Opcode::Move, target_reg, reg, 0_u8)
+        allocator.free_temp(reg)
+      end
+
+      instructions << Instruction.encode_ab_imm(Opcode::SpawnFiber, dest, func_idx.to_u16)
+      dest
+    end
+
     private def map_native_call(name : String) : NativeId?
       case name
       when "init_window" then NativeId::InitWindow
@@ -515,6 +646,21 @@ module Citrine
       when "stop_sound" then NativeId::StopSound
       when "debug_overlay=" then NativeId::SetDebugOverlay
       when "log" then NativeId::Log
+      when "sleep" then NativeId::Sleep
+      when "fiber_id" then NativeId::FiberId
+      when "fiber_alive?" then NativeId::FiberAlive
+      when "channel_new" then NativeId::ChannelNew
+      when "channel_send" then NativeId::ChannelSend
+      when "channel_receive" then NativeId::ChannelReceive
+      when "channel_try_receive" then NativeId::ChannelTryReceive
+      when "channel_count" then NativeId::ChannelCount
+      when "channel_capacity" then NativeId::ChannelCapacity
+      when "load_video" then NativeId::LoadVideo
+      when "play_video" then NativeId::PlayVideo
+      when "draw_video_frame" then NativeId::DrawVideoFrame
+      when "video_finished?" then NativeId::VideoFinished
+      when "pause_video" then NativeId::PauseVideo
+      when "stop_video" then NativeId::StopVideo
       when "panic" then NativeId::Panic
       else nil
       end

@@ -7,6 +7,8 @@ require "./citrine/cli/new_command"
 require "./citrine/cli/debug_command"
 require "./citrine/cli/tui_dashboard"
 require "./citrine/cli/iso_command"
+require "./citrine/cli/test_command"
+require "./citrine/cli/import_command"
 
 module Citrine
   def self.print_help
@@ -23,6 +25,8 @@ module Citrine
       iso <file.cr | file.cbc> [-o iso] Package bytecode into bootable PS2 ISO9660 disc
       run [file.cr | file.cbc | iso]    Compile, build ISO, and boot in PCSX2
       debug <file.cbc> [--port <port>]  Launch radare2 debugging session on PCSX2 GDB stub
+      test [spec_path]                  Run PS2 automated test suite & PCSX2 hardware specs
+      import <type> <file> [options]    Import & optimize media via Flourite (video, audio, textures)
       disasm <file.cbc>                 Disassemble bytecode and inspect symbols
       monitor [--port <port>]           Connect live telemetry monitor to PS2 / PCSX2
       new <project_name>                Scaffold a new Citrine PS2 project
@@ -33,6 +37,8 @@ module Citrine
       citrine ui
       citrine new my_game
       citrine run examples/01_hello_pad/main.cr --watch
+      citrine test spec/ps2/
+      citrine import video cutscene.mp4 --fps 15 --dvd-track
       citrine debug build/game.cbc
       citrine compile src/main.cr -o build/game.cbc
       citrine disasm build/game.cbc
@@ -53,6 +59,10 @@ module Citrine
       CLI::RunCommand.run(args[1..])
     when "debug"
       CLI::DebugCommand.run(args[1..])
+    when "test"
+      CLI::TestCommand.run(args[1..])
+    when "import"
+      CLI::ImportCommand.run(args[1..])
     when "disasm"
       CLI::DisasmCommand.run(args[1..])
     when "monitor"

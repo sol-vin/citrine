@@ -46,6 +46,10 @@ module Citrine
       end
     end
 
+    def find(offset : Int32) : SourceLocation?
+      resolve(offset)
+    end
+
     def record_register(func : String, reg : Int32, name : String)
       @register_names[func] ||= {} of Int32 => String
       @register_names[func][reg] = name
@@ -53,6 +57,10 @@ module Citrine
 
     def to_file(path : String)
       File.write(path, self.to_json)
+    end
+
+    def save(path : String)
+      to_file(path)
     end
 
     def self.from_file(path : String) : SourceMap

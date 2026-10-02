@@ -7,6 +7,7 @@
 #include "citrine_draw3d.h"
 #include "citrine_input.h"
 #include "citrine_audio.h"
+#include "citrine_video.h"
 #include "citrine_hud.h"
 #include "citrine_panic.h"
 

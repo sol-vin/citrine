@@ -1,0 +1,123 @@
+require "../spec_helper"
+require "../../src/citrine/spec/ps2_spec"
+
+describe "Citrine PS2 Examples Runner Suite" do
+  it "boots and verifies Example 01: Hello Pad" do
+    tc = Citrine::Spec::Ps2TestCase.new("01_hello_pad")
+    tc.target("examples/01_hello_pad/main.cr")
+    bytes, sm = tc.compile
+    bytes.size.should be > 18
+    tc.max_registers.should be <= 1024
+
+    result = tc.boot_pcsx2(timeout: 2.seconds)
+    result.should_boot_cleanly
+    result.should_preserve_spram
+  end
+
+  it "boots and verifies Example 02: Shapes and Text" do
+    tc = Citrine::Spec::Ps2TestCase.new("02_shapes_and_text")
+    tc.target("examples/02_shapes_and_text/main.cr")
+    bytes, sm = tc.compile
+    bytes.size.should be > 18
+    tc.max_registers.should be <= 1024
+
+    result = tc.boot_pcsx2(timeout: 2.seconds)
+    result.should_boot_cleanly
+    result.should_preserve_spram
+  end
+
+  it "boots and verifies Example 03: Entity Fibers" do
+    tc = Citrine::Spec::Ps2TestCase.new("03_entity_fibers")
+    tc.target("examples/03_entity_fibers/main.cr")
+    bytes, sm = tc.compile
+    bytes.size.should be > 18
+    tc.max_registers.should be <= 1024
+
+    result = tc.boot_pcsx2(timeout: 2.seconds)
+    result.should_boot_cleanly
+    result.should_preserve_spram
+  end
+
+  it "boots and verifies Example 04: Safety and Panic" do
+    tc = Citrine::Spec::Ps2TestCase.new("04_safety_and_panic")
+    tc.target("examples/04_safety_and_panic/main.cr")
+    bytes, sm = tc.compile
+    bytes.size.should be > 18
+    tc.max_registers.should be <= 1024
+
+    result = tc.boot_pcsx2(timeout: 2.seconds)
+    result.should_preserve_spram
+  end
+
+  it "boots and verifies Example 05: Hello World" do
+    tc = Citrine::Spec::Ps2TestCase.new("05_hello_world")
+    tc.target("examples/05_hello_world/main.cr")
+    bytes, sm = tc.compile
+    bytes.size.should be > 18
+    tc.max_registers.should be <= 1024
+
+    result = tc.boot_pcsx2(timeout: 2.seconds)
+    result.should_boot_cleanly
+    result.should_preserve_spram
+  end
+
+  it "boots and verifies Example 06: DVD Bounce" do
+    tc = Citrine::Spec::Ps2TestCase.new("06_dvd_bounce")
+    tc.target("examples/06_dvd_bounce/main.cr")
+    bytes, sm = tc.compile
+    bytes.size.should be > 18
+    tc.max_registers.should be <= 1024
+
+    result = tc.boot_pcsx2(timeout: 2.seconds)
+    result.should_boot_cleanly
+    result.should_preserve_spram
+  end
+
+  it "boots and verifies Example 07: Primitives 2D & 3D" do
+    tc = Citrine::Spec::Ps2TestCase.new("07_primitives_2d_3d")
+    tc.target("examples/07_primitives_2d_3d/main.cr")
+    bytes, sm = tc.compile
+    bytes.size.should be > 18
+    tc.max_registers.should be <= 1024
+
+    result = tc.boot_pcsx2(timeout: 2.seconds)
+    result.should_boot_cleanly
+    result.should_preserve_spram
+  end
+
+  it "boots and verifies Example 08: Controller Tester" do
+    tc = Citrine::Spec::Ps2TestCase.new("08_controller_tester")
+    tc.target("examples/08_controller_tester/main.cr")
+    bytes, sm = tc.compile
+    bytes.size.should be > 18
+    tc.max_registers.should be <= 1024
+
+    result = tc.boot_pcsx2(timeout: 2.seconds)
+    result.should_boot_cleanly
+    result.should_preserve_spram
+  end
+
+  it "boots and verifies Example 09: Concurrency Showcase" do
+    tc = Citrine::Spec::Ps2TestCase.new("09_concurrency_showcase")
+    tc.target("examples/09_concurrency_showcase/main.cr")
+    bytes, sm = tc.compile
+    bytes.size.should be > 18
+    tc.max_registers.should be <= 1024
+
+    result = tc.boot_pcsx2(timeout: 2.seconds)
+    result.should_boot_cleanly
+    result.should_preserve_spram
+  end
+
+  it "boots and verifies Example 10: Video and Audio Showcase" do
+    tc = Citrine::Spec::Ps2TestCase.new("10_video_and_audio")
+    tc.target("examples/10_video_and_audio/main.cr")
+    bytes, sm = tc.compile
+    bytes.size.should be > 18
+    tc.max_registers.should be <= 1024
+
+    result = tc.boot_pcsx2(timeout: 2.seconds)
+    result.should_boot_cleanly
+    result.should_preserve_spram
+  end
+end
