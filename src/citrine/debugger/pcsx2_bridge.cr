@@ -75,10 +75,24 @@ module Citrine
         if content.includes?("EnableEEConsole = false")
           content = content.gsub("EnableEEConsole = false", "EnableEEConsole = true")
           modified = true
+        elsif !content.includes?("EnableEEConsole = true")
+          if content.includes?("[Logging]")
+            content = content.sub("[Logging]", "[Logging]\nEnableEEConsole = true")
+          else
+            content += "\n[Logging]\nEnableEEConsole = true\n"
+          end
+          modified = true
         end
 
         if content.includes?("EnableFileLogging = false")
           content = content.gsub("EnableFileLogging = false", "EnableFileLogging = true")
+          modified = true
+        elsif !content.includes?("EnableFileLogging = true")
+          if content.includes?("[Logging]")
+            content = content.sub("[Logging]", "[Logging]\nEnableFileLogging = true")
+          else
+            content += "\n[Logging]\nEnableFileLogging = true\n"
+          end
           modified = true
         end
 

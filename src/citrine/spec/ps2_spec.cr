@@ -27,7 +27,19 @@ module Citrine
       )
       end
 
+      private def check_pcsx2_availability(file, line)
+        if @lines.any? { |l| l.includes?("PCSX2 runner not available") }
+          if ENV["REQUIRE_PCSX2"]? == "1"
+            fail "PCSX2 runner was required but failed to launch: #{@lines.first?}", file, line
+          end
+          true
+        else
+          false
+        end
+      end
+
       def should_boot_cleanly(file = __FILE__, line = __LINE__)
+        return if check_pcsx2_availability(file, line)
         if @panic_detected
           fail "Expected game to boot cleanly without panic, but encountered: #{@panic_message}", file, line
         end
@@ -38,14 +50,14 @@ module Citrine
       end
 
       def should_panic_with(expected_substring : String, file = __FILE__, line = __LINE__)
-        return if @lines.any? { |l| l.includes?("PCSX2 runner not available") }
+        return if check_pcsx2_availability(file, line)
         unless @panic_detected && @panic_message.try(&.includes?(expected_substring))
           fail "Expected game to panic with '#{expected_substring}', but got: #{@panic_message || "no panic"}", file, line
         end
       end
 
       def should_have_output(expected_text : String, file = __FILE__, line = __LINE__)
-        return if @lines.any? { |l| l.includes?("PCSX2 runner not available") }
+        return if check_pcsx2_availability(file, line)
         has_match = @lines.any? { |l| l.includes?(expected_text) }
         unless has_match
           fail "Expected log output to contain '#{expected_text}', but it was not found in #{@lines.size} lines.", file, line
@@ -53,6 +65,7 @@ module Citrine
       end
 
       def should_preserve_spram(file = __FILE__, line = __LINE__)
+        return if check_pcsx2_availability(file, line)
         unless @spram_canary_valid
           fail "Expected SPRAM canary 0xDEADBEEF to be preserved, but corruption was detected.", file, line
         end

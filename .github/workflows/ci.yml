@@ -39,9 +39,69 @@ jobs:
           mkdir -p bin
           crystal build src/citrine.cr -o bin/citrine --release --no-debug
 
+      - name: Setup PCSX2 PlayStation 2 Emulator (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PCSX2_BIOS_URL: ${{ secrets.PCSX2_BIOS_URL }}
+        run: |
+          Write-Host "Installing PCSX2 portable emulator release..."
+          New-Item -ItemType Directory -Force -Path "$env:TEMP\pcsx2_dl"
+          gh release download v2.9.94 -R PCSX2/pcsx2 -p "*windows-x64-Qt.7z" --dir "$env:TEMP\pcsx2_dl"
+          
+          New-Item -ItemType Directory -Force -Path "C:\Program Files\PCSX2"
+          7z x "$env:TEMP\pcsx2_dl\*.7z" -o"C:\Program Files\PCSX2" -y | Out-Null
+          
+          Write-Host "Configuring PCSX2.ini..."
+          $inisDir = "$HOME\Documents\PCSX2\inis"
+          New-Item -ItemType Directory -Force -Path $inisDir
+          @"
+          [UI]
+          SetupWizardIncomplete = false
+
+          [Folders]
+          Bios = bios
+          Logs = logs
+
+          [Logging]
+          EnableSystemConsole = true
+          EnableFileLogging = true
+          EnableEEConsole = true
+          EnableIOPConsole = true
+
+          [EmuCore]
+          EnableFastBoot = true
+          "@ | Set-Content -Path "$inisDir\PCSX2.ini"
+
+          $biosDir = "$HOME\Documents\PCSX2\bios"
+          New-Item -ItemType Directory -Force -Path $biosDir
+
+          if ($env:PCSX2_BIOS_URL) {
+            Write-Host "Downloading PS2 BIOS from secure URL..."
+            curl.exe -L -s -f -o "$env:TEMP\bios_dl" "$env:PCSX2_BIOS_URL"
+            & 7z x "$env:TEMP\bios_dl" -o"$biosDir" -y -r 2>&1 | Out-Null
+            if ((Get-ChildItem $biosDir -Recurse -Filter "*.bin", "*.BIN").Count -eq 0) {
+              Move-Item -Path "$env:TEMP\bios_dl" -Destination "$biosDir\SCPH-70004_BIOS_V12_PAL_200.BIN" -Force
+            }
+            Write-Host "PS2 BIOS successfully configured:"
+            Get-ChildItem $biosDir
+          } else {
+            Write-Warning "::warning::PCSX2_BIOS_URL secret is not set. Set the PCSX2_BIOS_URL secret in repository settings to run live PCSX2 tests."
+          }
+
       - name: Run Specs
         shell: bash
         run: ./bin/citrine test
+
+      - name: Verify PS2 Hardware Bridge Against PCSX2 Emulation (Windows)
+        if: runner.os == 'Windows' && env.PCSX2_BIOS_URL != ''
+        shell: bash
+        env:
+          REQUIRE_PCSX2: "1"
+          PCSX2_BIOS_URL: ${{ secrets.PCSX2_BIOS_URL }}
+        run: |
+          crystal spec spec/ps2/hardware_bridge_spec.cr spec/ps2/examples_ps2_spec.cr
 
       - name: Verify All 16 Examples Bytecode Compilation (.cbc)
         shell: bash
