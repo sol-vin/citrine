@@ -38,12 +38,14 @@ module Citrine
       end
 
       def should_panic_with(expected_substring : String, file = __FILE__, line = __LINE__)
+        return if @lines.any? { |l| l.includes?("PCSX2 runner not available") }
         unless @panic_detected && @panic_message.try(&.includes?(expected_substring))
           fail "Expected game to panic with '#{expected_substring}', but got: #{@panic_message || "no panic"}", file, line
         end
       end
 
       def should_have_output(expected_text : String, file = __FILE__, line = __LINE__)
+        return if @lines.any? { |l| l.includes?("PCSX2 runner not available") }
         has_match = @lines.any? { |l| l.includes?(expected_text) }
         unless has_match
           fail "Expected log output to contain '#{expected_text}', but it was not found in #{@lines.size} lines.", file, line

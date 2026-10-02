@@ -484,7 +484,7 @@ module Citrine
       # Native API Calls (Citrine.draw_rectangle, etc.)
       if obj_str == "Citrine" || obj_str.empty?
         if native_id = map_native_call(node.name)
-          if @release_mode && (native_id == NativeId::Log || native_id == NativeId::SetDebugOverlay)
+          if @release_mode && (native_id == NativeId::Log || native_id == NativeId::DebugLog || native_id == NativeId::SetDebugOverlay)
             instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
             return dest
           end
@@ -675,6 +675,7 @@ module Citrine
       when "stop_sound" then NativeId::StopSound
       when "debug_overlay=" then NativeId::SetDebugOverlay
       when "log", "puts", "print", "println", "printf" then NativeId::Log
+      when "debug_puts", "debug_log" then NativeId::DebugLog
       when "sleep" then NativeId::Sleep
       when "fiber_id" then NativeId::FiberId
       when "fiber_alive?" then NativeId::FiberAlive

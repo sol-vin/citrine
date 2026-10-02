@@ -60,12 +60,12 @@ module Citrine
         #
         # ```crystal
         # macro clamp_bound(val, min_v, max_v)
-        #   if {{val}} < {{min_v}}
-        #     {{min_v}}
-        #   elsif {{val}} > {{max_v}}
-        #     {{max_v}}
+        #   if \{{val}} < \{{min_v}}
+        #     \{{min_v}}
+        #   elsif \{{val}} > \{{max_v}}
+        #     \{{max_v}}
         #   else
-        #     {{val}}
+        #     \{{val}}
         #   end
         # end
         #

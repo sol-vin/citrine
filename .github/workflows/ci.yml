@@ -3,8 +3,10 @@ name: Citrine CI
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   test:
@@ -16,13 +18,17 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
 
     steps:
+      - name: Update Apt Repositories (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update
+
       - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Install Crystal
         uses: crystal-lang/install-crystal@v1
         with:
-          crystal: 1.14.0
+          crystal: latest
 
       - name: Install Shards
         run: shards install --ignore-crystal-version
@@ -36,7 +42,7 @@ jobs:
           mkdir -p bin
           crystal build src/citrine.cr -o bin/citrine --release --no-debug
 
-      - name: Verify All 8 Examples Bytecode Compilation (.cbc)
+      - name: Verify All 16 Examples Bytecode Compilation (.cbc)
         shell: bash
         run: |
           ./bin/citrine compile examples/01_hello_pad/main.cr -o examples/01_hello_pad/game.cbc
@@ -47,13 +53,23 @@ jobs:
           ./bin/citrine compile examples/06_dvd_bounce/main.cr -o examples/06_dvd_bounce/game.cbc
           ./bin/citrine compile examples/07_primitives_2d_3d/main.cr -o examples/07_primitives_2d_3d/game.cbc
           ./bin/citrine compile examples/08_controller_tester/main.cr -o examples/08_controller_tester/game.cbc
+          ./bin/citrine compile examples/09_concurrency_showcase/main.cr -o examples/09_concurrency_showcase/game.cbc
+          ./bin/citrine compile examples/10_video_and_audio/main.cr -o examples/10_video_and_audio/game.cbc
+          ./bin/citrine compile examples/11_macro_ecs_showcase/main.cr -o examples/11_macro_ecs_showcase/game.cbc
+          ./bin/citrine compile examples/12_immediate_ui/main.cr -o examples/12_immediate_ui/game.cbc
+          ./bin/citrine compile examples/13_physics_and_particles/main.cr -o examples/13_physics_and_particles/game.cbc
+          ./bin/citrine compile examples/14_creative_coding/main.cr -o examples/14_creative_coding/game.cbc
+          ./bin/citrine compile examples/15_rigid_body_physics/main.cr -o examples/15_rigid_body_physics/game.cbc
+          ./bin/citrine compile examples/16_shaders_and_postfx/main.cr -o examples/16_shaders_and_postfx/game.cbc
 
       - name: Verify PlayStation 2 ISO9660 Disc Generation
         shell: bash
         run: |
           ./bin/citrine iso examples/01_hello_pad/game.cbc -o examples/01_hello_pad/game.iso
+          ./bin/citrine iso examples/02_shapes_and_text/game.cbc -o examples/02_shapes_and_text/game.iso
           ./bin/citrine iso examples/05_hello_world/game.cbc -o examples/05_hello_world/game.iso
           ./bin/citrine iso examples/08_controller_tester/game.cbc -o examples/08_controller_tester/game.iso
+          ./bin/citrine iso examples/13_physics_and_particles/game.cbc -o examples/13_physics_and_particles/game.iso
 
       - name: Verify Disassembly of Examples
         shell: bash
@@ -65,3 +81,91 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           gcc -Wall -Wextra -std=c99 -fsyntax-only -DHOST_TEST_BUILD -Iruntime/include runtime/src/citrine_vm.c runtime/src/citrine_draw3d.c
+
+      - name: Upload Citrine CLI Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: citrine-${{ matrix.os }}
+          path: |
+            bin/citrine
+            bin/citrine.exe
+          if-no-files-found: error
+
+  pages:
+    name: Generate & Deploy Documentation to GitHub Pages
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Update Apt Repositories
+        run: sudo apt-get update
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Crystal
+        uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+
+      - name: Install Shards
+        run: shards install --ignore-crystal-version
+
+      - name: Generate API Documentation
+        run: crystal docs
+
+      - name: Setup GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  release:
+    name: Publish GitHub Release
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Package Release Assets
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [ -f artifacts/citrine-ubuntu-latest/citrine ]; then
+            cp artifacts/citrine-ubuntu-latest/citrine dist/citrine-linux-x86_64
+            chmod +x dist/citrine-linux-x86_64
+          fi
+          if [ -f artifacts/citrine-macos-latest/citrine ]; then
+            cp artifacts/citrine-macos-latest/citrine dist/citrine-macos-x86_64
+            chmod +x dist/citrine-macos-x86_64
+          fi
+          if [ -f artifacts/citrine-windows-latest/citrine.exe ]; then
+            cp artifacts/citrine-windows-latest/citrine.exe dist/citrine-windows-x86_64.exe
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true

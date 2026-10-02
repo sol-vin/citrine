@@ -50,6 +50,7 @@ module Citrine
     FiberId         = 66
     FiberAlive      = 67
     Log             = 70
+    DebugLog        = 71
     ChannelNew      = 80
     ChannelSend     = 81
     ChannelReceive  = 82

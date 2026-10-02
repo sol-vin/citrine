@@ -114,6 +114,14 @@ def sleep(seconds : Number)
   Citrine.sleep(seconds)
 end
 
+def debug_puts(msg : String)
+  Citrine.debug_puts(msg)
+end
+
+def debug_log(msg : String)
+  Citrine.debug_log(msg)
+end
+
 
 module Citrine
   # Display & Window Management
@@ -432,6 +440,14 @@ module Citrine
   end
 
   def self.puts(msg : String)
+    puts msg
+  end
+
+  def self.debug_puts(msg : String)
+    puts msg
+  end
+
+  def self.debug_log(msg : String)
     puts msg
   end
 

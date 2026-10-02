@@ -16,6 +16,7 @@
 *.exe
 
 # Testing / Scratch
+/docs/
 /scratch/
 /tmp/
 

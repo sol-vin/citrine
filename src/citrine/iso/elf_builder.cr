@@ -244,6 +244,26 @@ module Citrine
         emit((0x3F_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
       end
 
+      def lbu(rt : Int32, offset : Int32, base : Int32)
+        emit((0x24_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
+      end
+
+      def sb(rt : Int32, offset : Int32, base : Int32)
+        emit((0x28_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
+      end
+
+      def subu(rd : Int32, rs : Int32, rt : Int32)
+        emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x23_u32)
+      end
+
+      def addu(rd : Int32, rs : Int32, rt : Int32)
+        emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x21_u32)
+      end
+
+      def move(rd : Int32, rs : Int32)
+        or_(rd, rs, ZERO)
+      end
+
       def jr(rs : Int32)
         emit((rs.to_u32 << 21) | 0x08_u32)
       end
@@ -321,7 +341,7 @@ module Citrine
     end
 
     def generate(cbc_bytes : Bytes? = nil) : Bytes
-      phases = parse_cbc(cbc_bytes)
+      phases, debug_messages = parse_cbc(cbc_bytes)
 
       # Build GIF Packets
       env_packet = build_env_packet
@@ -338,6 +358,17 @@ module Citrine
       phase_packets.each do |pkt|
         phase_addrs << curr_addr
         curr_addr += pkt.size.to_u32
+      end
+
+      # String addresses in .rodata
+      banner_str = "[CITRINE] PS2 EE Engine Initialized\n\0"
+      banner_addr = curr_addr
+      curr_addr += banner_str.bytesize.to_u32
+
+      debug_msg_addrs = [] of UInt32
+      debug_messages.each do |msg|
+        debug_msg_addrs << curr_addr
+        curr_addr += (msg.bytesize + 2).to_u32 # msg + "\n\0"
       end
 
       emitter = MipsEmitter.new(0x00100000_u32)
@@ -412,6 +443,20 @@ module Citrine
 
       # GS_BGCOLOR at 0x120000E0: 0x00000000 (Pure black background)
       emitter.sd(ZERO, 0xe0, V1)
+
+      # Emit boot banner via debug_puts:
+      emitter.lui(A0, (banner_addr >> 16).to_i32)
+      emitter.ori(A0, A0, (banner_addr & 0xFFFF).to_i32)
+      emitter.jal("debug_puts")
+      emitter.nop
+
+      # Emit debug messages via debug_puts:
+      debug_msg_addrs.each do |msg_addr|
+        emitter.lui(A0, (msg_addr >> 16).to_i32)
+        emitter.ori(A0, A0, (msg_addr & 0xFFFF).to_i32)
+        emitter.jal("debug_puts")
+        emitter.nop
+      end
 
       # Send Environment Setup Packet (env_addr, env_qwc)
       emitter.jal("dma02_wait")
@@ -567,6 +612,41 @@ module Citrine
       emitter.jr(RA)
       emitter.nop
 
+      # Subroutine debug_puts:
+      # Writes null-terminated string at $a0 to SIO UART and invokes syscall 0x75 (PCSX2 BIOS Print)
+      emitter.label("debug_puts")
+      emitter.addiu(SP, SP, -32)
+      emitter.sw(RA, 28, SP)
+      emitter.sw(S0, 24, SP)
+      emitter.sw(A0, 20, SP)
+
+      # 1. Output string to EE SIO (UART at 0x1000f180) byte-by-byte
+      emitter.lui(T8, 0x1000)
+      emitter.ori(T8, T8, 0xf180)
+      emitter.move(S0, A0)
+
+      emitter.label("sio_loop")
+      emitter.lbu(T6, 0, S0)
+      emitter.beqz(T6, "sio_done")
+      emitter.nop
+      emitter.sb(T6, 0, T8)
+      emitter.addiu(S0, S0, 1)
+      emitter.j("sio_loop")
+      emitter.nop
+
+      emitter.label("sio_done")
+
+      # 2. Syscall 0x75 (PCSX2 SYSCALL_print)
+      emitter.lw(A0, 20, SP)
+      emitter.ori(V1, ZERO, 0x75)
+      emitter.syscall_inst
+      emitter.nop
+
+      emitter.lw(RA, 28, SP)
+      emitter.lw(S0, 24, SP)
+      emitter.jr(RA)
+      emitter.addiu(SP, SP, 32)
+
       # Native API stubs (Citrine_VM_Run, etc.)
       stub_start = 0x00100000_u32 + (emitter.words.size.to_u32 * 4)
       60.times do
@@ -588,6 +668,10 @@ module Citrine
       rodata_bytes.write(env_packet)
       phase_packets.each do |pkt|
         rodata_bytes.write(pkt)
+      end
+      rodata_bytes.write(banner_str.to_slice)
+      debug_messages.each do |msg|
+        rodata_bytes.write("#{msg}\n\0".to_slice)
       end
       rodata_bytes.write("Citrine PS2 Virtual Machine runtime v0.1.0\0".to_slice)
       rodata_bytes.write("Emotion Engine R5900 / Graphic Synthesizer\0".to_slice)
@@ -613,7 +697,8 @@ module Citrine
         SymbolEntry.new("_start", emitter.labels["_start"], (emitter.labels["main"] - emitter.labels["_start"]), STT_FUNC, STB_GLOBAL, 1_u16),
         SymbolEntry.new("main", emitter.labels["main"], (emitter.labels["dma02_wait"] - emitter.labels["main"]), STT_FUNC, STB_GLOBAL, 1_u16),
         SymbolEntry.new("dma02_wait", emitter.labels["dma02_wait"], (emitter.labels["dma_reset"] - emitter.labels["dma02_wait"]), STT_FUNC, STB_GLOBAL, 1_u16),
-        SymbolEntry.new("dma_reset", emitter.labels["dma_reset"], (stub_start - emitter.labels["dma_reset"]), STT_FUNC, STB_GLOBAL, 1_u16),
+        SymbolEntry.new("dma_reset", emitter.labels["dma_reset"], (emitter.labels["debug_puts"] - emitter.labels["dma_reset"]), STT_FUNC, STB_GLOBAL, 1_u16),
+        SymbolEntry.new("debug_puts", emitter.labels["debug_puts"], (stub_start - emitter.labels["debug_puts"]), STT_FUNC, STB_GLOBAL, 1_u16),
         SymbolEntry.new("Citrine_VM_Run", stub_start, 24_u32, STT_FUNC, STB_GLOBAL, 1_u16),
         SymbolEntry.new("Citrine_InitWindow", stub_start + 24, 24_u32, STT_FUNC, STB_GLOBAL, 1_u16),
         SymbolEntry.new("Citrine_CloseWindow", stub_start + 48, 24_u32, STT_FUNC, STB_GLOBAL, 1_u16),
@@ -943,13 +1028,13 @@ module Citrine
       rgbaq = (0x3F800000_u64 << 32) | (a.to_u64 << 24) | (b.to_u64 << 16) | (g.to_u64 << 8) | r.to_u64
       io.write_bytes(rgbaq, IO::ByteFormat::LittleEndian)
       io.write_bytes(1_u64, IO::ByteFormat::LittleEndian)
-      gs_x1 = (x1 << 4) & 0xFFFF
-      gs_y1 = (y1 << 4) & 0xFFFF
-      io.write_bytes((gs_y1.to_u64 << 16) | gs_x1.to_u64, IO::ByteFormat::LittleEndian)
+      gs_x1 = ((x1.to_i64 << 4) & 0xFFFF_i64).to_u64
+      gs_y1 = ((y1.to_i64 << 4) & 0xFFFF_i64).to_u64
+      io.write_bytes((gs_y1 << 16) | gs_x1, IO::ByteFormat::LittleEndian)
       io.write_bytes(0x0d_u64, IO::ByteFormat::LittleEndian) # Register 0x0D = XYZ3 (queue without kick)
-      gs_x2 = (x2 << 4) & 0xFFFF
-      gs_y2 = (y2 << 4) & 0xFFFF
-      io.write_bytes((gs_y2.to_u64 << 16) | gs_x2.to_u64, IO::ByteFormat::LittleEndian)
+      gs_x2 = ((x2.to_i64 << 4) & 0xFFFF_i64).to_u64
+      gs_y2 = ((y2.to_i64 << 4) & 0xFFFF_i64).to_u64
+      io.write_bytes((gs_y2 << 16) | gs_x2, IO::ByteFormat::LittleEndian)
       io.write_bytes(5_u64, IO::ByteFormat::LittleEndian)    # Register 0x05 = XYZ2 (queue and kick draw)
     end
 
@@ -968,13 +1053,13 @@ module Citrine
       rgbaq = (0x3F800000_u64 << 32) | (a.to_u64 << 24) | (b.to_u64 << 16) | (g.to_u64 << 8) | r.to_u64
       io.write_bytes(rgbaq, IO::ByteFormat::LittleEndian)
       io.write_bytes(1_u64, IO::ByteFormat::LittleEndian) # RGBAQ (0x01)
-      gs_x1 = (x1 << 4) & 0xFFFF
-      gs_y1 = (y1 << 4) & 0xFFFF
-      io.write_bytes((gs_y1.to_u64 << 16) | gs_x1.to_u64, IO::ByteFormat::LittleEndian)
+      gs_x1 = ((x1.to_i64 << 4) & 0xFFFF_i64).to_u64
+      gs_y1 = ((y1.to_i64 << 4) & 0xFFFF_i64).to_u64
+      io.write_bytes((gs_y1 << 16) | gs_x1, IO::ByteFormat::LittleEndian)
       io.write_bytes(0x0d_u64, IO::ByteFormat::LittleEndian) # XYZ3 (0x0D)
-      gs_x2 = (x2 << 4) & 0xFFFF
-      gs_y2 = (y2 << 4) & 0xFFFF
-      io.write_bytes((gs_y2.to_u64 << 16) | gs_x2.to_u64, IO::ByteFormat::LittleEndian)
+      gs_x2 = ((x2.to_i64 << 4) & 0xFFFF_i64).to_u64
+      gs_y2 = ((y2.to_i64 << 4) & 0xFFFF_i64).to_u64
+      io.write_bytes((gs_y2 << 16) | gs_x2, IO::ByteFormat::LittleEndian)
       io.write_bytes(5_u64, IO::ByteFormat::LittleEndian)    # XYZ2 (0x05)
     end
 
@@ -998,11 +1083,17 @@ module Citrine
       rgbaq = (0x3F800000_u64 << 32) | (a.to_u64 << 24) | (b.to_u64 << 16) | (g.to_u64 << 8) | r.to_u64
       io.write_bytes(rgbaq, IO::ByteFormat::LittleEndian)
       io.write_bytes(1_u64, IO::ByteFormat::LittleEndian) # RGBAQ (0x01)
-      io.write_bytes(((y1 << 4).to_u64 << 16) | (x1 << 4).to_u64, IO::ByteFormat::LittleEndian)
+      gs_x1 = ((x1.to_i64 << 4) & 0xFFFF_i64).to_u64
+      gs_y1 = ((y1.to_i64 << 4) & 0xFFFF_i64).to_u64
+      io.write_bytes((gs_y1 << 16) | gs_x1, IO::ByteFormat::LittleEndian)
       io.write_bytes(0x0d_u64, IO::ByteFormat::LittleEndian) # XYZ3 (0x0D)
-      io.write_bytes(((y2 << 4).to_u64 << 16) | (x2 << 4).to_u64, IO::ByteFormat::LittleEndian)
+      gs_x2 = ((x2.to_i64 << 4) & 0xFFFF_i64).to_u64
+      gs_y2 = ((y2.to_i64 << 4) & 0xFFFF_i64).to_u64
+      io.write_bytes((gs_y2 << 16) | gs_x2, IO::ByteFormat::LittleEndian)
       io.write_bytes(0x0d_u64, IO::ByteFormat::LittleEndian) # XYZ3 (0x0D)
-      io.write_bytes(((y3 << 4).to_u64 << 16) | (x3 << 4).to_u64, IO::ByteFormat::LittleEndian)
+      gs_x3 = ((x3.to_i64 << 4) & 0xFFFF_i64).to_u64
+      gs_y3 = ((y3.to_i64 << 4) & 0xFFFF_i64).to_u64
+      io.write_bytes((gs_y3 << 16) | gs_x3, IO::ByteFormat::LittleEndian)
       io.write_bytes(5_u64, IO::ByteFormat::LittleEndian)    # XYZ2 (0x05)
     end
 
@@ -1054,7 +1145,8 @@ module Citrine
       quad_count
     end
 
-    def parse_cbc(cbc_bytes : Bytes?) : Array(Phase)
+    def parse_cbc(cbc_bytes : Bytes?) : Tuple(Array(Phase), Array(String))
+      debug_messages = [] of String
       if cbc_bytes && cbc_bytes.size > 20 && String.new(cbc_bytes[0..3]) == "CBC1"
         begin
           io = IO::Memory.new(cbc_bytes)
@@ -1266,14 +1358,21 @@ module Citrine
                   if phases.size >= 4
                     first_frame_done = true
                   end
-                when 70 # Log / puts / print
+                when 70, 71 # Log / puts / print / debug_puts / debug_log
                   t_idx = regs[base].to_i
                   text = constants[t_idx]?.try(&.str_val) || ""
+                  unless text.empty?
+                    debug_messages << text
+                  end
                   if current_commands.empty?
                     current_commands << DrawCommand.new(DrawCommand::Type::Clear, color: 0xFF000000_u32)
                   end
                   y_pos = 60 + (current_commands.count { |c| c.type == DrawCommand::Type::Text } * 28)
                   current_commands << DrawCommand.new(DrawCommand::Type::Text, 60, y_pos, 20, 0, color: 0xFFFFFFFF_u32, text: text)
+                when 99 # Panic
+                  t_idx = regs[base].to_i
+                  text = constants[t_idx]?.try(&.str_val) || "Citrine PS2 VM Panic"
+                  debug_messages << "[CITRINE PANIC] #{text}"
                 end
               end
             end
@@ -1290,7 +1389,7 @@ module Citrine
               phases << Phase.new(current_commands.dup, 0_u32)
             end
 
-            return phases if phases.size > 0
+            return {phases, debug_messages} if phases.size > 0
           end
         rescue ex
           STDERR.puts "[parse_cbc Exception] #{ex.class}: #{ex.message}\n#{ex.backtrace.join("\n")}"
@@ -1298,12 +1397,13 @@ module Citrine
       end
 
       # Default Citrine PS2 fallback screen
-      [
+      fallback_phases = [
         Phase.new([
           DrawCommand.new(DrawCommand::Type::Clear, color: 0xFF000000_u32),
           DrawCommand.new(DrawCommand::Type::Text, 60, 60, 20, 0, color: 0xFFFFFFFF_u32, text: "Hello, world!")
         ], 0_u32)
       ]
+      {fallback_phases, debug_messages}
     end
   end
 end

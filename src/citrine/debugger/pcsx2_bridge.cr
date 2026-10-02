@@ -120,10 +120,10 @@ module Citrine
         args << File.expand_path(iso_path)
 
         log_file = @log_path
-        start_pos = 0_i64
         if log_file && File.exists?(log_file)
-          start_pos = File.size(log_file)
+          File.delete(log_file) rescue nil
         end
+        start_pos = 0_i64
 
         # Spawn PCSX2 process
         process = Process.new(bin, args)
@@ -131,12 +131,15 @@ module Citrine
 
         # Start background fiber to tail emulog.txt
         stop_tailing = false
+        current_offset = start_pos
         tail_fiber = spawn do
-          current_offset = start_pos
           while !stop_tailing
             if log_file && File.exists?(log_file)
               begin
                 file_size = File.size(log_file)
+                if file_size < current_offset
+                  current_offset = 0_i64
+                end
                 if file_size > current_offset
                   File.open(log_file, "r") do |f|
                     f.seek(current_offset)
@@ -193,6 +196,32 @@ module Citrine
         end
 
         stop_tailing = true
+
+        # Final drain to capture any remaining lines flushed on exit
+        if log_file && File.exists?(log_file)
+          begin
+            file_size = File.size(log_file)
+            if file_size < current_offset
+              current_offset = 0_i64
+            end
+            if file_size > current_offset
+              File.open(log_file, "r") do |f|
+                f.seek(current_offset)
+                while line = f.gets
+                  line_clean = line.strip
+                  unless line_clean.empty?
+                    @log_history << line_clean
+                    block.call(line_clean)
+                    check_for_faults(line_clean)
+                  end
+                end
+                current_offset = f.pos
+              end
+            end
+          rescue
+          end
+        end
+
         @is_running = false
         status
       end

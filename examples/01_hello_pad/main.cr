@@ -5,6 +5,7 @@ require "../../src/stubs/citrine"
 
 puts "Hello, world! sol.vin here!"
 puts "1234567890ABCDEF"
+debug_puts "[CITRINE DEBUG] Hello World booted on PlayStation 2 EE!"
 
 Citrine.main_loop do
 	sleep 10
