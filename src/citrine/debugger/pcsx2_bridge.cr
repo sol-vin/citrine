@@ -121,7 +121,14 @@ module Citrine
 
         log_file = @log_path
         if log_file && File.exists?(log_file)
-          File.delete(log_file) rescue nil
+          5.times do
+            begin
+              File.delete(log_file)
+              break
+            rescue
+              sleep 0.1.seconds
+            end
+          end
         end
         start_pos = 0_i64
 
@@ -233,6 +240,10 @@ module Citrine
         {% else %}
           process.terminate rescue nil
         {% end %}
+        10.times do
+          break if process.terminated?
+          sleep 0.1.seconds
+        end
       end
 
       private def check_for_faults(line : String)
