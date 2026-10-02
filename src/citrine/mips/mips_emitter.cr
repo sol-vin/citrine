@@ -117,6 +117,14 @@ module Citrine
         emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x2B_u32)
       end
 
+      def slti(rt : Int32, rs : Int32, imm : Int32)
+        emit((0x0A_u32 << 26) | (rs.to_u32 << 21) | (rt.to_u32 << 16) | (imm.to_u32 & 0xFFFF))
+      end
+
+      def sltiu(rt : Int32, rs : Int32, imm : Int32)
+        emit((0x0B_u32 << 26) | (rs.to_u32 << 21) | (rt.to_u32 << 16) | (imm.to_u32 & 0xFFFF))
+      end
+
       def subu(rd : Int32, rs : Int32, rt : Int32)
         emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x23_u32)
       end

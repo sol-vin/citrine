@@ -70,7 +70,7 @@ module Citrine
     end
 
     def generate(cbc_bytes : Bytes? = nil, input_schedule : Array(VirtualInput) = [] of VirtualInput) : Bytes
-      phases, boot_messages, loop_start_phase = parse_cbc(cbc_bytes)
+      phases, boot_messages, loop_start_phase, is_animated = parse_cbc(cbc_bytes)
 
       # Build GIF Packets
       env_packet = GifPacketBuilder.build_env_packet
@@ -88,6 +88,18 @@ module Citrine
         phase_addrs << curr_addr
         curr_addr += pkt.size.to_u32
       end
+
+      # Phase dispatch table in .rodata for O(1) indexed frames
+      phase_table_addr = curr_addr
+      phase_table_bytes = IO::Memory.new
+      if is_animated
+        phases.each_with_index do |_, i|
+          phase_table_bytes.write_bytes(phase_addrs[i], IO::ByteFormat::LittleEndian)
+          phase_table_bytes.write_bytes(phase_qwcs[i].to_u32, IO::ByteFormat::LittleEndian)
+        end
+        curr_addr += phase_table_bytes.size.to_u32
+      end
+      phase_table_slice = phase_table_bytes.to_slice
 
       # String addresses in .rodata
       banner_str = "[CITRINE] PS2 EE Engine Initialized\n\0"
@@ -160,6 +172,7 @@ module Citrine
       emitter.sw(ZERO, 20, T0)    # pad buttons prev = 0     (0x70000014)
       emitter.sw(ZERO, 24, T0)    # pad buttons pressed = 0  (0x70000018)
       emitter.sw(ZERO, 28, T0)    # pad buttons released = 0 (0x7000001C)
+      emitter.sw(ZERO, 32, T0)    # current bank = 0         (0x70000020)
       emitter.j("main")
       emitter.nop
 
@@ -254,7 +267,15 @@ module Citrine
       emitter.addiu(T1, T1, 1)
       emitter.sw(T1, 4, T0)
 
-      if phases.size == 1
+      if is_animated
+        emitter.lw(T2, 8, T0) # T2 = phase index
+        emitter.sll(T3, T2, 3) # T3 = phase_index * 8
+        emitter.lui(T8, (phase_table_addr >> 16).to_i32)
+        emitter.ori(T8, T8, (phase_table_addr & 0xFFFF).to_i32)
+        emitter.addu(T8, T8, T3)
+        emitter.lw(T7, 0, T8) # D2_MADR
+        emitter.lw(T6, 4, T8) # D2_QWC
+      elsif phases.size == 1
         emitter.lui(T7, (phase_addrs[0] >> 16).to_i32)
         emitter.ori(T7, T7, (phase_addrs[0] & 0xFFFF).to_i32)
         emitter.ori(T6, ZERO, phase_qwcs[0].to_i32)
@@ -417,7 +438,49 @@ module Citrine
       # Reset current buttons at 0x70000010 to 0 (so next frame re-polls schedule or hardware)
       emitter.sw(ZERO, 16, T0)
 
-      if phases.size > 1
+      if is_animated
+        # Animated mode bank & frame advance:
+        emitter.lw(T5, 24, T0) # T5 = pressed edges
+        emitter.lw(T4, 32, T0) # T4 = current_bank (at 0x70000020)
+
+        # 1. Check Triangle (bit 12: 0x1000): reset to Bank 0
+        emitter.andi(T7, T5, 0x1000)
+        emitter.beqz(T7, "chk_cross_advance")
+        emitter.nop
+        emitter.sw(ZERO, 32, T0) # current_bank = 0
+        emitter.sw(ZERO, 8, T0)  # phase_index = 0
+        emitter.j("advance_frame_done")
+        emitter.nop
+
+        emitter.label("chk_cross_advance")
+        # 2. Check Cross (bit 14: 0x4000): if current_bank < 3, advance bank!
+        emitter.andi(T7, T5, 0x4000)
+        emitter.beqz(T7, "advance_frame")
+        emitter.nop
+        emitter.sltiu(T7, T4, 3) # T7 = 1 if current_bank < 3
+        emitter.beqz(T7, "advance_frame")
+        emitter.nop
+        emitter.addiu(T4, T4, 1) # current_bank += 1
+        emitter.sw(T4, 32, T0)
+        emitter.sll(T2, T4, 6)   # phase_index = current_bank * 64
+        emitter.sw(T2, 8, T0)
+        emitter.j("advance_frame_done")
+        emitter.nop
+
+        emitter.label("advance_frame")
+        # 3. Every frame: advance phase_index within current bank (modulo 64)
+        emitter.lw(T2, 8, T0)    # T2 = phase_index
+        emitter.addiu(T2, T2, 1) # phase_index++
+        emitter.andi(T7, T2, 63) # if (phase_index & 63) == 0, wrapped around 64!
+        emitter.bnez(T7, "store_phase_index")
+        emitter.nop
+        emitter.addiu(T2, T2, -64) # wrap back to start of bank!
+
+        emitter.label("store_phase_index")
+        emitter.sw(T2, 8, T0)
+
+        emitter.label("advance_frame_done")
+      elsif phases.size > 1
         # Check if Triangle button (bit 12: 0x1000) was pressed in edges (0x70000018)
         # to reset phase index back to 0 (single logo state)
         emitter.lw(T5, 24, T0)
@@ -598,6 +661,9 @@ module Citrine
       phase_packets.each do |pkt|
         rodata_bytes.write(pkt)
       end
+      if is_animated
+        rodata_bytes.write(phase_table_slice)
+      end
       rodata_bytes.write(banner_str.to_slice)
       boot_messages.each do |msg|
         rodata_bytes.write("#{msg}\n\0".to_slice)
@@ -660,7 +726,7 @@ module Citrine
       ElfWriter.write(text_data, rodata_data, data_data, symbols, 0x00100000_u32)
     end
 
-    def parse_cbc(cbc_bytes : Bytes?) : Tuple(Array(Phase), Array(String), Int32)
+    def parse_cbc(cbc_bytes : Bytes?) : Tuple(Array(Phase), Array(String), Int32, Bool)
       boot_messages = [] of String
       loop_start_phase = 0
       if cbc_bytes && cbc_bytes.size > 20 && String.new(cbc_bytes[0..3]) == "CBC1"
@@ -739,7 +805,7 @@ module Citrine
             current_commands = [] of DrawCommand
             phases = [] of Phase
             pc = 0
-            max_steps = 10000
+            max_steps = 600_000
             steps = 0
             first_frame_done = false
             in_main_loop = false
@@ -757,6 +823,14 @@ module Citrine
             end
             simulated_button_press = false
             button_phase_count = 0
+
+            is_animated = false
+            animation_checked = false
+            prev_frame_cmds = [] of DrawCommand
+            anim_frame_count = 0
+            anim_bank = 0
+            max_banks = 4
+            frames_per_bank = 64
 
             while pc >= 0 && pc < instructions.size && steps < max_steps && !first_frame_done
               steps += 1
@@ -867,7 +941,8 @@ module Citrine
                   in_main_loop = true
                   regs[dst_r] = 1_i64
                 when 40, 41, 42 # ButtonDown, ButtonPressed, ButtonReleased
-                  btn = regs[base_r].to_i
+                  btn_idx = regs[base_r].to_i
+                  btn = constants[btn_idx]?.try(&.u32_val) || btn_idx.to_u32
                   if btn == 14 # Button::Cross
                     regs[dst_r] = simulated_button_press ? 1_i64 : 0_i64
                   else
@@ -875,7 +950,54 @@ module Citrine
                   end
                 when 11 # EndDrawing
                   if current_commands.size > 0
-                    if has_button_checks
+                    if !animation_checked
+                      if phases.empty?
+                        # Record Frame 0 without simulated button press
+                        prev_frame_cmds = current_commands.dup
+                        phases << Phase.new(current_commands.dup, 1_u32, current_loop_message)
+                        current_loop_message = nil
+                        current_commands = [] of DrawCommand
+                        simulated_button_press = false
+                      else
+                        # Frame 1: check if scene is moving autonomously
+                        animation_checked = true
+                        if current_commands != prev_frame_cmds
+                          # Active animation loop!
+                          is_animated = true
+                          phases << Phase.new(current_commands.dup, 1_u32, current_loop_message)
+                          current_loop_message = nil
+                          current_commands = [] of DrawCommand
+                          anim_frame_count = 2
+                        elsif has_button_checks
+                          # Static scene with button checks (e.g. 01_hello_pad, 08_controller_tester)
+                          phases[0].delay_frames = 0_u32
+                          button_phase_count += 1
+                          simulated_button_press = true
+                          current_commands = [] of DrawCommand
+                        else
+                          phases[0].delay_frames = 0_u32
+                          first_frame_done = true
+                        end
+                      end
+                    elsif is_animated
+                      phases << Phase.new(current_commands.dup, 1_u32, current_loop_message)
+                      current_loop_message = nil
+                      current_commands = [] of DrawCommand
+                      anim_frame_count += 1
+
+                      # Spawn next logo on the boundary between banks (frame 127, 255, 383)
+                      if (anim_frame_count % frames_per_bank) == (frames_per_bank - 1) && anim_bank < (max_banks - 1)
+                        simulated_button_press = true
+                        anim_bank += 1
+                      else
+                        simulated_button_press = false
+                      end
+
+                      if anim_frame_count >= max_banks * frames_per_bank
+                        first_frame_done = true
+                      end
+                    else
+                      # Static button handling
                       duplicate_idx = phases.index { |p| p.commands == current_commands }
                       if duplicate_idx
                         if duplicate_idx == 0 && current_loop_message
@@ -893,9 +1015,6 @@ module Citrine
                           current_commands = [] of DrawCommand
                         end
                       end
-                    else
-                      phases << Phase.new(current_commands.dup, 0_u32)
-                      first_frame_done = true
                     end
                   end
                 when 12 # ClearBackground
@@ -1149,8 +1268,8 @@ module Citrine
               phases << Phase.new(current_commands.dup, 0_u32, current_loop_message)
             end
 
-            loop_start = (phases.size > 1 && phases[0].message.nil? && !has_button_checks) ? 1 : 0
-            return {phases, boot_messages, loop_start} if phases.size > 0
+            loop_start = (phases.size > 1 && phases[0].message.nil? && !has_button_checks && !is_animated) ? 1 : 0
+            return {phases, boot_messages, loop_start, is_animated} if phases.size > 0
           end
         rescue ex
           STDERR.puts "[parse_cbc Exception] #{ex.class}: #{ex.message}\n#{ex.backtrace.join("\n")}"
@@ -1164,7 +1283,7 @@ module Citrine
           DrawCommand.new(DrawCommand::Type::Text, 60, 60, 20, 0, color: 0xFFFFFFFF_u32, text: "Hello, world!")
         ], 0_u32)
       ]
-      {fallback_phases, boot_messages, 0}
+      {fallback_phases, boot_messages, 0, false}
     end
   end
 end

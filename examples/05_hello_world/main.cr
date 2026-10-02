@@ -110,8 +110,8 @@ Citrine.set_target_fps(60)
 rng = SimpleRng.new(42)
 logos = [] of BouncingLogo
 
-# Initial logo: starts at (120, 100), moving southeast, Blue BG with Yellow text
-logos << BouncingLogo.new(120, 100, 3, 2, 3, 2)
+# Initial logo: starts at (240, 200), moving southeast, Blue BG with Yellow text
+logos << BouncingLogo.new(240, 200, 4, 3, 3, 2)
 
 Citrine.main_loop do
   # Check Cross button: spawn a new bouncing logo at random position & direction (max 16)
@@ -168,7 +168,7 @@ Citrine.main_loop do
   end
 
   # Status HUD
-  Citrine.draw_text("Press CROSS (X) to spawn logo (max 16) | TRIANGLE to reset to 1", 70, 418, 14, Color::Yellow)
+  Citrine.draw_text("CROSS (X): SPAWN LOGO | TRIANGLE: RESET (1)", 120, 420, 14, Color::Yellow)
 
   Citrine.end_drawing
 end

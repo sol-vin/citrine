@@ -13,7 +13,7 @@ describe "Citrine PS2 Example 05: Hello World DVD Bouncing Screensaver" do
     # Inject Triangle button at frame 35 (resets back to 1 logo)
     tc.inject_input(frame: 35, button: Citrine::PadButton::Triangle, duration: 2)
 
-    result = tc.boot_pcsx2(timeout: 5.0.seconds)
+    result = tc.boot_pcsx2(timeout: 8.0.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE] PS2 EE Engine Initialized")

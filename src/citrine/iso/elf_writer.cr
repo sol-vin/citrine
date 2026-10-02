@@ -143,10 +143,13 @@ module Citrine
         io.write_bytes(0x1000_u32, IO::ByteFormat::LittleEndian)
 
         # PH 1: Data (.data)
+        data_vaddr = ((entry_point + text_data.size.to_u32 + rodata_data.size.to_u32 + 0xFFF) & ~0xFFF_u32)
+        data_vaddr = 0x00200000_u32 if data_vaddr < 0x00200000_u32
+
         io.write_bytes(PT_LOAD, IO::ByteFormat::LittleEndian)
         io.write_bytes(offset_data, IO::ByteFormat::LittleEndian)
-        io.write_bytes(0x00200000_u32, IO::ByteFormat::LittleEndian)
-        io.write_bytes(0x00200000_u32, IO::ByteFormat::LittleEndian)
+        io.write_bytes(data_vaddr, IO::ByteFormat::LittleEndian)
+        io.write_bytes(data_vaddr, IO::ByteFormat::LittleEndian)
         io.write_bytes(data_data.size.to_u32, IO::ByteFormat::LittleEndian)
         io.write_bytes(data_data.size.to_u32, IO::ByteFormat::LittleEndian)
         io.write_bytes(PF_R | PF_W, IO::ByteFormat::LittleEndian)
@@ -202,7 +205,7 @@ module Citrine
         io.write_bytes(sh_names[:data], IO::ByteFormat::LittleEndian)
         io.write_bytes(SHT_PROGBITS, IO::ByteFormat::LittleEndian)
         io.write_bytes(SHF_ALLOC | SHF_WRITE, IO::ByteFormat::LittleEndian)
-        io.write_bytes(0x00200000_u32, IO::ByteFormat::LittleEndian)
+        io.write_bytes(data_vaddr, IO::ByteFormat::LittleEndian)
         io.write_bytes(offset_data, IO::ByteFormat::LittleEndian)
         io.write_bytes(data_data.size.to_u32, IO::ByteFormat::LittleEndian)
         io.write_bytes(0_u32, IO::ByteFormat::LittleEndian)
