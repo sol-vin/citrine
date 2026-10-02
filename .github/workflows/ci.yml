@@ -123,7 +123,7 @@ jobs:
               New-Item -ItemType Directory -Force -Path ".\bios"
               Copy-Item "$biosFile" ".\bios\SCPH-39001_BIOS_V7_USA_160.BIN" -Force
 
-              Write-Host "PS2 BIOS files present in $biosDir:"
+              Write-Host "PS2 BIOS files present in $biosDir"
               Get-ChildItem $biosDir
             } else {
               Write-Warning "::warning::Could not download PS2 BIOS within timeout. Skipping live PCSX2 specs."
