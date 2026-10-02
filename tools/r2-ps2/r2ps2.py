@@ -96,9 +96,16 @@ class Ps2ElfDissector:
         self.data = data
         self.sections = {}
         self.symbols = []
+        self.entry_point = 0
+        self.flags = 0
         self._parse_elf()
 
     def _parse_elf(self):
+        if len(self.data) >= 4 and self.data[0:4] != b"\x7fELF":
+            elf_pos = self.data.find(b"\x7fELF")
+            if elf_pos != -1:
+                self.data = self.data[elf_pos:]
+
         if len(self.data) < 52 or self.data[0:4] != b"\x7fELF":
             return
         # 32-bit little-endian ELF header

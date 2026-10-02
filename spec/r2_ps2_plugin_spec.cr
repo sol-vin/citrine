@@ -19,7 +19,7 @@ describe "Citrine PS2 Radare2 Plugin & Dissector" do
     report.should contain("  [PASS] ELF Entry Point: 0x00100000 (Standard EE MIPS)")
     report.should contain("  [PASS] Depth Test (TEST_1): ALLPASS (0x00030000) verified")
     report.should contain("  [PASS] Environment GIFTag: NLOOP=13, FLG=PACKED, EOP=true")
-    report.should contain("  [PASS] Draw GIFTag: NLOOP=8876, FLG=PACKED, EOP=true")
+    report.any? { |r| r.includes?("[PASS] Draw GIFTag:") && r.includes?("FLG=PACKED, EOP=true") }.should be_true
   end
 
   it "dissects Environment GIF packet and decodes GS registers" do

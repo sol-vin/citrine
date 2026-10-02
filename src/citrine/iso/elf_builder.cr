@@ -893,7 +893,7 @@ module Citrine
       quad_count
     end
 
-    private def parse_cbc(cbc_bytes : Bytes?) : Array(DrawCommand)
+    def parse_cbc(cbc_bytes : Bytes?) : Array(DrawCommand)
       if cbc_bytes && cbc_bytes.size > 20 && String.new(cbc_bytes[0..3]) == "CBC1"
         begin
           io = IO::Memory.new(cbc_bytes)
@@ -948,8 +948,11 @@ module Citrine
             fns << FnEntry.new(n_idx, argc, num_regs, off, cnt)
           end
 
+          instructions_start_pos = io.pos
+
           main_fn = fns.find { |f| strings[f.name_idx]? == "__main__" }
           if main_fn
+            io.pos = instructions_start_pos + (main_fn.offset.to_i64 * 4)
             instructions = [] of UInt32
             main_fn.count.times do
               instructions << io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
@@ -966,10 +969,12 @@ module Citrine
               imm16 = instr & 0xFFFF
 
               case opcode
+              when 1 # Move
+                regs[dst] = regs[a] if dst < 32 && a < 32
               when 4 # LoadInt
-                regs[dst] = imm16.to_u32
+                regs[dst] = imm16.to_u32 if dst < 32
               when 5 # LoadConst
-                regs[dst] = imm16.to_u32
+                regs[dst] = imm16.to_u32 if dst < 32
               when 52 # CallNative
                 base = a
                 native_id = b
@@ -1015,19 +1020,10 @@ module Citrine
         end
       end
 
-      # Default Citrine PS2 welcome card and information screen
+      # Default Citrine PS2 fallback screen
       [
         DrawCommand.new(DrawCommand::Type::Clear, color: 0xFF000000_u32),
-        DrawCommand.new(DrawCommand::Type::Rect, 40, 40, 600, 408, color: 0xFFFF0000_u32),
-        DrawCommand.new(DrawCommand::Type::Rect, 44, 44, 596, 404, color: 0xFF000000_u32),
-        DrawCommand.new(DrawCommand::Type::Rect, 120, 180, 520, 250, color: 0xFF0000FF_u32),
-        DrawCommand.new(DrawCommand::Type::Text, 180, 80, 24, 0, color: 0xFF00FFFF_u32, text: "CITRINE PS2 TOOLKIT"),
-        DrawCommand.new(DrawCommand::Type::Text, 110, 120, 16, 0, color: 0xFFFFFFFF_u32, text: "Crystal Virtual Machine for Sony PlayStation 2"),
-        DrawCommand.new(DrawCommand::Type::Text, 150, 205, 20, 0, color: 0xFFFFFFFF_u32, text: "HELLO PLAYSTATION 2!"),
-        DrawCommand.new(DrawCommand::Type::Text, 110, 280, 14, 0, color: 0xFF00FF00_u32, text: "Target: Sony Emotion Engine (R5900 @ 294MHz)"),
-        DrawCommand.new(DrawCommand::Type::Text, 110, 305, 14, 0, color: 0xFF00FF00_u32, text: "Renderer: Graphic Synthesizer (GS 4MB eDRAM @ 147MHz)"),
-        DrawCommand.new(DrawCommand::Type::Text, 110, 330, 14, 0, color: 0xFF00FF00_u32, text: "Memory: 32MB Main RAM | 16KB Scratchpad RAM (SPRAM)"),
-        DrawCommand.new(DrawCommand::Type::Text, 230, 370, 14, 0, color: 0xFF00FFFF_u32, text: "Press START to proceed")
+        DrawCommand.new(DrawCommand::Type::Text, 60, 60, 20, 0, color: 0xFFFFFFFF_u32, text: "Hello, world!")
       ]
     end
   end
