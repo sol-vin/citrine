@@ -50,19 +50,22 @@ module Citrine
       nil
     end
 
-    def compile_game(source_path : String, output_cbc_path : String) : BytecodeCompiler
+    def compile_game(source_path : String, output_cbc_path : String, release : Bool = false) : BytecodeCompiler
       source = File.read(source_path)
       parser = DslParser.new(filename: source_path)
       program = parser.parse(source)
 
       compiler = BytecodeCompiler.new(filename: source_path)
+      compiler.release_mode = release
       bytes = compiler.compile(program)
 
       File.write(output_cbc_path, bytes)
 
-      # Write source map alongside .cbc
-      sym_path = output_cbc_path.gsub(/\.cbc$/, ".cbcsym")
-      compiler.source_map.to_file(sym_path)
+      # Write source map alongside .cbc (omitted in release mode)
+      unless release
+        sym_path = output_cbc_path.gsub(/\.cbc$/, ".cbcsym")
+        compiler.source_map.to_file(sym_path)
+      end
 
       compiler
     end

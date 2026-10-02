@@ -1,0 +1,75 @@
+id: MODULAR_SUBSYSTEMS
+title: Modular Subsystems (Physics, UI, Scene, Hardware)
+summary: Opt-in engine modules strictly loaded via require "citrine/..." for zero overhead in core builds.
+track: 11_modular_subsystems
+overview: |
+  Citrine enforces a strict modularity boundary: physics, immediate-mode GUI, scene management, camera controllers,
+  and low-level hardware coprocessors are kept out of the core runtime unless explicitly required.
+  When required via `require "citrine/<subsystem>"`, the module definitions are merged into the compilation unit.
+related_sources:
+  - "src/stubs/citrine/physics.cr"
+  - "src/stubs/citrine/ui.cr"
+  - "src/stubs/citrine/scene.cr"
+  - "src/stubs/citrine/camera.cr"
+  - "src/stubs/citrine/hardware/vu0.cr"
+  - "src/stubs/citrine/hardware/dmac.cr"
+  - "src/stubs/citrine/hardware/gs.cr"
+  - "src/stubs/citrine/hardware/cdvd.cr"
+sections:
+  - id: physics_subsystem
+    title: 2D Fixed-Point Physics & Verlet Particles
+    summary: require "citrine/physics"
+    content: |
+      Import deterministic physics:
+      ```crystal
+      require "citrine/physics"
+
+      # AABB Collision Check
+      colliding = Citrine::Physics2D.check_collision_recs(x1, y1, w1, h1, x2, y2, w2, h2)
+
+      # Verlet Particle Dynamics
+      particle = Citrine::VerletParticle.new(320.0, 100.0)
+      particle.update(dt: 1.0, gravity: 0.35)
+      particle.constrain(20.0, 20.0, 620.0, 420.0, bounce: 0.75)
+      ```
+  - id: ui_subsystem
+    title: Immediate-Mode UI (Raygui Style)
+    summary: require "citrine/ui"
+    content: |
+      Render Dear ImGui / Raygui-style immediate-mode interfaces on the PS2 with DualShock navigation:
+      ```crystal
+      require "citrine/ui"
+
+      Citrine::UI.scope do |ui|
+        ui.panel(140, 60, 360, 320, "SYSTEM CONFIGURATION")
+        ui.label("Audio Volume:", 160, 96)
+        volume = ui.slider_float("SFX", volume, 0.0, 1.0, 160, 116)
+        rumble = ui.checkbox("Vibration", rumble, 160, 150)
+        ui.progress_bar(hp, 100.0, 160, 240)
+
+        if ui.button("Apply", 160, 290)
+          # Handled via Cross button when focused
+        end
+      end
+      ```
+  - id: scene_and_camera
+    title: Scene Manager & Camera2D
+    summary: require "citrine/scene" and require "citrine/camera"
+    content: |
+      Structure games with clean lifecycle hooks and camera tracking:
+      ```crystal
+      require "citrine/scene"
+      require "citrine/camera"
+
+      cam = Camera2D.new(offset_x: 320.0, offset_y: 224.0, zoom: 1.0)
+      cam.follow(player_x, player_y, lerp_speed: 0.1)
+      ```
+  - id: hardware_modules
+    title: Low-Level Emotion Engine Hardware Modules
+    summary: VU0 Coprocessor 2, DMAC, GS registers, and CDVD disc sector streaming.
+    content: |
+      Access low-level PS2 hardware coprocessors:
+      - `require "citrine/hardware/vu0"`: Vector Unit 0 128-bit SIMD math.
+      - `require "citrine/hardware/dmac"`: Direct Memory Access Controller channels (GIF channel 2, SIF DMA).
+      - `require "citrine/hardware/gs"`: Low-level GS registers (PMODE, DISPFB, DISPLAY, CSR) & CLUT interleave.
+      - `require "citrine/hardware/cdvd"`: Disc sector reading (`sceCdRead`) and LBA conversions.

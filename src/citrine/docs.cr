@@ -9,7 +9,7 @@ module Citrine
   #
   # ## Learning Tracks & Topic Index
   #
-  # The documentation is paced into 9 distinct tracks:
+  # The documentation is paced into 11 distinct tracks:
   #
   # ### 1. Getting started (`A_GETTING_STARTED`)
   # <table>
@@ -173,6 +173,42 @@ module Citrine
   #   </tbody>
   # </table>
   #
+  # ### 10. Metaprogramming (`J_METAPROGRAMMING`)
+  # <table>
+  #   <thead>
+  #     <tr>
+  #       <th>Submodule</th>
+  #       <th>Title</th>
+  #       <th>Description</th>
+  #     </tr>
+  #   </thead>
+  #   <tbody>
+  #     <tr>
+  #       <td><code>METAPROGRAMMING</code></td>
+  #       <td><strong>PS2 Metaprogramming, Macros & ECS</strong></td>
+  #       <td>Compile-time macro expansion, declarative ECS component memory layout, and finite state machines.</td>
+  #     </tr>
+  #   </tbody>
+  # </table>
+  #
+  # ### 11. Modular subsystems (`K_MODULAR_SUBSYSTEMS`)
+  # <table>
+  #   <thead>
+  #     <tr>
+  #       <th>Submodule</th>
+  #       <th>Title</th>
+  #       <th>Description</th>
+  #     </tr>
+  #   </thead>
+  #   <tbody>
+  #     <tr>
+  #       <td><code>MODULAR_SUBSYSTEMS</code></td>
+  #       <td><strong>Modular Subsystems (Physics, UI, Scene, Hardware)</strong></td>
+  #       <td>Opt-in engine modules strictly loaded via require "citrine/..." for zero overhead in core builds.</td>
+  #     </tr>
+  #   </tbody>
+  # </table>
+  #
   module Docs
     # **Quick-Start Commands**: Essential commands for building, running, and testing.
     #
@@ -216,6 +252,12 @@ module Citrine
     # ##### 9. Testing suite (`I_TESTING_SUITE`)
     # - `I_TESTING_SUITE::TESTING_SUITE`: **PS2 Hardware Testing Suite & Spec DSL** &mdash; Automated PCSX2 testing suite with hardware matchers, SPRAM corruption detection, and crash symbolication.
     #
+    # ##### 10. Metaprogramming (`J_METAPROGRAMMING`)
+    # - `J_METAPROGRAMMING::METAPROGRAMMING`: **PS2 Metaprogramming, Macros & ECS** &mdash; Compile-time macro expansion, declarative ECS component memory layout, and finite state machines.
+    #
+    # ##### 11. Modular subsystems (`K_MODULAR_SUBSYSTEMS`)
+    # - `K_MODULAR_SUBSYSTEMS::MODULAR_SUBSYSTEMS`: **Modular Subsystems (Physics, UI, Scene, Hardware)** &mdash; Opt-in engine modules strictly loaded via require "citrine/..." for zero overhead in core builds.
+    #
     def self.topic_02_reading_paths : Nil; end
 
     # **Master Table of Contents**: Complete hierarchical topic index.
@@ -249,6 +291,12 @@ module Citrine
     # ##### `I_TESTING_SUITE`
     # - `I_TESTING_SUITE::TESTING_SUITE`: **PS2 Hardware Testing Suite & Spec DSL** &mdash; Automated PCSX2 testing suite with hardware matchers, SPRAM corruption detection, and crash symbolication.
     #
+    # ##### `J_METAPROGRAMMING`
+    # - `J_METAPROGRAMMING::METAPROGRAMMING`: **PS2 Metaprogramming, Macros & ECS** &mdash; Compile-time macro expansion, declarative ECS component memory layout, and finite state machines.
+    #
+    # ##### `K_MODULAR_SUBSYSTEMS`
+    # - `K_MODULAR_SUBSYSTEMS::MODULAR_SUBSYSTEMS`: **Modular Subsystems (Physics, UI, Scene, Hardware)** &mdash; Opt-in engine modules strictly loaded via require "citrine/..." for zero overhead in core builds.
+    #
     def self.topic_03_table_of_contents : Nil; end
 
     # :nodoc:
@@ -269,6 +317,8 @@ require "./docs/f_debugging/debugging"
 require "./docs/g_concurrency/concurrency"
 require "./docs/h_media_pipeline/media_pipeline"
 require "./docs/i_testing_suite/testing_suite"
+require "./docs/j_metaprogramming/metaprogramming"
+require "./docs/k_modular_subsystems/modular_subsystems"
 
 alias CitrineDocs = ::Citrine::Docs
 {% end %}

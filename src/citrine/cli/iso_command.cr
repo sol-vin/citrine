@@ -25,11 +25,12 @@ module Citrine
         end
 
         runner = Runner.new
+        release_mode = args.includes?("--release")
         cbc_path = if input_file.ends_with?(".cbc")
                      input_file
                    else
                      temp_cbc = input_file.gsub(/\.cr$/, ".cbc")
-                     runner.compile_game(input_file, temp_cbc)
+                     runner.compile_game(input_file, temp_cbc, release: release_mode)
                      temp_cbc
                    end
 

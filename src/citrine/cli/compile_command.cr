@@ -5,9 +5,9 @@ module Citrine
   module CLI
     class CompileCommand
       def self.run(args : Array(String))
-        input_file = args.first?
+        input_file = args.reject(&.starts_with?("-")).first?
         unless input_file && File.exists?(input_file)
-          puts "Usage: citrine compile <input.cr> [-o <output.cbc>]"
+          puts "Usage: citrine compile <input.cr> [-o <output.cbc>] [--release]"
           exit(1)
         end
 
@@ -16,10 +16,12 @@ module Citrine
           output_file = args[idx + 1]? || "game.cbc"
         end
 
-        puts "[Citrine] Compiling #{input_file} -> #{output_file}..."
+        release_mode = args.includes?("--release")
+        mode_str = release_mode ? " [RELEASE - Dead code stripped]" : " [DEBUG]"
+        puts "[Citrine] Compiling #{input_file} -> #{output_file}#{mode_str}..."
         runner = Runner.new
         t0 = Time.instant
-        compiler = runner.compile_game(input_file, output_file)
+        compiler = runner.compile_game(input_file, output_file, release: release_mode)
         dt = (Time.instant - t0).total_milliseconds
 
         size = File.size(output_file)

@@ -1,0 +1,73 @@
+id: METAPROGRAMMING
+title: PS2 Metaprogramming, Macros & ECS
+summary: Compile-time macro expansion, declarative ECS component memory layout, and finite state machines.
+track: 10_metaprogramming
+overview: |
+  Citrine features a compile-time Crystal macro preprocessor (`MacroExpander`) that expands user-defined macros,
+  component-entity-system layouts, and finite state machines directly into standard Crystal AST prior to bytecode emission.
+  This allows zero-overhead metaprogramming without modifying the PlayStation 2 VM inner loop.
+related_sources:
+  - "src/citrine/compiler/macro_expander.cr"
+  - "src/citrine/parser/dsl_parser.cr"
+  - "examples/11_macro_ecs_showcase/main.cr"
+sections:
+  - id: crystal_macros
+    title: Custom Crystal Macros
+    summary: Inlining math, coordinate clamping, and custom code generation.
+    content: |
+      Define Crystal macros with standard `macro` blocks and call them with arguments. The Citrine AST expander
+      performs argument substitution and inlines the resulting expressions:
+
+      ```crystal
+      macro clamp_bound(val, min_v, max_v)
+        if {{val}} < {{min_v}}
+          {{min_v}}
+        elsif {{val}} > {{max_v}}
+          {{max_v}}
+        else
+          {{val}}
+        end
+      end
+
+      player_x = clamp_bound(player_x, 20.0, 600.0)
+      ```
+  - id: ecs_macro
+    title: Declarative ECS Memory Layout
+    summary: citrine_ecs! component declarations.
+    content: |
+      Declare components with `citrine_ecs!`. It emits sequential component ID constants and totals:
+
+      ```crystal
+      citrine_ecs! do
+        component Position, x: Float32, y: Float32
+        component Velocity, vx: Float32, vy: Float32
+        component Health, hp: Int32
+      end
+      # Emits: COMPONENT_POSITION = 1, COMPONENT_VELOCITY = 2, COMPONENT_HEALTH = 3, TOTAL_COMPONENTS = 3
+      ```
+  - id: fsm_macro
+    title: Finite State Machine DSL
+    summary: fsm! state transitions and integer jump tables.
+    content: |
+      Declare entity behavior states with `fsm!`:
+
+      ```crystal
+      fsm PlayerAI, initial: :idle do
+        state :idle
+        state :moving
+        state :attacking
+      end
+
+      # Generates STATE_IDLE, STATE_MOVING, STATE_ATTACKING and player_ai_state = 0
+      ```
+  - id: release_stripping
+    title: Zero-Cost Release Stripping
+    summary: citrine compile --release dead code elimination.
+    content: |
+      Build production ship discs with `--release`:
+      ```bash
+      citrine compile src/main.cr -o build/game.cbc --release
+      citrine iso src/main.cr -o build/game.iso --release
+      ```
+      All calls to `Citrine.log` and `Citrine.debug_overlay=` are eliminated from the AST, `.cbcsym` debug symbol
+      files are omitted, and string constants are pruned from the `.cbc` binary.

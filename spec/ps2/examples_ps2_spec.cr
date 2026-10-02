@@ -120,4 +120,40 @@ describe "Citrine PS2 Examples Runner Suite" do
     result.should_boot_cleanly
     result.should_preserve_spram
   end
+
+  it "boots and verifies Example 11: Macro & ECS Showcase" do
+    tc = Citrine::Spec::Ps2TestCase.new("11_macro_ecs_showcase")
+    tc.target("examples/11_macro_ecs_showcase/main.cr")
+    bytes, sm = tc.compile
+    bytes.size.should be > 18
+    tc.max_registers.should be <= 1024
+
+    result = tc.boot_pcsx2(timeout: 2.seconds)
+    result.should_boot_cleanly
+    result.should_preserve_spram
+  end
+
+  it "boots and verifies Example 12: Immediate-Mode UI" do
+    tc = Citrine::Spec::Ps2TestCase.new("12_immediate_ui")
+    tc.target("examples/12_immediate_ui/main.cr")
+    bytes, sm = tc.compile
+    bytes.size.should be > 18
+    tc.max_registers.should be <= 1024
+
+    result = tc.boot_pcsx2(timeout: 2.seconds)
+    result.should_boot_cleanly
+    result.should_preserve_spram
+  end
+
+  it "boots and verifies Example 13: Physics & Verlet Particles" do
+    tc = Citrine::Spec::Ps2TestCase.new("13_physics_and_particles")
+    tc.target("examples/13_physics_and_particles/main.cr")
+    bytes, sm = tc.compile
+    bytes.size.should be > 18
+    tc.max_registers.should be <= 1024
+
+    result = tc.boot_pcsx2(timeout: 2.seconds)
+    result.should_boot_cleanly
+    result.should_preserve_spram
+  end
 end

@@ -2,6 +2,12 @@ module Citrine
   module CLI
     class TestCommand
       def self.run(args : Array(String))
+        if args.first? == "iso"
+          iso_pattern = args[1]? || "examples/**/game.iso"
+          status = Process.run("crystal", ["run", "src/citrine/spec/iso_runner.cr", "--", iso_pattern], output: Process::Redirect::Inherit, error: Process::Redirect::Inherit)
+          exit(status.exit_code)
+        end
+
         target_path = args.reject(&.starts_with?("-")).first?
 
         puts "======================================================================"

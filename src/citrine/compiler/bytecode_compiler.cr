@@ -58,15 +58,21 @@ module Citrine
     getter strings : Array(String)
     getter functions : Array(CompiledFunction)
     getter filename : String?
+    property release_mode : Bool = false
 
     def initialize(@filename : String? = nil)
       @source_map = SourceMap.new
       @constants = [] of ConstValue
       @strings = [] of String
       @functions = [] of CompiledFunction
+      @release_mode = false
     end
 
     def compile(program : ParsedProgram) : Bytes
+      if @release_mode
+        strip_debug_nodes(program)
+      end
+
       # 1. Compile helper functions / methods
       program.defs.each do |name, def_node|
         compile_function(def_node)
@@ -478,6 +484,11 @@ module Citrine
       # Native API Calls (Citrine.draw_rectangle, etc.)
       if obj_str == "Citrine" || obj_str.empty?
         if native_id = map_native_call(node.name)
+          if @release_mode && (native_id == NativeId::Log || native_id == NativeId::SetDebugOverlay)
+            instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+            return dest
+          end
+
           # Compile args into sequential registers
           arg_regs = node.args.map { |a| compile_node(a, allocator, instructions, fn) }
           base_reg = arg_regs.first? || 0_u8
@@ -710,6 +721,50 @@ module Citrine
     private def record_location(node : Crystal::ASTNode, offset : Int32, fn_name : String)
       if loc = node.location
         @source_map.add(offset, @filename || "main.cr", loc.line_number, loc.column_number, fn_name)
+      end
+    end
+
+    private def is_debug_node?(node : Crystal::ASTNode) : Bool
+      if node.is_a?(Crystal::Call)
+        obj_name = node.obj.try(&.to_s) || ""
+        if obj_name == "Citrine" || obj_name.empty?
+          return true if node.name == "log" || node.name == "debug_overlay="
+        end
+        return true if node.name == "citrine_log"
+      end
+      false
+    end
+
+    private def strip_debug_nodes(program : ParsedProgram)
+      program.top_level_nodes.reject! { |node| is_debug_node?(node) }
+
+      if loop_body = program.main_loop_body
+        program.main_loop_body = strip_debug_from_node(loop_body)
+      end
+
+      program.defs.each do |name, def_node|
+        if body = def_node.body
+          def_node.body = strip_debug_from_node(body)
+        end
+      end
+    end
+
+    private def strip_debug_from_node(node : Crystal::ASTNode) : Crystal::ASTNode
+      case node
+      when Crystal::Expressions
+        cleaned = node.expressions.reject { |child| is_debug_node?(child) }
+        Crystal::Expressions.new(cleaned.map { |child| strip_debug_from_node(child) })
+      when Crystal::If
+        node.then = strip_debug_from_node(node.then)
+        if node_else = node.else
+          node.else = strip_debug_from_node(node_else)
+        end
+        node
+      when Crystal::While
+        node.body = strip_debug_from_node(node.body)
+        node
+      else
+        is_debug_node?(node) ? Crystal::Nop.new : node
       end
     end
 

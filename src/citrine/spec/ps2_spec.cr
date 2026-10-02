@@ -14,6 +14,7 @@ module Citrine
       getter crash_report : Debugger::CrashReport?
       getter status : Process::Status?
       getter spram_canary_valid : Bool
+      getter boot_time_seconds : Float64
 
       def initialize(
         @lines : Array(String) = [] of String,
@@ -21,7 +22,8 @@ module Citrine
         @panic_message : String? = nil,
         @crash_report : Debugger::CrashReport? = nil,
         @status : Process::Status? = nil,
-        @spram_canary_valid : Bool = true
+        @spram_canary_valid : Bool = true,
+        @boot_time_seconds : Float64 = 0.0
       )
       end
 
@@ -51,6 +53,13 @@ module Citrine
       def should_preserve_spram(file = __FILE__, line = __LINE__)
         unless @spram_canary_valid
           fail "Expected SPRAM canary 0xDEADBEEF to be preserved, but corruption was detected.", file, line
+        end
+      end
+
+      def should_not_exceed_boot_time(max_time : Time::Span | Float64, file = __FILE__, line = __LINE__)
+        limit = max_time.is_a?(Time::Span) ? max_time.total_seconds : max_time
+        if @boot_time_seconds > limit
+          fail "Expected boot time to not exceed #{limit}s, but took #{@boot_time_seconds}s.", file, line
         end
       end
     end
