@@ -122,6 +122,15 @@ module Citrine
           modified = true
         end
 
+        unless content.includes?("[Filenames]") && content.includes?("BIOS =")
+          if content.includes?("[Filenames]")
+            content = content.sub("[Filenames]", "[Filenames]\nBIOS = SCPH-39001_BIOS_V7_USA_160.BIN")
+          else
+            content += "\n[Filenames]\nBIOS = SCPH-39001_BIOS_V7_USA_160.BIN\n"
+          end
+          modified = true
+        end
+
         if modified
           File.write(ini_file, content)
         end
@@ -159,36 +168,82 @@ module Citrine
 
         args << File.expand_path(iso_path)
 
-        log_file = @log_path
-        if log_file && File.exists?(log_file)
-          5.times do
-            begin
-              File.delete(log_file)
-              break
-            rescue
-              sleep 0.1.seconds
+        home = Path.home
+        log_candidates = [
+          @log_path,
+          home.join("Documents", "PCSX2", "logs", "emulog.txt").to_s,
+          "C:\\Program Files\\PCSX2\\logs\\emulog.txt",
+          home.join("AppData", "Roaming", "PCSX2", "logs", "emulog.txt").to_s,
+          home.join("AppData", "Local", "PCSX2", "logs", "emulog.txt").to_s,
+          File.expand_path("logs/emulog.txt")
+        ].compact.uniq
+
+        log_candidates.each do |cand|
+          if File.exists?(cand)
+            5.times do
+              begin
+                File.delete(cand)
+                break
+              rescue
+                sleep 0.05.seconds
+              end
             end
           end
         end
         start_pos = 0_i64
 
-        # Spawn PCSX2 process
-        process = Process.new(bin, args)
+        # Spawn PCSX2 process with stdout and stderr pipes captured
+        process = Process.new(
+          bin,
+          args,
+          output: Process::Redirect::Pipe,
+          error: Process::Redirect::Pipe
+        )
         @is_running = true
 
-        # Start background fiber to tail emulog.txt
+        # Start background fibers to capture stdout and stderr directly
+        spawn do
+          if out = process.output?
+            out.each_line do |line|
+              line_clean = line.strip
+              unless line_clean.empty?
+                @log_history << line_clean
+                block.call(line_clean)
+                check_for_faults(line_clean)
+              end
+            end
+          end
+        rescue
+        end
+
+        spawn do
+          if err = process.error?
+            err.each_line do |line|
+              line_clean = line.strip
+              unless line_clean.empty?
+                @log_history << line_clean
+                block.call(line_clean)
+                check_for_faults(line_clean)
+              end
+            end
+          end
+        rescue
+        end
+
+        # Start background fiber to tail emulog.txt across candidate paths
         stop_tailing = false
         current_offset = start_pos
         tail_fiber = spawn do
           while !stop_tailing
-            if log_file && File.exists?(log_file)
+            active_log = log_candidates.find { |cand| File.exists?(cand) }
+            if active_log
               begin
-                file_size = File.size(log_file)
+                file_size = File.size(active_log)
                 if file_size < current_offset
                   current_offset = 0_i64
                 end
                 if file_size > current_offset
-                  File.open(log_file, "r") do |f|
+                  File.open(active_log, "r") do |f|
                     f.seek(current_offset)
                     while line = f.gets
                       line_clean = line.strip
@@ -245,14 +300,14 @@ module Citrine
         stop_tailing = true
 
         # Final drain to capture any remaining lines flushed on exit
-        if log_file && File.exists?(log_file)
+        if active_log = log_candidates.find { |cand| File.exists?(cand) }
           begin
-            file_size = File.size(log_file)
+            file_size = File.size(active_log)
             if file_size < current_offset
               current_offset = 0_i64
             end
             if file_size > current_offset
-              File.open(log_file, "r") do |f|
+              File.open(active_log, "r") do |f|
                 f.seek(current_offset)
                 while line = f.gets
                   line_clean = line.strip

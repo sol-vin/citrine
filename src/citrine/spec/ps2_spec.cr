@@ -28,9 +28,9 @@ module Citrine
       end
 
       private def check_pcsx2_availability(file, line)
-        if @lines.any? { |l| l.includes?("PCSX2 runner not available") }
+        if @lines.empty? || @lines.any? { |l| l.includes?("PCSX2 runner not available") }
           if ENV["REQUIRE_PCSX2"]? == "1"
-            fail "PCSX2 runner was required but failed to launch: #{@lines.first?}", file, line
+            fail "PCSX2 runner was required but failed to launch or produced no output: #{@lines.first?}", file, line
           end
           true
         else

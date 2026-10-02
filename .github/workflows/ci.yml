@@ -72,17 +72,26 @@ jobs:
 
           $iniLines = @(
             "[UI]",
+            "SettingsVersion = 1",
             "SetupWizardIncomplete = false",
+            "ConfirmShutdown = false",
+            "WarnAboutUnsafeSettings = false",
             "",
             "[Folders]",
             "Bios = $biosDir",
             "Logs = $logsDir",
             "",
+            "[Filenames]",
+            "BIOS = SCPH-39001_BIOS_V7_USA_160.BIN",
+            "",
             "[Logging]",
             "EnableSystemConsole = true",
             "EnableFileLogging = true",
+            "EnableTimestamps = true",
             "EnableEEConsole = true",
             "EnableIOPConsole = true",
+            "EnableLogWindow = true",
+            "ShowEESIOInput = true",
             "",
             "[EmuCore]",
             "EnableFastBoot = true"
@@ -90,6 +99,11 @@ jobs:
           $iniLines | Set-Content -Path "$inisDir\PCSX2.ini" -Force
           New-Item -ItemType Directory -Force -Path "C:\Program Files\PCSX2\inis"
           $iniLines | Set-Content -Path "C:\Program Files\PCSX2\inis\PCSX2.ini" -Force
+          New-Item -ItemType Directory -Force -Path "$HOME\AppData\Roaming\PCSX2\inis"
+          $iniLines | Set-Content -Path "$HOME\AppData\Roaming\PCSX2\inis\PCSX2.ini" -Force
+          New-Item -ItemType Directory -Force -Path ".\inis"
+          $iniLines | Set-Content -Path ".\inis\PCSX2.ini" -Force
+          New-Item -ItemType File -Force -Path "C:\Program Files\PCSX2\portable.txt"
 
           if ($env:PCSX2_BIOS_URL) {
             Write-Host "Downloading PS2 BIOS from secure URL..."
@@ -118,10 +132,13 @@ jobs:
             if ((Test-Path "$biosFile") -and (Get-Item "$biosFile").Length -gt 1000000) {
               Write-Host "PS2 BIOS downloaded successfully: $((Get-Item "$biosFile").Length) bytes"
               Copy-Item "$biosFile" "$biosDir\SCPH-39001_BIOS_V7_USA_160.BIN" -Force
+              Copy-Item "$biosFile" "$biosDir\scph39001.bin" -Force
               New-Item -ItemType Directory -Force -Path "C:\Program Files\PCSX2\bios"
               Copy-Item "$biosFile" "C:\Program Files\PCSX2\bios\SCPH-39001_BIOS_V7_USA_160.BIN" -Force
+              Copy-Item "$biosFile" "C:\Program Files\PCSX2\bios\scph39001.bin" -Force
               New-Item -ItemType Directory -Force -Path ".\bios"
               Copy-Item "$biosFile" ".\bios\SCPH-39001_BIOS_V7_USA_160.BIN" -Force
+              Copy-Item "$biosFile" ".\bios\scph39001.bin" -Force
 
               Write-Host "PS2 BIOS files present in $biosDir"
               Get-ChildItem $biosDir
