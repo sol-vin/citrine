@@ -26,7 +26,8 @@ dependencies:
     github: sol-vin/cradare2
     branch: master
   flourite:
-    path: ../flourite
+    github: sol-vin/flourite
+    branch: main
 
 targets:
   citrine:
