@@ -33,7 +33,7 @@ module Citrine
         end
       end
 
-      def boot_pcsx2(timeout : Time::Span = 3.seconds) : Ps2ExecutionResult
+      def boot_pcsx2(timeout : ::Time::Span = 3.seconds) : Ps2ExecutionResult
         iso = @iso_path
         raise "No ISO path provided for ISO test: #{name}" unless iso && File.exists?(iso)
 
@@ -42,7 +42,7 @@ module Citrine
         panic_found = false
         panic_msg : String? = nil
         crash_rep : Debugger::CrashReport? = nil
-        t0 = Time.instant
+        t0 = ::Time.instant
 
         status = bridge.spawn_pcsx2(iso, batch: true, timeout: timeout) do |line|
           lines << line
@@ -53,7 +53,7 @@ module Citrine
           end
         end
 
-        elapsed = (Time.instant - t0).total_seconds
+        elapsed = (::Time.instant - t0).total_seconds
         canary_ok = !lines.any? { |l| l.includes?("SPRAM Stack Canary Corrupted") }
 
         Ps2ExecutionResult.new(
@@ -78,7 +78,7 @@ module Citrine
     # Discovers and boots all ISOs matching a glob pattern
     def self.test_all_isos(
       glob_pattern : String = "examples/**/game.iso",
-      timeout : Time::Span = 3.seconds,
+      timeout : ::Time::Span = 3.seconds,
       &block : (String, Ps2ExecutionResult) -> Nil
     )
       iso_files = Dir.glob(glob_pattern)
@@ -95,7 +95,7 @@ module Citrine
 
     def self.run_iso_suite(
       glob_pattern : String = "examples/**/game.iso",
-      timeout : Time::Span = 3.seconds
+      timeout : ::Time::Span = 3.seconds
     ) : Tuple(Int32, Int32)
       iso_files = Dir.glob(glob_pattern)
       if iso_files.empty?

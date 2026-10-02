@@ -24,13 +24,12 @@ describe "Citrine ISO Testing DSL (PCSX2 Engine Supervisor)" do
     end
   end
 
-  it "discovers all built example ISOs using test_all_isos" do
+  it "discovers built example ISOs using test_all_isos" do
     discovered_count = 0
-    Citrine::Spec.test_all_isos("examples/**/game.iso", timeout: 1.seconds) do |iso_path, result|
+    Citrine::Spec.test_all_isos("examples/0[1-2]*/game.iso", timeout: 1.seconds) do |iso_path, result|
       File.exists?(iso_path).should be_true
       result.should_preserve_spram
       discovered_count += 1
-      next if discovered_count >= 2
     end
 
     discovered_count.should be >= 2

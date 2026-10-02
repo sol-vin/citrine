@@ -117,7 +117,7 @@ module Citrine
           args << "-debugger"
         end
 
-        args << iso_path
+        args << File.expand_path(iso_path)
 
         log_file = @log_path
         start_pos = 0_i64

@@ -1,0 +1,130 @@
+id: ADVANCED_SUBSYSTEMS
+title: Advanced Subsystems (Std, Box2D, Hardware, Shaders)
+summary: Comprehensive standard library, Box2D rigid body physics, USB peripherals, network sockets, and VU1/GS shaders.
+track: 12_advanced_subsystems
+overview: |
+  Citrine extends the PlayStation 2 developer ecosystem with optional, modular subsystems designed for high performance
+  and zero heap allocations during the game loop. Everything is opt-in via standard `require "citrine/..."` imports.
+related_sources:
+  - "src/stubs/citrine/time.cr"
+  - "src/stubs/citrine/math.cr"
+  - "src/stubs/citrine/fastmath.cr"
+  - "src/stubs/citrine/string.cr"
+  - "src/stubs/citrine/collections.cr"
+  - "src/stubs/citrine/draw.cr"
+  - "src/stubs/citrine/physics/box2d.cr"
+  - "src/stubs/citrine/physics/collision.cr"
+  - "src/stubs/citrine/input/usb.cr"
+  - "src/stubs/citrine/net.cr"
+  - "src/stubs/citrine/regex.cr"
+  - "src/stubs/citrine/events.cr"
+  - "src/stubs/citrine/shader.cr"
+  - "src/citrine/compiler/shader_compiler.cr"
+sections:
+  - id: standard_library
+    title: Extended Standard Library (Time, Math, FastMath, String, Collections)
+    summary: require "citrine/time", "citrine/math", "citrine/fastmath", "citrine/string", "citrine/collections"
+    content: |
+      Opt-in standard library utilities crafted for embedded console constraints:
+      ```crystal
+      require "citrine/time"
+      require "citrine/math"
+      require "citrine/fastmath"
+      require "citrine/string"
+      require "citrine/collections"
+
+      timer = Citrine::Timer.new(duration: 2.5_f32, looping: true)
+      rad = Citrine::Math.deg2rad(45.0_f32)
+      inv_s = Citrine::FastMath.fast_inv_sqrt(16.0_f32) # Quake fast inverse square root
+
+      slice = Citrine::StringSlice.new("PLAYER_ONE", 0, 6) # Zero-allocation view
+      list = Citrine::FixedList(Int32).new(16)
+      list << 42
+      list.sort!
+      ```
+  - id: creative_coding_draw
+    title: Processing & P5.js Creative Coding API
+    summary: require "citrine/draw"
+    content: |
+      Emulates the intuitive drawing semantics of Processing with an affine matrix stack:
+      ```crystal
+      require "citrine/draw"
+
+      Citrine::Draw.background(Color.new(15, 18, 26, 255))
+      Citrine::Draw.push_matrix
+      Citrine::Draw.translate(320.0, 224.0)
+      Citrine::Draw.rotate(angle)
+      Citrine::Draw.fill(Color.new(52, 152, 219, 180))
+      Citrine::Draw.rect(-40.0, -40.0, 80.0, 80.0)
+      Citrine::Draw.circle(0.0, 0.0, 20.0)
+      Citrine::Draw.pop_matrix
+      ```
+  - id: box2d_and_collision
+    title: Box2D Rigid Body Physics & Continuous Collision Detection
+    summary: require "citrine/physics/box2d" and "citrine/physics/collision"
+    content: |
+      Rigid body dynamics with impulse velocity resolution and Baumgarte positional stabilization:
+      ```crystal
+      require "citrine/physics/box2d"
+      require "citrine/physics/collision"
+
+      world = Citrine::Physics::PhysicsWorld2D.new(Vector2.new(0.0, 380.0))
+      body = Citrine::Physics::RigidBody2D.new(Vector2.new(320.0, 100.0), 32.0, 32.0, 1.0)
+      world.add_body(body)
+      world.step(dt: 0.016, velocity_iters: 4, position_iters: 2)
+
+      # 16-bit Layer Mask & Raycasting
+      filter = Citrine::Collision::Filter.new(layer: 1_u16, mask: 0xFFFF_u16)
+      ray = Citrine::Collision::Ray2D.new(Vector2.new(320.0, 0.0), Vector2.new(0.0, 1.0))
+      hit = Citrine::Collision.raycast_aabb(ray, rx, ry, rw, rh)
+      ```
+  - id: peripherals_and_networking
+    title: USB Peripherals & PS2 Network Adapter
+    summary: require "citrine/input/usb" and "citrine/net"
+    content: |
+      Interact with external hardware connected to PS2 USB 1.1 and Ethernet expansion bay:
+      ```crystal
+      require "citrine/input/usb"
+      require "citrine/net"
+
+      kbd = Citrine::Input::Keyboard.new
+      if kbd.key_down?(:space)
+        sock = Citrine::Net::UdpSocket.new
+        sock.send_to("FRAME_READY", Citrine::Net::IPAddress.new("192.168.1.50", 9999))
+      end
+      ```
+  - id: regex_and_events
+    title: Lean NFA Regex & Event Emitters
+    summary: require "citrine/regex" and "citrine/events"
+    content: |
+      Zero-heap regular expressions and decoupled event messaging:
+      ```crystal
+      require "citrine/regex"
+      require "citrine/events"
+
+      regex = Citrine::Regex::LeanRegex.new("^STAGE_[0-9]+$")
+      matched = regex.matches?("STAGE_04")
+
+      events = Citrine::Events::EventEmitter.new
+      events.on("boss_defeated") { |payload| puts "Victory!" }
+      events.emit("boss_defeated", "Boss #1")
+      ```
+  - id: shaders_vu1_and_gs
+    title: PlayStation 2 Shaders (VU1 Microcode & GS Multi-Pass)
+    summary: require "citrine/shader"
+    content: |
+      Dual-pipeline hardware shading on PS2:
+      1. **VU1 Coprocessor Microcode (`.vsm`)**: 128-bit VLIW SIMD vertex wave displacement and MVP matrix math.
+      2. **GS Multi-Pass eDRAM Blending**: Leveraging 48 GB/s fillrate for Bloom, Motion Blur, and Scanlines.
+      ```crystal
+      require "citrine/shader"
+
+      pipeline = Citrine::Shader.create("WaterSurface") do |pipe|
+        pipe.vertex_wave(amplitude: 14.0, frequency: 0.05)
+        pipe.add_pass(Citrine::Shader::EffectType::Bloom, intensity: 0.8, alpha: 160)
+        pipe.add_pass(Citrine::Shader::EffectType::Scanlines, intensity: 0.4, alpha: 64)
+      end
+
+      # Displace vertices via VU1 pipeline simulation
+      v_out = pipeline.transform_vertex(vx, vy, vz, time)
+      ```

@@ -56,8 +56,8 @@ module Citrine
         end
       end
 
-      def should_not_exceed_boot_time(max_time : Time::Span | Float64, file = __FILE__, line = __LINE__)
-        limit = max_time.is_a?(Time::Span) ? max_time.total_seconds : max_time
+      def should_not_exceed_boot_time(max_time : ::Time::Span | Float64, file = __FILE__, line = __LINE__)
+        limit = max_time.is_a?(::Time::Span) ? max_time.total_seconds : max_time
         if @boot_time_seconds > limit
           fail "Expected boot time to not exceed #{limit}s, but took #{@boot_time_seconds}s.", file, line
         end
@@ -99,7 +99,7 @@ module Citrine
         {bytes, compiler.source_map}
       end
 
-      def boot_pcsx2(timeout : Time::Span = 4.seconds) : Ps2ExecutionResult
+      def boot_pcsx2(timeout : ::Time::Span = 4.seconds) : Ps2ExecutionResult
         bytes, sm = compile
         temp_iso = "tmp_spec_test.iso"
         IsoBuilder.build(temp_iso, bytes)

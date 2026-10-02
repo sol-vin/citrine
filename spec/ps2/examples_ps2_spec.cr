@@ -156,4 +156,41 @@ describe "Citrine PS2 Examples Runner Suite" do
     result.should_boot_cleanly
     result.should_preserve_spram
   end
+
+  it "boots and verifies Example 14: Creative Coding" do
+    tc = Citrine::Spec::Ps2TestCase.new("14_creative_coding")
+    tc.target("examples/14_creative_coding/main.cr")
+    bytes, sm = tc.compile
+    bytes.size.should be > 18
+    tc.max_registers.should be <= 1024
+
+    result = tc.boot_pcsx2(timeout: 2.seconds)
+    result.should_boot_cleanly
+    result.should_preserve_spram
+  end
+
+  it "boots and verifies Example 15: Rigid Body Physics" do
+    tc = Citrine::Spec::Ps2TestCase.new("15_rigid_body_physics")
+    tc.target("examples/15_rigid_body_physics/main.cr")
+    bytes, sm = tc.compile
+    bytes.size.should be > 18
+    tc.max_registers.should be <= 1024
+
+    result = tc.boot_pcsx2(timeout: 2.seconds)
+    result.should_boot_cleanly
+    result.should_preserve_spram
+  end
+
+  it "boots and verifies Example 16: Shaders and Post-FX" do
+    tc = Citrine::Spec::Ps2TestCase.new("16_shaders_and_postfx")
+    tc.target("examples/16_shaders_and_postfx/main.cr")
+    bytes, sm = tc.compile
+    bytes.size.should be > 18
+    tc.max_registers.should be <= 1024
+
+    result = tc.boot_pcsx2(timeout: 2.seconds)
+    result.should_boot_cleanly
+    result.should_preserve_spram
+  end
 end
+

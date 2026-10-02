@@ -9,7 +9,7 @@ module Citrine
   #
   # ## Learning Tracks & Topic Index
   #
-  # The documentation is paced into 11 distinct tracks:
+  # The documentation is paced into 12 distinct tracks:
   #
   # ### 1. Getting started (`A_GETTING_STARTED`)
   # <table>
@@ -209,6 +209,24 @@ module Citrine
   #   </tbody>
   # </table>
   #
+  # ### 12. Advanced subsystems (`L_ADVANCED_SUBSYSTEMS`)
+  # <table>
+  #   <thead>
+  #     <tr>
+  #       <th>Submodule</th>
+  #       <th>Title</th>
+  #       <th>Description</th>
+  #     </tr>
+  #   </thead>
+  #   <tbody>
+  #     <tr>
+  #       <td><code>ADVANCED_SUBSYSTEMS</code></td>
+  #       <td><strong>Advanced Subsystems (Std, Box2D, Hardware, Shaders)</strong></td>
+  #       <td>Comprehensive standard library, Box2D rigid body physics, USB peripherals, network sockets, and VU1/GS shaders.</td>
+  #     </tr>
+  #   </tbody>
+  # </table>
+  #
   module Docs
     # **Quick-Start Commands**: Essential commands for building, running, and testing.
     #
@@ -258,6 +276,9 @@ module Citrine
     # ##### 11. Modular subsystems (`K_MODULAR_SUBSYSTEMS`)
     # - `K_MODULAR_SUBSYSTEMS::MODULAR_SUBSYSTEMS`: **Modular Subsystems (Physics, UI, Scene, Hardware)** &mdash; Opt-in engine modules strictly loaded via require "citrine/..." for zero overhead in core builds.
     #
+    # ##### 12. Advanced subsystems (`L_ADVANCED_SUBSYSTEMS`)
+    # - `L_ADVANCED_SUBSYSTEMS::ADVANCED_SUBSYSTEMS`: **Advanced Subsystems (Std, Box2D, Hardware, Shaders)** &mdash; Comprehensive standard library, Box2D rigid body physics, USB peripherals, network sockets, and VU1/GS shaders.
+    #
     def self.topic_02_reading_paths : Nil; end
 
     # **Master Table of Contents**: Complete hierarchical topic index.
@@ -297,6 +318,9 @@ module Citrine
     # ##### `K_MODULAR_SUBSYSTEMS`
     # - `K_MODULAR_SUBSYSTEMS::MODULAR_SUBSYSTEMS`: **Modular Subsystems (Physics, UI, Scene, Hardware)** &mdash; Opt-in engine modules strictly loaded via require "citrine/..." for zero overhead in core builds.
     #
+    # ##### `L_ADVANCED_SUBSYSTEMS`
+    # - `L_ADVANCED_SUBSYSTEMS::ADVANCED_SUBSYSTEMS`: **Advanced Subsystems (Std, Box2D, Hardware, Shaders)** &mdash; Comprehensive standard library, Box2D rigid body physics, USB peripherals, network sockets, and VU1/GS shaders.
+    #
     def self.topic_03_table_of_contents : Nil; end
 
     # :nodoc:
@@ -319,6 +343,7 @@ require "./docs/h_media_pipeline/media_pipeline"
 require "./docs/i_testing_suite/testing_suite"
 require "./docs/j_metaprogramming/metaprogramming"
 require "./docs/k_modular_subsystems/modular_subsystems"
+require "./docs/l_advanced_subsystems/advanced_subsystems"
 
 alias CitrineDocs = ::Citrine::Docs
 {% end %}
