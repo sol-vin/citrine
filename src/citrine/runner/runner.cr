@@ -123,10 +123,13 @@ module Citrine
 
       pcsx2 = @pcsx2_path
       if pcsx2
-        puts "[Citrine] Launching PCSX2 with #{output_iso}..."
+        abs_iso = File.expand_path(output_iso)
+        puts "[Citrine] Launching PCSX2 with #{abs_iso}..."
         args = [] of String
+        args << "-fastboot"
+        args << "-earlyconsolelog"
         args << "-batch" if batch_mode
-        args << output_iso
+        args << abs_iso
         # Spawn process asynchronously so terminal remains free and PCSX2 window opens
         Process.new(pcsx2, args)
         puts "[Citrine] PCSX2 process started successfully."
