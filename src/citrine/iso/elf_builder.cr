@@ -343,8 +343,8 @@ module Citrine
       # Configure GS registers:
       emitter.lui(V1, 0x1200)
 
-      # GS_PMODE at 0x12000000: 0xff67 (Circuit 1 + Circuit 2 enable, CRTMD=1, MMOD=1, AMOD=1, ALP=0xFF)
-      emitter.ori(V0, ZERO, 0xff67)
+      # GS_PMODE at 0x12000000: 0x0005 (Circuit 1 enable, Circuit 2 disable, CRTMD=1, MMOD=0 [pure direct scanout], AMOD=0, ALP=0)
+      emitter.ori(V0, ZERO, 0x0005)
       emitter.sd(V0, 0, V1)
 
       # GS_DISPFB1 at 0x12000070 and GS_DISPFB2 at 0x12000090: 0x1400 (FBP=0, FBW=10 [640 px], PSM=0 [PSMCT32])
@@ -352,20 +352,18 @@ module Citrine
       emitter.sd(V0, 0x70, V1)
       emitter.sd(V0, 0x90, V1)
 
-      # GS_DISPLAY1 at 0x12000080 and GS_DISPLAY2 at 0x120000A0: 0x001bf9ff01824290
+      # GS_DISPLAY1 at 0x12000080 and GS_DISPLAY2 at 0x120000A0: 0x001bf9ff01832290 (NTSC Field mode dy=50)
       emitter.lui(T1, 0x001b)
       emitter.ori(T1, T1, 0xf9ff)
       emitter.dsll32(T1, T1, 0)
-      emitter.lui(V0, 0x0182)
-      emitter.ori(V0, V0, 0x4290)
+      emitter.lui(V0, 0x0183)
+      emitter.ori(V0, V0, 0x2290)
       emitter.or_(T1, T1, V0)
       emitter.sd(T1, 0x80, V1)
       emitter.sd(T1, 0xa0, V1)
 
-      # GS_BGCOLOR at 0x120000E0: 0x0018141f (Citrine dark navy)
-      emitter.lui(V0, 0x0018)
-      emitter.ori(V0, V0, 0x141f)
-      emitter.sd(V0, 0xe0, V1)
+      # GS_BGCOLOR at 0x120000E0: 0x00000000 (Pure black background)
+      emitter.sd(ZERO, 0xe0, V1)
 
       # Send Environment Setup Packet (env_addr, env_qwc)
       emitter.jal("dma02_wait")
@@ -740,21 +738,20 @@ module Citrine
       mem.write_bytes(0x000a0000_u64, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x4d_u64, IO::ByteFormat::LittleEndian)
 
-      # 3. ZBUF_1 (0x4E): ZBP=140, PSM=0, ZMSK=0
-      mem.write_bytes(0x0000008c_u64, IO::ByteFormat::LittleEndian)
+      # 3. ZBUF_1 (0x4E): ZBP=140, PSM=0, ZMSK=1 (Mask Z writes)
+      mem.write_bytes(0x000000010000008c_u64, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x4e_u64, IO::ByteFormat::LittleEndian)
 
-      # 4. ZBUF_2 (0x4F): ZBP=140, PSM=0, ZMSK=0
-      mem.write_bytes(0x0000008c_u64, IO::ByteFormat::LittleEndian)
+      # 4. ZBUF_2 (0x4F): ZBP=140, PSM=0, ZMSK=1 (Mask Z writes)
+      mem.write_bytes(0x000000010000008c_u64, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x4f_u64, IO::ByteFormat::LittleEndian)
 
-      # 5. XYOFFSET_1 (0x18): OFX=1728*16, OFY=1936*16
-      xyoff = (30976_u64 << 32) | 27648_u64
-      mem.write_bytes(xyoff, IO::ByteFormat::LittleEndian)
+      # 5. XYOFFSET_1 (0x18): OFX=0, OFY=0 (Direct pixel coordinate space)
+      mem.write_bytes(0_u64, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x18_u64, IO::ByteFormat::LittleEndian)
 
-      # 6. XYOFFSET_2 (0x19)
-      mem.write_bytes(xyoff, IO::ByteFormat::LittleEndian)
+      # 6. XYOFFSET_2 (0x19): OFX=0, OFY=0
+      mem.write_bytes(0_u64, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x19_u64, IO::ByteFormat::LittleEndian)
 
       # 7. SCISSOR_1 (0x40): X0=0, X1=639, Y0=0, Y1=447
@@ -766,7 +763,7 @@ module Citrine
       mem.write_bytes(sciss, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x41_u64, IO::ByteFormat::LittleEndian)
 
-      # 9. PRMODECONT (0x1A): 1
+      # 9. PRMODECONT (0x1A): 1 (Use attributes from PRIM register)
       mem.write_bytes(1_u64, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x1a_u64, IO::ByteFormat::LittleEndian)
 
@@ -778,12 +775,12 @@ module Citrine
       mem.write_bytes(0_u64, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x45_u64, IO::ByteFormat::LittleEndian)
 
-      # 12. TEST_1 (0x47): ZTE=1, ZTST=1 (Pass ALWAYS)
-      mem.write_bytes(0x30000_u64, IO::ByteFormat::LittleEndian)
+      # 12. TEST_1 (0x47): All pixel tests disabled (draw unconditionally)
+      mem.write_bytes(0_u64, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x47_u64, IO::ByteFormat::LittleEndian)
 
-      # 13. TEST_2 (0x48): ZTE=1, ZTST=1 (Pass ALWAYS)
-      mem.write_bytes(0x30000_u64, IO::ByteFormat::LittleEndian)
+      # 13. TEST_2 (0x48): All pixel tests disabled
+      mem.write_bytes(0_u64, IO::ByteFormat::LittleEndian)
       mem.write_bytes(0x48_u64, IO::ByteFormat::LittleEndian)
 
       mem.to_slice
@@ -831,12 +828,12 @@ module Citrine
       rgbaq = (0x3F800000_u64 << 32) | (a.to_u64 << 24) | (b.to_u64 << 16) | (g.to_u64 << 8) | r.to_u64
       io.write_bytes(rgbaq, IO::ByteFormat::LittleEndian)
       io.write_bytes(1_u64, IO::ByteFormat::LittleEndian)
-      gs_x1 = ((1728 + x1) << 4) & 0xFFFF
-      gs_y1 = ((1936 + y1) << 4) & 0xFFFF
+      gs_x1 = (x1 << 4) & 0xFFFF
+      gs_y1 = (y1 << 4) & 0xFFFF
       io.write_bytes((gs_y1.to_u64 << 16) | gs_x1.to_u64, IO::ByteFormat::LittleEndian)
       io.write_bytes(5_u64, IO::ByteFormat::LittleEndian)
-      gs_x2 = ((1728 + x2) << 4) & 0xFFFF
-      gs_y2 = ((1936 + y2) << 4) & 0xFFFF
+      gs_x2 = (x2 << 4) & 0xFFFF
+      gs_y2 = (y2 << 4) & 0xFFFF
       io.write_bytes((gs_y2.to_u64 << 16) | gs_x2.to_u64, IO::ByteFormat::LittleEndian)
       io.write_bytes(5_u64, IO::ByteFormat::LittleEndian)
     end
