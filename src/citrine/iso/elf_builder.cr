@@ -177,6 +177,7 @@ module Citrine
       emitter.sw(ZERO, 24, T0)    # pad buttons pressed = 0  (0x70000018)
       emitter.sw(ZERO, 28, T0)    # pad buttons released = 0 (0x7000001C)
       emitter.sw(ZERO, 32, T0)    # current bank = 0         (0x70000020)
+      emitter.sw(ZERO, 36, T0)    # button debounce = 0      (0x70000024)
       emitter.j("main")
       emitter.nop
 
@@ -270,6 +271,14 @@ module Citrine
       emitter.lw(T1, 4, T0)
       emitter.addiu(T1, T1, 1)
       emitter.sw(T1, 4, T0)
+
+      # Decrement button debounce counter at 0x70000024 if > 0
+      emitter.lw(T3, 36, T0)
+      emitter.beqz(T3, "debounce_ok")
+      emitter.nop
+      emitter.addiu(T3, T3, -1)
+      emitter.sw(T3, 36, T0)
+      emitter.label("debounce_ok")
 
       if is_animated
         emitter.lw(T2, 8, T0) # T2 = phase index
@@ -377,10 +386,86 @@ module Citrine
       emitter.lbu(T7, 0xc0, T8)       # SIO_RXFIFO at 0x1000f1c0
       emitter.beqz(T7, "sio_rx_done")
       emitter.nop
-      # Key received over UART -> set Cross button (bit 14: 0x4000) in SPRAM
+
+      # Map received character to PS2 button:
+      # Cross (0x4000): 'x' (0x78), 'X' (0x58), Enter (0x0D), Space (0x20)
+      emitter.ori(T6, ZERO, 0x78)
+      emitter.beq(T7, T6, "sio_set_cross")
+      emitter.nop
+      emitter.ori(T6, ZERO, 0x58)
+      emitter.beq(T7, T6, "sio_set_cross")
+      emitter.nop
+      emitter.ori(T6, ZERO, 0x0d)
+      emitter.beq(T7, T6, "sio_set_cross")
+      emitter.nop
+      emitter.ori(T6, ZERO, 0x20)
+      emitter.beq(T7, T6, "sio_set_cross")
+      emitter.nop
+
+      # Triangle (0x1000): 't' (0x74), 'T' (0x54), 'v' (0x76), 'V' (0x56)
+      emitter.ori(T6, ZERO, 0x74)
+      emitter.beq(T7, T6, "sio_set_triangle")
+      emitter.nop
+      emitter.ori(T6, ZERO, 0x54)
+      emitter.beq(T7, T6, "sio_set_triangle")
+      emitter.nop
+      emitter.ori(T6, ZERO, 0x76)
+      emitter.beq(T7, T6, "sio_set_triangle")
+      emitter.nop
+      emitter.ori(T6, ZERO, 0x56)
+      emitter.beq(T7, T6, "sio_set_triangle")
+      emitter.nop
+
+      # Circle (0x2000): 'c' (0x63), 'C' (0x43)
+      emitter.ori(T6, ZERO, 0x63)
+      emitter.beq(T7, T6, "sio_set_circle")
+      emitter.nop
+      emitter.ori(T6, ZERO, 0x43)
+      emitter.beq(T7, T6, "sio_set_circle")
+      emitter.nop
+
+      # Square (0x8000): 's' (0x73), 'S' (0x53), 'z' (0x7A), 'Z' (0x5A)
+      emitter.ori(T6, ZERO, 0x73)
+      emitter.beq(T7, T6, "sio_set_square")
+      emitter.nop
+      emitter.ori(T6, ZERO, 0x53)
+      emitter.beq(T7, T6, "sio_set_square")
+      emitter.nop
+      emitter.ori(T6, ZERO, 0x7a)
+      emitter.beq(T7, T6, "sio_set_square")
+      emitter.nop
+      emitter.ori(T6, ZERO, 0x5a)
+      emitter.beq(T7, T6, "sio_set_square")
+      emitter.nop
+      emitter.j("sio_rx_done")
+      emitter.nop
+
+      emitter.label("sio_set_cross")
       emitter.lw(T5, 16, T0)
       emitter.ori(T5, T5, 0x4000)
       emitter.sw(T5, 16, T0)
+      emitter.j("sio_rx_done")
+      emitter.nop
+
+      emitter.label("sio_set_triangle")
+      emitter.lw(T5, 16, T0)
+      emitter.ori(T5, T5, 0x1000)
+      emitter.sw(T5, 16, T0)
+      emitter.j("sio_rx_done")
+      emitter.nop
+
+      emitter.label("sio_set_circle")
+      emitter.lw(T5, 16, T0)
+      emitter.ori(T5, T5, 0x2000)
+      emitter.sw(T5, 16, T0)
+      emitter.j("sio_rx_done")
+      emitter.nop
+
+      emitter.label("sio_set_square")
+      emitter.lw(T5, 16, T0)
+      emitter.ori(T5, T5, 0x8000)
+      emitter.sw(T5, 16, T0)
+
       emitter.label("sio_rx_done")
 
       # 3. Compute edge transitions:
@@ -444,15 +529,21 @@ module Citrine
 
       if is_animated
         # Animated mode bank & frame advance:
-        emitter.lw(T5, 24, T0) # T5 = pressed edges
+        emitter.lw(T5, 24, T0) # T5 = pressed edges (0x70000018)
         emitter.lw(T4, 32, T0) # T4 = current_bank (at 0x70000020)
+        emitter.lw(T3, 36, T0) # T3 = debounce counter (at 0x70000024)
 
         # 1. Check Triangle (bit 12: 0x1000): reset to Bank 0
         emitter.andi(T7, T5, 0x1000)
         emitter.beqz(T7, "chk_cross_advance")
         emitter.nop
-        emitter.sw(ZERO, 32, T0) # current_bank = 0
-        emitter.sw(ZERO, 8, T0)  # phase_index = 0
+        # Only reset if debounce counter == 0:
+        emitter.bnez(T3, "advance_frame")
+        emitter.nop
+        emitter.sw(ZERO, 32, T0)  # current_bank = 0
+        emitter.sw(ZERO, 8, T0)   # phase_index = 0
+        emitter.ori(T3, ZERO, 12) # debounce = 12 frames (~200ms)
+        emitter.sw(T3, 36, T0)
         emitter.j("advance_frame_done")
         emitter.nop
 
@@ -461,24 +552,29 @@ module Citrine
         emitter.andi(T7, T5, 0x4000)
         emitter.beqz(T7, "advance_frame")
         emitter.nop
+        # Only advance if debounce counter == 0:
+        emitter.bnez(T3, "advance_frame")
+        emitter.nop
         emitter.sltiu(T7, T4, 3) # T7 = 1 if current_bank < 3
         emitter.beqz(T7, "advance_frame")
         emitter.nop
-        emitter.addiu(T4, T4, 1) # current_bank += 1
+        emitter.addiu(T4, T4, 1)  # current_bank += 1
         emitter.sw(T4, 32, T0)
-        emitter.sll(T2, T4, 5)   # phase_index = current_bank * 32
+        emitter.sll(T2, T4, 6)    # phase_index = current_bank * 64
         emitter.sw(T2, 8, T0)
+        emitter.ori(T3, ZERO, 12) # debounce = 12 frames (~200ms)
+        emitter.sw(T3, 36, T0)
         emitter.j("advance_frame_done")
         emitter.nop
 
         emitter.label("advance_frame")
-        # 3. Every frame: advance phase_index within current bank (modulo 32)
+        # 3. Every frame: advance phase_index within current bank (modulo 64)
         emitter.lw(T2, 8, T0)    # T2 = phase_index
         emitter.addiu(T2, T2, 1) # phase_index++
-        emitter.andi(T7, T2, 31) # if (phase_index & 31) == 0, wrapped around 32!
+        emitter.andi(T7, T2, 63) # if (phase_index & 63) == 0, wrapped around 64!
         emitter.bnez(T7, "store_phase_index")
         emitter.nop
-        emitter.addiu(T2, T2, -32) # wrap back to start of bank!
+        emitter.addiu(T2, T2, -64) # wrap back to start of bank!
 
         emitter.label("store_phase_index")
         emitter.sw(T2, 8, T0)
@@ -834,7 +930,7 @@ module Citrine
             anim_frame_count = 0
             anim_bank = 0
             max_banks = 4
-            frames_per_bank = 32
+            frames_per_bank = 64
 
             while pc >= 0 && pc < instructions.size && steps < max_steps && !first_frame_done
               steps += 1
@@ -987,17 +1083,15 @@ module Citrine
                       phases << Phase.new(current_commands.dup, 1_u32, current_loop_message)
                       current_loop_message = nil
                       current_commands = [] of DrawCommand
-                      anim_frame_count += 1
-
-                      # Spawn next logo on the boundary between banks (frame 127, 255, 383)
-                      if (anim_frame_count % frames_per_bank) == (frames_per_bank - 1) && anim_bank < (max_banks - 1)
+                      # Spawn next logo on the boundary between banks
+                      if (phases.size % frames_per_bank) == 0 && anim_bank < (max_banks - 1)
                         simulated_button_press = true
                         anim_bank += 1
                       else
                         simulated_button_press = false
                       end
 
-                      if anim_frame_count >= max_banks * frames_per_bank
+                      if phases.size >= max_banks * frames_per_bank
                         first_frame_done = true
                       end
                     else

@@ -120,7 +120,8 @@ module Citrine
             native_id = NativeId.from_value(b.to_u16)
             @io.puts sprintf("  %04d: %-14s R%d, native:%s (base: R%d)%s", i, op.to_s, dst, native_id.to_s, a, loc_str)
           when Opcode::LoadInt
-            @io.puts sprintf("  %04d: %-14s R%d, %d%s", i, op.to_s, dst, imm16.to_i16, loc_str)
+            signed_imm = imm16 >= 0x8000 ? imm16.to_i32 - 0x10000 : imm16.to_i32
+            @io.puts sprintf("  %04d: %-14s R%d, %d%s", i, op.to_s, dst, signed_imm, loc_str)
           when Opcode::LoadConst
             @io.puts sprintf("  %04d: %-14s R%d, const[%d]%s", i, op.to_s, dst, imm16, loc_str)
           when Opcode::Jump
