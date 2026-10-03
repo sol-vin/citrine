@@ -234,6 +234,7 @@ module Citrine
         emitter.sw(ZERO, 36, T0)    # debounce = 0   at 0x70000024
         emitter.ori(T1, ZERO, 42)
         emitter.sw(T1, 40, T0)      # rng_seed = 42  at 0x70000028
+        emitter.sw(ZERO, 44, T0)    # manual_override = 0 at 0x7000002C
 
         # Logo 0 at 0x70000100:
         # pos_x = 240, pos_y = 200, vel_x = 7, vel_y = 6, text_color_idx = 3, bg_color_idx = 2
@@ -625,10 +626,47 @@ module Citrine
         emitter.lw(T4, 32, T0) # T4 = logo_count    (0x70000020)
         emitter.lw(T3, 36, T0) # T3 = debounce      (0x70000024)
 
+        # Check manual override: if user ever pressed any button, set 0x7000002C = 1
+        emitter.lw(T8, 44, T0) # T8 = manual_override at 0x7000002C
+        emitter.beqz(T5, "dvd_skip_override")
+        emitter.nop
+        emitter.ori(T8, ZERO, 1)
+        emitter.sw(T8, 44, T0)
+        emitter.label("dvd_skip_override")
+
         # 1. Triangle (0x1000): reset to 1 logo
         emitter.andi(T7, T5, 0x1000)
-        emitter.beqz(T7, "dvd_chk_cross")
+        emitter.bnez(T7, "dvd_do_reset")
         emitter.nop
+
+        # 2. Cross (0x4000): spawn new logo if logo_count < 16
+        emitter.andi(T7, T5, 0x4000)
+        emitter.bnez(T7, "dvd_do_spawn")
+        emitter.nop
+
+        # 3. Autonomous Demo Mode (if no manual interaction has occurred)
+        emitter.bnez(T8, "dvd_buttons_done")
+        emitter.nop
+        emitter.lw(T1, 4, T0) # T1 = frame_counter
+        emitter.ori(T6, ZERO, 1200)
+        emitter.divu(T1, T6)
+        emitter.mfhi(T2) # T2 = frame % 1200
+        emitter.ori(T6, ZERO, 240)
+        emitter.beq(T2, T6, "dvd_do_spawn")
+        emitter.nop
+        emitter.ori(T6, ZERO, 420)
+        emitter.beq(T2, T6, "dvd_do_spawn")
+        emitter.nop
+        emitter.ori(T6, ZERO, 600)
+        emitter.beq(T2, T6, "dvd_do_spawn")
+        emitter.nop
+        emitter.ori(T6, ZERO, 1199)
+        emitter.beq(T2, T6, "dvd_do_reset")
+        emitter.nop
+        emitter.j("dvd_buttons_done")
+        emitter.nop
+
+        emitter.label("dvd_do_reset")
         emitter.bnez(T3, "dvd_buttons_done")
         emitter.nop
         emitter.ori(T4, ZERO, 1)
@@ -638,11 +676,7 @@ module Citrine
         emitter.j("dvd_buttons_done")
         emitter.nop
 
-        emitter.label("dvd_chk_cross")
-        # 2. Cross (0x4000): spawn new logo if logo_count < 16
-        emitter.andi(T7, T5, 0x4000)
-        emitter.beqz(T7, "dvd_buttons_done")
-        emitter.nop
+        emitter.label("dvd_do_spawn")
         emitter.bnez(T3, "dvd_buttons_done")
         emitter.nop
         emitter.sltiu(T7, T4, 16)

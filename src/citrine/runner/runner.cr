@@ -4,6 +4,7 @@ require "../parser/dsl_parser"
 require "../iso/iso_builder"
 require "../iso/elf_builder"
 require "../debugger/pcsx2_bridge"
+require "../debugger/virtual_pad_bridge"
 
 module Citrine
   class Runner
@@ -128,7 +129,7 @@ module Citrine
       pcsx2 = @pcsx2_path
       if pcsx2
         Debugger::Pcsx2Bridge.new.ensure_logging_configured rescue nil
-        abs_iso = File.expand_path(output_iso)
+        abs_iso = File.expand_path(output_iso).gsub('/', '\\')
         puts "[Citrine] Launching PCSX2 with #{abs_iso}..."
         args = [] of String
         args << "-fastboot"
@@ -139,9 +140,18 @@ module Citrine
           proc = Process.new(pcsx2, args)
           proc.wait
         else
-          puts "[Citrine] PCSX2 process running. (Close PCSX2 or press Ctrl+C to exit)..."
+          bridge = Debugger::VirtualPadBridge.new
+          bridge.clean_previous_log
           proc = Process.new(pcsx2, args, input: Process::Redirect::Inherit)
-          proc.wait
+          bridge.start(proc.pid)
+          puts "[Citrine] PCSX2 process running. (Close PCSX2 or press Ctrl+C to exit)..."
+          begin
+            while !proc.terminated?
+              sleep 0.1.seconds
+            end
+          ensure
+            bridge.stop
+          end
         end
       else
         puts "[Citrine] PCSX2 not found in standard paths. Disc image ready at #{output_iso}."
