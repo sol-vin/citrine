@@ -345,6 +345,29 @@ module Citrine
 
         quad_count
       end
+
+      # Extracts relative quad offsets (dx1, dy1, dx2, dy2) for pre-rendered text quads
+      def self.extract_text_glyph_quads(text : String, scale : Int32 = 2) : Bytes
+        io = IO::Memory.new
+        emit_text(io, text, 0, 0, scale, 255_u8, 255_u8, 255_u8)
+        slice = io.to_slice
+        quad_count = slice.size // 64
+        out_bytes = IO::Memory.new(quad_count * 4)
+        quad_count.times do |i|
+          base = i * 64
+          v1_low = IO::ByteFormat::LittleEndian.decode(UInt32, slice[base + 32, 4])
+          x1 = ((v1_low & 0xFFFF) >> 4).to_u8
+          y1 = ((v1_low >> 16) >> 4).to_u8
+          v2_low = IO::ByteFormat::LittleEndian.decode(UInt32, slice[base + 48, 4])
+          x2 = ((v2_low & 0xFFFF) >> 4).to_u8
+          y2 = ((v2_low >> 16) >> 4).to_u8
+          out_bytes.write_byte(x1)
+          out_bytes.write_byte(y1)
+          out_bytes.write_byte(x2)
+          out_bytes.write_byte(y2)
+        end
+        out_bytes.to_slice
+      end
     end
   end
 end

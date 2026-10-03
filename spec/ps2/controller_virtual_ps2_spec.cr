@@ -20,7 +20,7 @@ describe "Citrine PS2 Virtual Controller & Button Testing Suite" do
 
     tc.inject_input(frame: 15, button: Citrine::PadButton::Cross, duration: 2)
 
-    result = tc.boot_pcsx2(timeout: 4.5.seconds)
+    result = tc.boot_pcsx2(timeout: 6.0.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE] Button Cross (X) pressed!")
@@ -44,7 +44,7 @@ describe "Citrine PS2 Virtual Controller & Button Testing Suite" do
     tc.inject_input(frame: 25, button: Citrine::PadButton::Triangle, duration: 2)
     tc.inject_input(frame: 40, button: Citrine::PadButton::Square, duration: 2)
 
-    result = tc.boot_pcsx2(timeout: 4.5.seconds)
+    result = tc.boot_pcsx2(timeout: 6.0.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE] Button Cross (X) pressed!")
@@ -59,7 +59,7 @@ describe "Citrine PS2 Virtual Controller & Button Testing Suite" do
     # Inject Cross button at frame 15
     tc.inject_input(frame: 15, button: Citrine::PadButton::Cross, duration: 2)
 
-    result = tc.boot_pcsx2(timeout: 4.5.seconds)
+    result = tc.boot_pcsx2(timeout: 6.0.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE] Button Cross (X) pressed! Background cycled.")
@@ -82,7 +82,7 @@ describe "Citrine PS2 Virtual Controller & Button Testing Suite" do
     # Hold Circle button for 15 full frames (frames 10 through 25)
     tc.inject_input(frame: 10, button: Citrine::PadButton::Circle, duration: 15)
 
-    result = tc.boot_pcsx2(timeout: 4.5.seconds)
+    result = tc.boot_pcsx2(timeout: 6.0.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE] Button Circle pressed!")

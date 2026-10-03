@@ -29,12 +29,12 @@ module Citrine
     S0   = Citrine::MIPS::S0;  S1 = Citrine::MIPS::S1;  S2 = Citrine::MIPS::S2;  S3 = Citrine::MIPS::S3
     S4   = Citrine::MIPS::S4;  S5 = Citrine::MIPS::S5;  S6 = Citrine::MIPS::S6;  S7 = Citrine::MIPS::S7
     T8   = Citrine::MIPS::T8;  T9 = Citrine::MIPS::T9
-    SP   = Citrine::MIPS::SP;  RA = Citrine::MIPS::RA
+    SP   = Citrine::MIPS::SP;  RA = Citrine::MIPS::RA; FP = Citrine::MIPS::FP
     STT_FUNC   = Citrine::ISO::ElfWriter::STT_FUNC
     STT_OBJECT = Citrine::ISO::ElfWriter::STT_OBJECT
     STB_GLOBAL = Citrine::ISO::ElfWriter::STB_GLOBAL
 
-    TEXT_SIZE = 4096_u32
+    TEXT_SIZE = 8192_u32
     RODATA_VADDR = 0x00100000_u32 + TEXT_SIZE
 
     struct CVal
@@ -70,7 +70,7 @@ module Citrine
     end
 
     def generate(cbc_bytes : Bytes? = nil, input_schedule : Array(VirtualInput) = [] of VirtualInput) : Bytes
-      phases, boot_messages, loop_start_phase, is_animated = parse_cbc(cbc_bytes)
+      phases, boot_messages, loop_start_phase, is_animated, is_dvd_screensaver = parse_cbc(cbc_bytes)
 
       # Build GIF Packets
       env_packet = GifPacketBuilder.build_env_packet
@@ -83,25 +83,77 @@ module Citrine
       env_addr = rodata_vaddr
       curr_addr = env_addr + env_packet.size.to_u32
 
-      phase_addrs = [] of UInt32
-      phase_packets.each do |pkt|
-        phase_addrs << curr_addr
-        curr_addr += pkt.size.to_u32
-      end
+      static_dvd_addr = 0_u32
+      static_dvd_qwc = 0_u16
+      static_dvd_packet = Bytes.empty
+      font_quad_addr = 0_u32
+      font_quad_slice = Bytes.empty
+      color_palette_addr = 0_u32
+      color_palette_slice = Bytes.empty
 
-      # Phase dispatch table in .rodata for O(1) indexed frames
-      phase_table_addr = curr_addr
-      phase_table_bytes = IO::Memory.new
-      if is_animated
-        phases.each_with_index do |_, i|
-          phase_table_bytes.write_bytes(phase_addrs[i], IO::ByteFormat::LittleEndian)
-          phase_table_bytes.write_bytes(phase_qwcs[i].to_u32, IO::ByteFormat::LittleEndian)
+      phase_addrs = [] of UInt32
+      phase_table_slice = Bytes.empty
+      phase_table_addr = 0_u32
+
+      if is_dvd_screensaver
+        static_cmds = [
+          DrawCommand.new(DrawCommand::Type::Clear, color: 0xFF000000_u32),
+          DrawCommand.new(DrawCommand::Type::Rect, 0, 0, 640, 6, color: 0xFF808080_u32),
+          DrawCommand.new(DrawCommand::Type::Rect, 0, 442, 640, 6, color: 0xFF808080_u32),
+          DrawCommand.new(DrawCommand::Type::Rect, 0, 0, 6, 448, color: 0xFF808080_u32),
+          DrawCommand.new(DrawCommand::Type::Rect, 634, 0, 6, 448, color: 0xFF808080_u32),
+          DrawCommand.new(DrawCommand::Type::Text, 120, 420, 14, 0, color: 0xFF00FFFF_u32, text: "CROSS (X): SPAWN LOGO | TRIANGLE: RESET (1)")
+        ]
+        static_dvd_packet = GifPacketBuilder.build_draw_packet(static_cmds)
+        static_dvd_qwc = (static_dvd_packet.size // 16).to_u16
+        static_dvd_addr = curr_addr
+        curr_addr += static_dvd_packet.size.to_u32
+
+        raw_fq = GifPacketBuilder.extract_text_glyph_quads("HELLO WORLD!", 2)
+        fq_pad = (16 - (raw_fq.size % 16)) % 16
+        if fq_pad > 0
+          fq_mem = IO::Memory.new(raw_fq.size + fq_pad)
+          fq_mem.write(raw_fq)
+          fq_pad.times { fq_mem.write_byte(0_u8) }
+          font_quad_slice = fq_mem.to_slice
+        else
+          font_quad_slice = raw_fq
         end
-        pt_pad = (16 - (phase_table_bytes.size % 16)) % 16
-        pt_pad.times { phase_table_bytes.write_byte(0_u8) }
-        curr_addr += phase_table_bytes.size.to_u32
+        font_quad_addr = curr_addr
+        curr_addr += font_quad_slice.size.to_u32
+
+        c_mem = IO::Memory.new(64)
+        c_mem.write_bytes(0x3F800000_800000FF_u64, IO::ByteFormat::LittleEndian) # 0: Red
+        c_mem.write_bytes(0x3F800000_8000FF00_u64, IO::ByteFormat::LittleEndian) # 1: Green
+        c_mem.write_bytes(0x3F800000_80FF0000_u64, IO::ByteFormat::LittleEndian) # 2: Blue
+        c_mem.write_bytes(0x3F800000_8000FFFF_u64, IO::ByteFormat::LittleEndian) # 3: Yellow
+        c_mem.write_bytes(0x3F800000_80FFFF00_u64, IO::ByteFormat::LittleEndian) # 4: Cyan
+        c_mem.write_bytes(0x3F800000_80FF00FF_u64, IO::ByteFormat::LittleEndian) # 5: Magenta
+        c_mem.write_bytes(0x3F800000_80FFFFFF_u64, IO::ByteFormat::LittleEndian) # 6: White
+        c_mem.write_bytes(0x3F800000_80000000_u64, IO::ByteFormat::LittleEndian) # 7: Black
+        color_palette_slice = c_mem.to_slice
+        color_palette_addr = curr_addr
+        curr_addr += color_palette_slice.size.to_u32
+      else
+        phase_packets.each do |pkt|
+          phase_addrs << curr_addr
+          curr_addr += pkt.size.to_u32
+        end
+
+        # Phase dispatch table in .rodata for O(1) indexed frames
+        phase_table_addr = curr_addr
+        phase_table_bytes = IO::Memory.new
+        if is_animated
+          phases.each_with_index do |_, i|
+            phase_table_bytes.write_bytes(phase_addrs[i], IO::ByteFormat::LittleEndian)
+            phase_table_bytes.write_bytes(phase_qwcs[i].to_u32, IO::ByteFormat::LittleEndian)
+          end
+          pt_pad = (16 - (phase_table_bytes.size % 16)) % 16
+          pt_pad.times { phase_table_bytes.write_byte(0_u8) }
+          curr_addr += phase_table_bytes.size.to_u32
+        end
+        phase_table_slice = phase_table_bytes.to_slice
       end
-      phase_table_slice = phase_table_bytes.to_slice
 
       # Virtual Input Schedule table in .rodata (placed before strings for guaranteed 16-byte alignment):
       sched_addr = curr_addr
@@ -158,8 +210,7 @@ module Citrine
 
       emitter = MipsEmitter.new(0x00100000_u32)
 
-      # Function 0 (_start at 0x00100000, 36 bytes):
-      phase0_delay = phases[0].delay_frames
+      phase0_delay = phases.empty? ? 0_u32 : phases[0].delay_frames
       emitter.label("_start")
       emitter.lui(SP, 0x0200)
       emitter.addiu(SP, SP, -16)
@@ -176,8 +227,32 @@ module Citrine
       emitter.sw(ZERO, 20, T0)    # pad buttons prev = 0     (0x70000014)
       emitter.sw(ZERO, 24, T0)    # pad buttons pressed = 0  (0x70000018)
       emitter.sw(ZERO, 28, T0)    # pad buttons released = 0 (0x7000001C)
-      emitter.sw(ZERO, 32, T0)    # current bank = 0         (0x70000020)
-      emitter.sw(ZERO, 36, T0)    # button debounce = 0      (0x70000024)
+
+      if is_dvd_screensaver
+        emitter.ori(T1, ZERO, 1)
+        emitter.sw(T1, 32, T0)      # logo_count = 1 at 0x70000020
+        emitter.sw(ZERO, 36, T0)    # debounce = 0   at 0x70000024
+        emitter.ori(T1, ZERO, 42)
+        emitter.sw(T1, 40, T0)      # rng_seed = 42  at 0x70000028
+
+        # Logo 0 at 0x70000100:
+        # pos_x = 240, pos_y = 200, vel_x = 7, vel_y = 6, text_color_idx = 3, bg_color_idx = 2
+        emitter.ori(T1, ZERO, 240)
+        emitter.sw(T1, 0x0100, T0)
+        emitter.ori(T1, ZERO, 200)
+        emitter.sw(T1, 0x0104, T0)
+        emitter.ori(T1, ZERO, 7)
+        emitter.sw(T1, 0x0108, T0)
+        emitter.ori(T1, ZERO, 6)
+        emitter.sw(T1, 0x010C, T0)
+        emitter.ori(T1, ZERO, 3)
+        emitter.sw(T1, 0x0110, T0)
+        emitter.ori(T1, ZERO, 2)
+        emitter.sw(T1, 0x0114, T0)
+      else
+        emitter.sw(ZERO, 32, T0)    # current bank = 0         (0x70000020)
+        emitter.sw(ZERO, 36, T0)    # button debounce = 0      (0x70000024)
+      end
       emitter.j("main")
       emitter.nop
 
@@ -280,7 +355,21 @@ module Citrine
       emitter.sw(T3, 36, T0)
       emitter.label("debounce_ok")
 
-      if is_animated
+      if is_dvd_screensaver
+        emitter.jal("dma02_wait")
+        emitter.nop
+        emitter.lui(T8, 0x1000)
+        emitter.ori(T8, T8, 0xa000)
+        emitter.lui(T7, (static_dvd_addr >> 16).to_i32)
+        emitter.ori(T7, T7, (static_dvd_addr & 0xFFFF).to_i32)
+        emitter.sw(T7, 0x10, T8)
+        emitter.ori(T6, ZERO, static_dvd_qwc.to_i32)
+        emitter.sw(T6, 0x20, T8)
+        emitter.ori(T5, ZERO, 0x101)
+        emitter.sw(T5, 0x00, T8)
+        emitter.jal("dma02_wait")
+        emitter.nop
+      elsif is_animated
         emitter.lw(T2, 8, T0) # T2 = phase index
         emitter.sll(T3, T2, 3) # T3 = phase_index * 8
         emitter.lui(T8, (phase_table_addr >> 16).to_i32)
@@ -312,16 +401,18 @@ module Citrine
         emitter.label("send_dma")
       end
 
-      emitter.jal("dma02_wait")
-      emitter.nop
-      emitter.lui(T8, 0x1000)
-      emitter.ori(T8, T8, 0xa000)
-      emitter.sw(T7, 0x10, T8)
-      emitter.sw(T6, 0x20, T8)
-      emitter.ori(T5, ZERO, 0x101)
-      emitter.sw(T5, 0x00, T8)
-      emitter.jal("dma02_wait")
-      emitter.nop
+      unless is_dvd_screensaver
+        emitter.jal("dma02_wait")
+        emitter.nop
+        emitter.lui(T8, 0x1000)
+        emitter.ori(T8, T8, 0xa000)
+        emitter.sw(T7, 0x10, T8)
+        emitter.sw(T6, 0x20, T8)
+        emitter.ori(T5, ZERO, 0x101)
+        emitter.sw(T5, 0x00, T8)
+        emitter.jal("dma02_wait")
+        emitter.nop
+      end
 
       # VSync wait loop (GS_CSR bit 3):
       emitter.lui(V1, 0x1200)
@@ -527,7 +618,358 @@ module Citrine
       # Reset current buttons at 0x70000010 to 0 (so next frame re-polls schedule or hardware)
       emitter.sw(ZERO, 16, T0)
 
-      if is_animated
+      if is_dvd_screensaver
+        # --- DVD BUTTONS & LOGO MANAGEMENT ---
+        emitter.lw(T5, 24, T0) # T5 = pressed edges (0x70000018)
+        emitter.lw(T4, 32, T0) # T4 = logo_count    (0x70000020)
+        emitter.lw(T3, 36, T0) # T3 = debounce      (0x70000024)
+
+        # 1. Triangle (0x1000): reset to 1 logo
+        emitter.andi(T7, T5, 0x1000)
+        emitter.beqz(T7, "dvd_chk_cross")
+        emitter.nop
+        emitter.bnez(T3, "dvd_buttons_done")
+        emitter.nop
+        emitter.ori(T4, ZERO, 1)
+        emitter.sw(T4, 32, T0)  # logo_count = 1
+        emitter.ori(T3, ZERO, 12)
+        emitter.sw(T3, 36, T0)  # debounce = 12
+        emitter.j("dvd_buttons_done")
+        emitter.nop
+
+        emitter.label("dvd_chk_cross")
+        # 2. Cross (0x4000): spawn new logo if logo_count < 16
+        emitter.andi(T7, T5, 0x4000)
+        emitter.beqz(T7, "dvd_buttons_done")
+        emitter.nop
+        emitter.bnez(T3, "dvd_buttons_done")
+        emitter.nop
+        emitter.sltiu(T7, T4, 16)
+        emitter.beqz(T7, "dvd_buttons_done")
+        emitter.nop
+
+        # Calculate slot address in SPRAM: 0x70000100 + (logo_count * 24)
+        emitter.sll(S1, T4, 4)  # T4 * 16
+        emitter.sll(S2, T4, 3)  # T4 * 8
+        emitter.addu(S1, S1, S2)
+        emitter.addiu(S1, S1, 0x0100)
+        emitter.addu(S0, T0, S1) # S0 = new logo SPRAM address
+
+        # rx = rng.next_int(40, 400)
+        emitter.ori(A0, ZERO, 40)
+        emitter.ori(A1, ZERO, 400)
+        emitter.jal("rng_next_int")
+        emitter.nop
+        emitter.sw(V0, 0, S0)
+
+        # ry = rng.next_int(40, 320)
+        emitter.ori(A0, ZERO, 40)
+        emitter.ori(A1, ZERO, 320)
+        emitter.jal("rng_next_int")
+        emitter.nop
+        emitter.sw(V0, 4, S0)
+
+        # dir_x: rng_next_int(0, 1) == 0 ? -3 : 3
+        emitter.ori(A0, ZERO, 0)
+        emitter.ori(A1, ZERO, 1)
+        emitter.jal("rng_next_int")
+        emitter.nop
+        emitter.ori(T6, ZERO, 3)
+        emitter.bnez(V0, "dvd_dir_x_set")
+        emitter.nop
+        emitter.subu(T6, ZERO, T6) # T6 = -3
+        emitter.label("dvd_dir_x_set")
+        emitter.sw(T6, 8, S0)
+
+        # dir_y: rng_next_int(0, 1) == 0 ? -2 : 2
+        emitter.ori(A0, ZERO, 0)
+        emitter.ori(A1, ZERO, 1)
+        emitter.jal("rng_next_int")
+        emitter.nop
+        emitter.ori(T6, ZERO, 2)
+        emitter.bnez(V0, "dvd_dir_y_set")
+        emitter.nop
+        emitter.subu(T6, ZERO, T6) # T6 = -2
+        emitter.label("dvd_dir_y_set")
+        emitter.sw(T6, 12, S0)
+
+        # rt_col = rng_next_int(0, 5)
+        emitter.ori(A0, ZERO, 0)
+        emitter.ori(A1, ZERO, 5)
+        emitter.jal("rng_next_int")
+        emitter.nop
+        emitter.move(S2, V0)
+        emitter.sw(S2, 16, S0) # text_color_idx
+
+        # bg_step = rng_next_int(1, 5) -> rbg_col = (rt_col + bg_step) % 6
+        emitter.ori(A0, ZERO, 1)
+        emitter.ori(A1, ZERO, 5)
+        emitter.jal("rng_next_int")
+        emitter.nop
+        emitter.addu(S2, S2, V0)
+        emitter.ori(T6, ZERO, 6)
+        emitter.divu(S2, T6)
+        emitter.mfhi(S2)
+        emitter.sw(S2, 20, S0) # bg_color_idx
+
+        # logo_count++
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T4, 32, T0)
+        emitter.addiu(T4, T4, 1)
+        emitter.sw(T4, 32, T0)
+        emitter.ori(T3, ZERO, 12)
+        emitter.sw(T3, 36, T0)
+
+        emitter.label("dvd_buttons_done")
+
+        # --- DVD PHYSICS UPDATE FOR ALL LOGOS ---
+        emitter.lui(T0, 0x7000)
+        emitter.lw(S6, 32, T0)  # S6 = logo_count
+        emitter.move(S7, ZERO)  # S7 = logo index (0 .. logo_count - 1)
+
+        emitter.label("dvd_physics_loop")
+        emitter.sll(S1, S7, 4)
+        emitter.sll(S2, S7, 3)
+        emitter.addu(S1, S1, S2)
+        emitter.addiu(S1, S1, 0x0100)
+        emitter.addu(S0, T0, S1) # S0 = current logo address
+
+        emitter.lw(T1, 0, S0)  # x
+        emitter.lw(T2, 8, S0)  # vx
+        emitter.addu(T1, T1, T2)
+
+        emitter.lw(T3, 4, S0)  # y
+        emitter.lw(T4, 12, S0) # vy
+        emitter.addu(T3, T3, T4)
+
+        emitter.move(S3, ZERO) # S3 = bounced = 0
+
+        # if x <= 10
+        emitter.ori(T6, ZERO, 10)
+        emitter.slt(T7, T6, T1) # 10 < x
+        emitter.bnez(T7, "dvd_chk_x_hi")
+        emitter.nop
+        emitter.ori(T1, ZERO, 10)
+        emitter.subu(T2, ZERO, T2)
+        emitter.ori(S3, ZERO, 1)
+
+        emitter.label("dvd_chk_x_hi")
+        # if x >= 430
+        emitter.ori(T6, ZERO, 430)
+        emitter.slt(T7, T1, T6) # x < 430
+        emitter.bnez(T7, "dvd_chk_y_lo")
+        emitter.nop
+        emitter.ori(T1, ZERO, 430)
+        emitter.subu(T2, ZERO, T2)
+        emitter.ori(S3, ZERO, 1)
+
+        emitter.label("dvd_chk_y_lo")
+        # if y <= 10
+        emitter.ori(T6, ZERO, 10)
+        emitter.slt(T7, T6, T3) # 10 < y
+        emitter.bnez(T7, "dvd_chk_y_hi")
+        emitter.nop
+        emitter.ori(T3, ZERO, 10)
+        emitter.subu(T4, ZERO, T4)
+        emitter.ori(S3, ZERO, 1)
+
+        emitter.label("dvd_chk_y_hi")
+        # if y >= 360
+        emitter.ori(T6, ZERO, 360)
+        emitter.slt(T7, T3, T6) # y < 360
+        emitter.bnez(T7, "dvd_physics_store")
+        emitter.nop
+        emitter.ori(T3, ZERO, 360)
+        emitter.subu(T4, ZERO, T4)
+        emitter.ori(S3, ZERO, 1)
+
+        emitter.label("dvd_physics_store")
+        emitter.sw(T1, 0, S0)
+        emitter.sw(T3, 4, S0)
+        emitter.sw(T2, 8, S0)
+        emitter.sw(T4, 12, S0)
+
+        emitter.beqz(S3, "dvd_physics_next")
+        emitter.nop
+
+        # On bounce: text_col = (text_col + step) % 6; bg_col = (text_col + bg_step) % 6
+        emitter.ori(A0, ZERO, 1)
+        emitter.ori(A1, ZERO, 5)
+        emitter.jal("rng_next_int")
+        emitter.nop
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T5, 16, S0) # old text_color_idx
+        emitter.addu(T5, T5, V0)
+        emitter.ori(T6, ZERO, 6)
+        emitter.divu(T5, T6)
+        emitter.mfhi(T5)
+        emitter.sw(T5, 16, S0) # new text_color_idx
+
+        emitter.ori(A0, ZERO, 1)
+        emitter.ori(A1, ZERO, 5)
+        emitter.jal("rng_next_int")
+        emitter.nop
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T5, 16, S0) # text_color_idx
+        emitter.addu(T5, T5, V0)
+        emitter.ori(T6, ZERO, 6)
+        emitter.divu(T5, T6)
+        emitter.mfhi(T5)
+        emitter.sw(T5, 20, S0) # new bg_color_idx
+
+        emitter.label("dvd_physics_next")
+        emitter.addiu(S7, S7, 1)
+        emitter.bne(S7, S6, "dvd_physics_loop")
+        emitter.nop
+
+        # --- DVD DYNAMIC GIF PACKET GENERATION ---
+        # Buffer pointer S0 in RAM at 0x20210010 (offset 16 bytes for GIFTag header)
+        emitter.lui(S0, 0x2021)
+        emitter.ori(S0, S0, 0x0010)
+
+        emitter.lui(T0, 0x7000)
+        emitter.lw(S6, 32, T0)  # S6 = logo_count
+        emitter.move(S7, ZERO)  # S7 = logo index (0 .. logo_count - 1)
+
+        emitter.label("dvd_draw_logo_loop")
+        emitter.sll(S1, S7, 4)
+        emitter.sll(S2, S7, 3)
+        emitter.addu(S1, S1, S2)
+        emitter.addiu(S1, S1, 0x0100)
+        emitter.addu(A1, T0, S1) # A1 = logo struct address
+
+        emitter.lw(T1, 0, A1)   # px
+        emitter.lw(T2, 4, A1)   # py
+        emitter.lw(T3, 16, A1)  # txt_col
+        emitter.lw(T4, 20, A1)  # bg_col
+
+        # Load bg_rgba into S2
+        emitter.lui(A2, (color_palette_addr >> 16).to_i32)
+        emitter.ori(A2, A2, (color_palette_addr & 0xFFFF).to_i32)
+        emitter.sll(T5, T4, 3)
+        emitter.addu(T5, A2, T5)
+        emitter.ld(S2, 0, T5)
+
+        # Load txt_rgba into S3
+        emitter.sll(T5, T3, 3)
+        emitter.addu(T5, A2, T5)
+        emitter.ld(S3, 0, T5)
+
+        # Load black_rgba (at offset 56) into S4
+        emitter.ld(S4, 56, A2)
+
+        # 1. Outer rect: (px, py, px + 190, py + 44), color = bg_rgba (S2)
+        emitter.move(A0, T1)
+        emitter.move(A1, T2)
+        emitter.addiu(A2, T1, 190)
+        emitter.addiu(A3, T2, 44)
+        emitter.move(T4, S2)
+        emitter.jal("emit_quad_s0")
+        emitter.nop
+
+        # 2. Inner border: (px + 2, py + 2, px + 188, py + 42), color = black_rgba (S4)
+        emitter.addiu(A0, T1, 2)
+        emitter.addiu(A1, T2, 2)
+        emitter.addiu(A2, T1, 188)
+        emitter.addiu(A3, T2, 42)
+        emitter.move(T4, S4)
+        emitter.jal("emit_quad_s0")
+        emitter.nop
+
+        # 3. Inner rect: (px + 4, py + 4, px + 186, py + 40), color = bg_rgba (S2)
+        emitter.addiu(A0, T1, 4)
+        emitter.addiu(A1, T2, 4)
+        emitter.addiu(A2, T1, 186)
+        emitter.addiu(A3, T2, 40)
+        emitter.move(T4, S2)
+        emitter.jal("emit_quad_s0")
+        emitter.nop
+
+        # 4. Text Quads (111 quads)
+        # S1 = px + 16 (Origin X)
+        # FP = py + 12 (Origin Y)
+        emitter.addiu(S1, T1, 16)
+        emitter.addiu(FP, T2, 12)
+
+        # Store font_quad_addr in SPRAM at 0x70000030
+        emitter.lui(T5, (font_quad_addr >> 16).to_i32)
+        emitter.ori(T5, T5, (font_quad_addr & 0xFFFF).to_i32)
+        emitter.lui(T0, 0x7000)
+        emitter.sw(T5, 48, T0)
+
+        emitter.ori(S5, ZERO, 111) # loop counter
+
+        emitter.label("dvd_glyph_loop")
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T5, 48, T0)
+        emitter.lbu(T6, 0, T5)  # dx1
+        emitter.lbu(T7, 1, T5)  # dy1
+        emitter.lbu(T8, 2, T5)  # dx2
+        emitter.lbu(T9, 3, T5)  # dy2
+        emitter.addiu(T5, T5, 4)
+        emitter.sw(T5, 48, T0)
+
+        emitter.addu(A0, S1, T6) # x1
+        emitter.addu(A1, FP, T7) # y1
+        emitter.addu(A2, S1, T8) # x2
+        emitter.addu(A3, FP, T9) # y2
+        emitter.move(T4, S3)     # txt_rgba
+
+        emitter.jal("emit_quad_s0")
+        emitter.nop
+
+        emitter.addiu(S5, S5, -1)
+        emitter.bnez(S5, "dvd_glyph_loop")
+        emitter.nop
+
+        # Next logo
+        emitter.lui(T0, 0x7000)
+        emitter.lw(S6, 32, T0)
+        emitter.addiu(S7, S7, 1)
+        emitter.bne(S7, S6, "dvd_draw_logo_loop")
+        emitter.nop
+
+        # --- WRITE GIFTAG AND KICK DMA CHANNEL 2 ---
+        # total_items = logo_count * 114 * 4 = logo_count * 456
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T1, 32, T0)
+        emitter.ori(T2, ZERO, 456)
+        emitter.multu(T1, T2)
+        emitter.mflo(T1) # T1 = total_items
+
+        # GIFTag at 0x20210000:
+        emitter.lui(T0, 0x2021)
+        emitter.lui(T2, 0x1000)
+        emitter.dsll32(T2, T2, 0) # bit 60 PRE = 1
+        emitter.ori(T3, ZERO, 0x8000) # bit 15 EOP = 1
+        emitter.or_(T2, T2, T3)
+        emitter.andi(T3, T1, 0x7FFF)
+        emitter.or_(T2, T2, T3)
+        emitter.sd(T2, 0, T0)
+        emitter.ori(T3, ZERO, 0x0E)
+        emitter.sd(T3, 8, T0)
+
+        # Kick DMA:
+        emitter.jal("dma02_wait")
+        emitter.nop
+        emitter.lui(T8, 0x1000)
+        emitter.ori(T8, T8, 0xa000)
+        emitter.lui(T7, 0x0021)
+        emitter.sw(T7, 0x10, T8) # D2_MADR = 0x00210000
+        emitter.addiu(T6, T1, 1) # D2_QWC = total_items + 1
+        emitter.sw(T6, 0x20, T8)
+        emitter.ori(T5, ZERO, 0x101)
+        emitter.sw(T5, 0x00, T8)
+        emitter.jal("dma02_wait")
+        emitter.nop
+
+        # Clear buttons:
+        emitter.lui(T0, 0x7000)
+        emitter.sw(ZERO, 16, T0)
+
+        emitter.j("frame_loop")
+        emitter.nop
+      elsif is_animated
         # Animated mode bank & frame advance:
         emitter.lw(T5, 24, T0) # T5 = pressed edges (0x70000018)
         emitter.lw(T4, 32, T0) # T4 = current_bank (at 0x70000020)
@@ -723,6 +1165,60 @@ module Citrine
       emitter.jr(RA)
       emitter.addiu(SP, SP, 32)
 
+      # Subroutine rng_next_int:
+      # a0 = min, a1 = max, returns v0
+      emitter.label("rng_next_int")
+      emitter.lui(T8, 0x7000)
+      emitter.lw(T0, 40, T8)       # rng_seed at 0x70000028
+      emitter.lui(T1, 0x41C6)
+      emitter.ori(T1, T1, 0x4E6D)  # 1103515245
+      emitter.multu(T0, T1)
+      emitter.mflo(T0)
+      emitter.addiu(T0, T0, 12345)
+      emitter.lui(T2, 0x7FFF)
+      emitter.ori(T2, T2, 0xFFFF)  # 0x7FFFFFFF
+      emitter.and_(T0, T0, T2)
+      emitter.sw(T0, 40, T8)       # store new seed
+      emitter.subu(T3, A1, A0)     # max - min
+      emitter.addiu(T3, T3, 1)     # range = max - min + 1
+      emitter.divu(T0, T3)
+      emitter.mfhi(V0)             # seed % range
+      emitter.addu(V0, V0, A0)     # min + (seed % range)
+      emitter.jr(RA)
+      emitter.nop
+
+      # Subroutine emit_quad_s0:
+      # s0 = write pointer in RAM (advanced by 64 bytes)
+      # a0 = x1, a1 = y1, a2 = x2, a3 = y2, t4 = rgbaq (lower 64 bits)
+      emitter.label("emit_quad_s0")
+      emitter.ori(T6, ZERO, 6)
+      emitter.sd(T6, 0, S0)
+      emitter.sd(ZERO, 8, S0)
+
+      emitter.sd(T4, 16, S0)
+      emitter.ori(T6, ZERO, 1)
+      emitter.sd(T6, 24, S0)
+
+      emitter.sll(T6, A0, 4)
+      emitter.andi(T6, T6, 0xFFFF)
+      emitter.sll(T7, A1, 20)
+      emitter.or_(T6, T6, T7)
+      emitter.sd(T6, 32, S0)
+      emitter.ori(T7, ZERO, 0x0d)
+      emitter.sd(T7, 40, S0)
+
+      emitter.sll(T6, A2, 4)
+      emitter.andi(T6, T6, 0xFFFF)
+      emitter.sll(T7, A3, 20)
+      emitter.or_(T6, T6, T7)
+      emitter.sd(T6, 48, S0)
+      emitter.ori(T7, ZERO, 5)
+      emitter.sd(T7, 56, S0)
+
+      emitter.addiu(S0, S0, 64)
+      emitter.jr(RA)
+      emitter.nop
+
       # Native API stubs (Citrine_VM_Run, etc.)
       stub_start = 0x00100000_u32 + (emitter.words.size.to_u32 * 4)
       60.times do |stub_idx|
@@ -750,7 +1246,7 @@ module Citrine
         end
       end
 
-      # Pad .text to 4096 bytes (0x1000)
+      # Pad .text to 8192 bytes
       emitter.pad_to(TEXT_SIZE.to_i32)
       emitter.resolve!
       text_data = emitter.to_slice
@@ -758,11 +1254,17 @@ module Citrine
       # .rodata segment
       rodata_bytes = IO::Memory.new
       rodata_bytes.write(env_packet)
-      phase_packets.each do |pkt|
-        rodata_bytes.write(pkt)
-      end
-      if is_animated
-        rodata_bytes.write(phase_table_slice)
+      if is_dvd_screensaver
+        rodata_bytes.write(static_dvd_packet)
+        rodata_bytes.write(font_quad_slice)
+        rodata_bytes.write(color_palette_slice)
+      else
+        phase_packets.each do |pkt|
+          rodata_bytes.write(pkt)
+        end
+        if is_animated
+          rodata_bytes.write(phase_table_slice)
+        end
       end
       rodata_bytes.write(sched_slice)
       rodata_bytes.write(banner_str.to_slice)
@@ -826,9 +1328,10 @@ module Citrine
       ElfWriter.write(text_data, rodata_data, data_data, symbols, 0x00100000_u32)
     end
 
-    def parse_cbc(cbc_bytes : Bytes?) : Tuple(Array(Phase), Array(String), Int32, Bool)
+    def parse_cbc(cbc_bytes : Bytes?) : Tuple(Array(Phase), Array(String), Int32, Bool, Bool)
       boot_messages = [] of String
       loop_start_phase = 0
+      is_dvd_screensaver = false
       if cbc_bytes && cbc_bytes.size > 20 && String.new(cbc_bytes[0..3]) == "CBC1"
         begin
           io = IO::Memory.new(cbc_bytes)
@@ -843,6 +1346,7 @@ module Citrine
             len = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
             strings << io.read_string(len)
           end
+          is_dvd_screensaver = strings.any? { |s| s.includes?("BouncingLogo") || s.includes?("DVD Bouncing Screensaver") }
 
           constants = [] of CVal
           num_consts.times do
@@ -1040,6 +1544,7 @@ module Citrine
                 when 3 # WindowOpen
                   in_main_loop = true
                   regs[dst_r] = 1_i64
+                  break if is_dvd_screensaver
                 when 40, 41, 42 # ButtonDown, ButtonPressed, ButtonReleased
                   btn_idx = regs[base_r].to_i
                   btn = constants[btn_idx]?.try(&.u32_val) || btn_idx.to_u32
@@ -1366,8 +1871,12 @@ module Citrine
               phases << Phase.new(current_commands.dup, 0_u32, current_loop_message)
             end
 
+            if is_dvd_screensaver
+              return {[] of Phase, boot_messages, 0, false, true}
+            end
+
             loop_start = (phases.size > 1 && phases[0].message.nil? && !has_button_checks && !is_animated) ? 1 : 0
-            return {phases, boot_messages, loop_start, is_animated} if phases.size > 0
+            return {phases, boot_messages, loop_start, is_animated, false} if phases.size > 0
           end
         rescue ex
           STDERR.puts "[parse_cbc Exception] #{ex.class}: #{ex.message}\n#{ex.backtrace.join("\n")}"
@@ -1381,7 +1890,7 @@ module Citrine
           DrawCommand.new(DrawCommand::Type::Text, 60, 60, 20, 0, color: 0xFFFFFFFF_u32, text: "Hello, world!")
         ], 0_u32)
       ]
-      {fallback_phases, boot_messages, 0, false}
+      {fallback_phases, boot_messages, 0, false, false}
     end
   end
 end

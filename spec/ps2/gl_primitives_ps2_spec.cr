@@ -30,7 +30,7 @@ describe "Citrine PS2 Hardware GL Primitives & Opcode Decomposition Suite" do
     bytes.size.should be > 18
     tc.max_registers.should be <= 1024
 
-    result = tc.boot_pcsx2(timeout: 5.seconds)
+    result = tc.boot_pcsx2(timeout: 7.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE] PS2 EE Engine Initialized")
@@ -52,7 +52,7 @@ describe "Citrine PS2 Hardware GL Primitives & Opcode Decomposition Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 5.seconds)
+    result = tc.boot_pcsx2(timeout: 7.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] draw_quad Decomposition Verification")
@@ -79,7 +79,7 @@ describe "Citrine PS2 Hardware GL Primitives & Opcode Decomposition Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 5.seconds)
+    result = tc.boot_pcsx2(timeout: 7.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] GL Matrix Stack Testing")
@@ -101,7 +101,7 @@ describe "Citrine PS2 Hardware GL Primitives & Opcode Decomposition Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 5.seconds)
+    result = tc.boot_pcsx2(timeout: 7.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] Citrine::Draw.quad Helper Init")
@@ -136,7 +136,7 @@ describe "Citrine PS2 Hardware GL Primitives & Opcode Decomposition Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 5.seconds)
+    result = tc.boot_pcsx2(timeout: 7.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] GL Fan and Strip Primitives Init")

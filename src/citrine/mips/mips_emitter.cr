@@ -133,6 +133,22 @@ module Citrine
         emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x21_u32)
       end
 
+      def multu(rs : Int32, rt : Int32)
+        emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | 0x19_u32)
+      end
+
+      def mflo(rd : Int32)
+        emit((rd.to_u32 << 11) | 0x12_u32)
+      end
+
+      def mfhi(rd : Int32)
+        emit((rd.to_u32 << 11) | 0x10_u32)
+      end
+
+      def divu(rs : Int32, rt : Int32)
+        emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | 0x1B_u32)
+      end
+
       def move(rd : Int32, rs : Int32)
         or_(rd, rs, ZERO)
       end
