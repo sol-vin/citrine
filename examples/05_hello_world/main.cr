@@ -111,7 +111,7 @@ rng = SimpleRng.new(42)
 logos = [] of BouncingLogo
 
 # Initial logo: starts at (240, 200), moving southeast, Blue BG with Yellow text
-logos << BouncingLogo.new(240, 200, 4, 3, 3, 2)
+logos << BouncingLogo.new(240, 200, 7, 6, 3, 2)
 
 Citrine.main_loop do
   # Check Cross button: spawn a new bouncing logo at random position & direction (max 16)

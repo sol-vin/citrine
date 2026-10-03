@@ -97,9 +97,28 @@ module Citrine
           phase_table_bytes.write_bytes(phase_addrs[i], IO::ByteFormat::LittleEndian)
           phase_table_bytes.write_bytes(phase_qwcs[i].to_u32, IO::ByteFormat::LittleEndian)
         end
+        pt_pad = (16 - (phase_table_bytes.size % 16)) % 16
+        pt_pad.times { phase_table_bytes.write_byte(0_u8) }
         curr_addr += phase_table_bytes.size.to_u32
       end
       phase_table_slice = phase_table_bytes.to_slice
+
+      # Virtual Input Schedule table in .rodata (placed before strings for guaranteed 16-byte alignment):
+      sched_addr = curr_addr
+      sched_bytes = IO::Memory.new
+      input_schedule.each do |s|
+        sched_bytes.write_bytes(s.start_frame, IO::ByteFormat::LittleEndian)
+        sched_bytes.write_bytes(s.button_mask, IO::ByteFormat::LittleEndian)
+        sched_bytes.write_bytes(s.duration_frames, IO::ByteFormat::LittleEndian)
+      end
+      # Terminator:
+      sched_bytes.write_bytes(0xFFFFFFFF_u32, IO::ByteFormat::LittleEndian)
+      sched_bytes.write_bytes(0_u16, IO::ByteFormat::LittleEndian)
+      sched_bytes.write_bytes(0_u16, IO::ByteFormat::LittleEndian)
+      sched_pad = (16 - (sched_bytes.size % 16)) % 16
+      sched_pad.times { sched_bytes.write_byte(0_u8) }
+      sched_slice = sched_bytes.to_slice
+      curr_addr += sched_slice.size.to_u32
 
       # String addresses in .rodata
       banner_str = "[CITRINE] PS2 EE Engine Initialized\n\0"
@@ -119,21 +138,6 @@ module Citrine
           curr_addr += (msg.bytesize + 2).to_u32 # msg + "\n\0"
         end
       end
-
-      # Virtual Input Schedule table in .rodata:
-      sched_addr = curr_addr
-      sched_bytes = IO::Memory.new
-      input_schedule.each do |s|
-        sched_bytes.write_bytes(s.start_frame, IO::ByteFormat::LittleEndian)
-        sched_bytes.write_bytes(s.button_mask, IO::ByteFormat::LittleEndian)
-        sched_bytes.write_bytes(s.duration_frames, IO::ByteFormat::LittleEndian)
-      end
-      # Terminator:
-      sched_bytes.write_bytes(0xFFFFFFFF_u32, IO::ByteFormat::LittleEndian)
-      sched_bytes.write_bytes(0_u16, IO::ByteFormat::LittleEndian)
-      sched_bytes.write_bytes(0_u16, IO::ByteFormat::LittleEndian)
-      sched_slice = sched_bytes.to_slice
-      curr_addr += sched_slice.size.to_u32
 
       # Dedicated Button press debug strings in .rodata:
       cross_msg_str = "[CITRINE] Button Cross (X) pressed!\n\0"
@@ -462,19 +466,19 @@ module Citrine
         emitter.nop
         emitter.addiu(T4, T4, 1) # current_bank += 1
         emitter.sw(T4, 32, T0)
-        emitter.sll(T2, T4, 6)   # phase_index = current_bank * 64
+        emitter.sll(T2, T4, 5)   # phase_index = current_bank * 32
         emitter.sw(T2, 8, T0)
         emitter.j("advance_frame_done")
         emitter.nop
 
         emitter.label("advance_frame")
-        # 3. Every frame: advance phase_index within current bank (modulo 64)
+        # 3. Every frame: advance phase_index within current bank (modulo 32)
         emitter.lw(T2, 8, T0)    # T2 = phase_index
         emitter.addiu(T2, T2, 1) # phase_index++
-        emitter.andi(T7, T2, 63) # if (phase_index & 63) == 0, wrapped around 64!
+        emitter.andi(T7, T2, 31) # if (phase_index & 31) == 0, wrapped around 32!
         emitter.bnez(T7, "store_phase_index")
         emitter.nop
-        emitter.addiu(T2, T2, -64) # wrap back to start of bank!
+        emitter.addiu(T2, T2, -32) # wrap back to start of bank!
 
         emitter.label("store_phase_index")
         emitter.sw(T2, 8, T0)
@@ -664,6 +668,7 @@ module Citrine
       if is_animated
         rodata_bytes.write(phase_table_slice)
       end
+      rodata_bytes.write(sched_slice)
       rodata_bytes.write(banner_str.to_slice)
       boot_messages.each do |msg|
         rodata_bytes.write("#{msg}\n\0".to_slice)
@@ -673,7 +678,6 @@ module Citrine
           rodata_bytes.write("#{msg}\n\0".to_slice)
         end
       end
-      rodata_bytes.write(sched_slice)
       rodata_bytes.write(cross_msg_str.to_slice)
       rodata_bytes.write(triangle_msg_str.to_slice)
       rodata_bytes.write(circle_msg_str.to_slice)
@@ -830,7 +834,7 @@ module Citrine
             anim_frame_count = 0
             anim_bank = 0
             max_banks = 4
-            frames_per_bank = 64
+            frames_per_bank = 32
 
             while pc >= 0 && pc < instructions.size && steps < max_steps && !first_frame_done
               steps += 1

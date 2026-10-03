@@ -298,25 +298,7 @@ module Citrine
         io.write_bytes(5_u64, IO::ByteFormat::LittleEndian)    # XYZ2 (0x05) kicks draw
       end
 
-      def self.emit_sprite_coords(io : IO::Memory, x1 : Int32, y1 : Int32, x2 : Int32, y2 : Int32)
-        gs_x1 = ((x1.to_i64 << 4) & 0xFFFF_i64).to_u64
-        gs_y1 = ((y1.to_i64 << 4) & 0xFFFF_i64).to_u64
-        io.write_bytes((gs_y1 << 16) | gs_x1, IO::ByteFormat::LittleEndian)
-        io.write_bytes(0x0d_u64, IO::ByteFormat::LittleEndian) # XYZ3 (0x0D - queue without draw)
-        gs_x2 = ((x2.to_i64 << 4) & 0xFFFF_i64).to_u64
-        gs_y2 = ((y2.to_i64 << 4) & 0xFFFF_i64).to_u64
-        io.write_bytes((gs_y2 << 16) | gs_x2, IO::ByteFormat::LittleEndian)
-        io.write_bytes(5_u64, IO::ByteFormat::LittleEndian)    # XYZ2 (0x05 - queue and kick draw)
-      end
-
       def self.emit_text(io : IO::Memory, text : String, start_x : Int32, start_y : Int32, scale : Int32, r : UInt8, g : UInt8, b : UInt8, a : UInt8 = 0x80_u8) : Int32
-        # Set PRIM = Sprite (6) and RGBAQ once for the text batch
-        io.write_bytes(6_u64, IO::ByteFormat::LittleEndian)
-        io.write_bytes(0_u64, IO::ByteFormat::LittleEndian)
-        rgbaq = (0x3F800000_u64 << 32) | (a.to_u64 << 24) | (b.to_u64 << 16) | (g.to_u64 << 8) | r.to_u64
-        io.write_bytes(rgbaq, IO::ByteFormat::LittleEndian)
-        io.write_bytes(1_u64, IO::ByteFormat::LittleEndian)
-
         quad_count = 0
         cx = start_x
         cy = start_y
@@ -344,7 +326,7 @@ module Citrine
                 x2 = cx + col * scale
                 y1 = cy + row * scale
                 y2 = y1 + scale
-                emit_sprite_coords(io, x1, y1, x2, y2)
+                emit_quad(io, x1, y1, x2, y2, r, g, b, a)
                 quad_count += 1
               end
             end
@@ -353,7 +335,7 @@ module Citrine
               x2 = cx + 5 * scale
               y1 = cy + row * scale
               y2 = y1 + scale
-              emit_sprite_coords(io, x1, y1, x2, y2)
+              emit_quad(io, x1, y1, x2, y2, r, g, b, a)
               quad_count += 1
             end
           end
