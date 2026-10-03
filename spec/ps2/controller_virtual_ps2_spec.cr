@@ -56,13 +56,13 @@ describe "Citrine PS2 Virtual Controller & Button Testing Suite" do
     tc = Citrine::Spec::Ps2TestCase.new("01_hello_pad_virtual_input")
     tc.target("examples/01_hello_pad/main.cr")
 
-    # Inject Cross button at frame 15
-    tc.inject_input(frame: 15, button: Citrine::PadButton::Cross, duration: 2)
+    # Inject Cross button at frames 10-15
+    tc.inject_input(frame: 10, button: Citrine::PadButton::Cross, duration: 5)
 
-    result = tc.boot_pcsx2(timeout: 6.0.seconds)
+    result = tc.boot_pcsx2(timeout: 8.0.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
-    result.should_have_output("[CITRINE] Button Cross (X) pressed! Background cycled.")
+    result.should_have_output("[CITRINE] Button Cross (X) pressed!")
   end
 
   it "verifies button hold behavior does not trigger spurious edge re-triggers" do

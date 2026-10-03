@@ -1,0 +1,221 @@
+id: NATIVE_FUNCTION_REFERENCE
+title: Citrine Native System Call Reference (NativeId)
+summary: Complete reference of all 50+ Citrine VM native subsystem calls, parameters, return values, and hardware bindings.
+track: 03_virtual_machine
+overview: |
+  Citrine VM bridges high-level Crystal APIs with PlayStation 2 hardware through the `Opcode::CallNative` (0x34) instruction.
+  The 16-bit `NativeId` specifies the target subsystem service. Arguments are passed in consecutive registers
+  starting at `R[arg_base]`, and the primary result is written directly back to `R[arg_base]`.
+  
+  Native functions directly orchestrate:
+  - Graphics Synthesizer (GS) DMA transfers and GIF packet assembly
+  - SPU2 Sound Processor and CD/DVD streaming
+  - Emotion Engine Scratchpad RAM (SPRAM) and timers
+  - DualShock 2 SIO2 controller sampling
+  - 4-Tier Memory pools, context arenas, and conservative mark-sweep
+related_sources:
+  - "src/citrine/ast/types.cr"
+  - "src/citrine/iso/elf_builder.cr"
+  - "runtime/src/citrine_core.c"
+  - "runtime/src/citrine_draw2d.c"
+  - "runtime/src/citrine_gl.c"
+sections:
+  - id: window_and_frame_timing
+    title: Window, V-Blank & Frame Timing Services
+    summary: Display initialization, frame synchronization, and delta time tracking.
+    content: |
+      ### InitWindow (`NativeId::InitWindow` = 1)
+      - **Arguments**: `width`, `height`, `title_str_ptr`
+      - **Semantics**: Initializes video mode (640x448 NTSC or 640x512 PAL), configures GS registers, and opens display window.
+      
+      ### CloseWindow (`NativeId::CloseWindow` = 2)
+      - **Semantics**: Closes active display, flushes remaining DMA transfers, and releases GS context.
+      
+      ### WindowOpen (`NativeId::WindowOpen` = 3)
+      - **Return**: Boolean (`true` if display is active, `false` upon exit request).
+      
+      ### SetTargetFPS (`NativeId::SetTargetFPS` = 4)
+      - **Arguments**: `fps` (typically 60 for NTSC, 50 for PAL).
+      - **Semantics**: Sets VSync throttle divisor.
+      
+      ### GetFPS (`NativeId::GetFPS` = 5)
+      - **Return**: Current measured frames per second as an integer.
+      
+      ### GetDeltaTime (`NativeId::GetDeltaTime` = 6)
+      - **Return**: Elapsed time since previous frame as a float (`Float32`).
+      
+      ### Sleep (`NativeId::Sleep` = 65)
+      - **Arguments**: `milliseconds` (integer).
+      - **Semantics**: Calibrated hardware busy-wait or timer interrupt pause.
+    examples:
+      - |
+        ```crystal
+        Citrine.init_window(640, 448, "PS2 Display")
+        Citrine.set_target_fps(60)
+
+        while Citrine.window_open?
+          dt = Citrine.get_delta_time
+          fps = Citrine.get_fps
+          Citrine.sleep(1)
+        end
+        Citrine.close_window
+        ```
+  - id: graphics_2d_and_3d
+    title: 2D Rasterization & 3D Geometry Services
+    summary: Direct-to-GS immediate draw commands, sprite textures, and wireframe meshes.
+    content: |
+      ### BeginDrawing (`NativeId::BeginDrawing` = 10)
+      - **Semantics**: Marks start of render frame. Rewinds Tier 1 per-frame scratch pool (O(1)) and resets GIF DMA buffer.
+      
+      ### EndDrawing (`NativeId::EndDrawing` = 11)
+      - **Semantics**: Finalizes GIF packet list, initiates DMA Channel 2 transfer to GS, and synchronizes on V-Blank.
+      
+      ### ClearBackground (`NativeId::ClearBackground` = 12)
+      - **Arguments**: `color_u32` (packed RGBA color).
+      - **Semantics**: Emits a full-screen flat shaded rectangle clearing the GS frame buffer.
+      
+      ### DrawRectangle (`NativeId::DrawRectangle` = 20)
+      - **Arguments**: `x`, `y`, `width`, `height`, `color_u32`.
+      
+      ### DrawCircle (`NativeId::DrawCircle` = 21)
+      - **Arguments**: `center_x`, `center_y`, `radius`, `color_u32`.
+      
+      ### DrawLine (`NativeId::DrawLine` = 22)
+      - **Arguments**: `start_x`, `start_y`, `end_x`, `end_y`, `color_u32`.
+      
+      ### DrawTriangle (`NativeId::DrawTriangle` = 23)
+      - **Arguments**: `x1`, `y1`, `x2`, `y2`, `x3`, `y3`, `color_u32`.
+      
+      ### DrawText (`NativeId::DrawText` = 24)
+      - **Arguments**: `text_ptr`, `pos_x`, `pos_y`, `font_size`, `color_u32`.
+      - **Semantics**: Rasterizes glyph quads using built-in 8x8 bitmap font stored in `.rodata`.
+      
+      ### 3D Primitive Rendering (IDs 25 - 29, 34)
+      - `BeginMode3D` (25) & `EndMode3D` (26): Push/pop 3D perspective projection matrices.
+      - `DrawCube` (27) & `DrawCubeWires` (28): Render solid and wireframe 3D cubes.
+      - `DrawGrid` (29): Renders ground coordinate grid.
+      - `DrawMesh` (34): Transfers indexed vertex buffers to GS via VU1 / DMA.
+    examples:
+      - |
+        ```crystal
+        Citrine.begin_drawing
+        Citrine.clear_background(Citrine::Color::DARKBLUE)
+        Citrine.draw_rectangle(50, 50, 200, 100, Citrine::Color::GOLD)
+        Citrine.draw_circle(400, 200, 40, Citrine::Color::RED)
+        Citrine.draw_text("PS2 Rasterizer", 60, 60, 20, Citrine::Color::WHITE)
+        Citrine.end_drawing
+        ```
+  - id: citrine_gl_subsystem
+    title: Citrine GL Immediate Mode Pipeline
+    summary: OpenGL 1.1-style immediate mode emulation (GLBegin, GLVertex, GLColor, Matrix Stack).
+    content: |
+      Citrine GL allows writing standard fixed-function OpenGL code compiled to optimized GS packets:
+      - `GLBegin` (101): Begins geometry mode (`Points`, `Lines`, `Triangles`, `Quads`).
+      - `GLEnd` (102): Submits geometry vertices to GS rasterizer.
+      - `GLVertex` (103): Submits 2D/3D vertex position `(x, y, z)`.
+      - `GLColor` (104): Sets current vertex color `(r, g, b, a)`.
+      - `GLTexCoord` (105): Sets current texture coordinates `(u, v)`.
+      - `GLPushMatrix` (106) & `GLPopMatrix` (107): Push/pop active transform matrix.
+      - `GLTranslate` (108), `GLRotate` (109), `GLScale` (110): Matrix transformations.
+      - `GLLoadIdentity` (111): Resets active transform matrix to identity.
+    examples:
+      - |
+        ```crystal
+        Citrine::GL.begin(Citrine::GLMode::Triangles)
+        Citrine::GL.color(1.0, 0.0, 0.0, 1.0)
+        Citrine::GL.vertex(0.0, 1.0, 0.0)
+        Citrine::GL.color(0.0, 1.0, 0.0, 1.0)
+        Citrine::GL.vertex(-1.0, -1.0, 0.0)
+        Citrine::GL.color(0.0, 0.0, 1.0, 1.0)
+        Citrine::GL.vertex(1.0, -1.0, 0.0)
+        Citrine::GL.end
+        ```
+  - id: input_and_audio
+    title: DualShock 2 Input & Audio Subsystem
+    summary: Digital/pressure button sampling, analog sticks, vibration, and SPU2 audio.
+    content: |
+      ### DualShock 2 Controller Services (IDs 40 - 44)
+      - `ButtonDown` (40): Returns `true` if specified button bit is currently held down.
+      - `ButtonPressed` (41): Returns `true` only on the frame the button transitioned from released to pressed.
+      - `ButtonReleased` (42): Returns `true` only on the frame the button was released.
+      - `GetAnalog` (43): Returns normalized analog stick axis position (-1.0 to 1.0).
+      - `SetRumble` (44): Activates DualShock 2 small motor (high frequency) or large motor (pressure speed).
+      
+      ### SPU2 Audio Processing (IDs 35 - 37)
+      - `LoadSound` (35): Loads ADPCM audio sample into SPU2 sound RAM.
+      - `PlaySound` (36): Triggers playback voice channel.
+      - `StopSound` (37): Quiets playback voice channel.
+    examples:
+      - |
+        ```crystal
+        # Checking DualShock 2 input and triggering sound
+        if Citrine.button_pressed?(Citrine::Button::Cross)
+          sound_id = Citrine.load_sound("jump.wav")
+          Citrine.play_sound(sound_id)
+          Citrine.set_rumble(small: 1, large: 64)
+        end
+        ```
+  - id: memory_and_pointers
+    title: Memory Tiers, Context Arenas & Pointers
+    summary: 4-tier hybrid memory management, pointer manipulation, and safe object allocation.
+    content: |
+      ### Object Allocation & Field Access (IDs 150 - 153)
+      - `ObjectNew` (150): Allocates instance memory for a `class` (Heap/Arena) or `struct` (Tier 1 Scratch Pool).
+      - `ObjectGetField` (151): Reads instance variable at specified field offset.
+      - `ObjectSetField` (152): Writes instance variable at specified field offset.
+      - `StructCopy` (153): Value-copies all struct fields into a new scratch memory address.
+      
+      ### Explicit Pointer Subsystem (IDs 160 - 168)
+      - `PointerMalloc` (160): Allocates typed memory block with 8-byte alignment; checks free-list before advancing heap.
+      - `PointerGet` (161): Dereferences address at index offset (`ptr[i]`).
+      - `PointerSet` (162): Stores value at address index offset (`ptr[i] = val`).
+      - `PointerOffset` (163): Computes byte-offset pointer (`ptr + offset`).
+      - `PointerAddress` (164): Returns raw integer memory address.
+      - `PointerFree` (168): Explicitly deallocates memory block, recycling slot into free-list and flagging use-after-free traps.
+      
+      ### Context Arenas & Idle GC (IDs 180 - 185)
+      - `ContextSet` (180): Sets active memory context namespace (e.g. `:menu`, `:gameplay`).
+      - `ContextClear` (181): Bulk deallocates all allocations belonging to the specified context in O(1) time.
+      - `MemoryStats` (182): Returns memory telemetry (heap bytes, scratch bytes, active allocations).
+      - `GCCycle` (185): Executes conservative mark-sweep cycle during idle V-Blank interval.
+    examples:
+      - |
+        ```crystal
+        # Explicit pointer buffer allocation and freeing
+        buf = Pointer(UInt32).malloc(64)
+        buf[0] = 0xCAFEBABE_u32
+        buf.free # Recycles into 8-byte aligned free-list
+        ```
+  - id: strings_and_collections
+    title: Strings, Regular Expressions & Dynamic Collections
+    summary: String interpolation, lean regular expressions, IO::Memory, and dynamic arrays.
+    content: |
+      ### String Manipulation (IDs 186 - 196)
+      - `StringStrip` (186), `StringDowncase` (187), `StringUpcase` (188): In-place or scratch-allocated string transforms.
+      - `StringIncludes` (189), `StringStartsWith` (192), `StringEndsWith` (193): Substring searches.
+      - `StringSplit` (194): Splits string on delimiter into an `Array(String)`.
+      - `StringConcat` (195): Concatenates two strings in Tier 1 scratch pool.
+      - `ToString` (196): Converts integer, float, symbol, or enum to scratch-allocated string.
+      
+      ### Lean Regular Expressions (IDs 190 - 191)
+      - `RegexNew` (190): Compiles lean regex pattern string into a bytecode matcher.
+      - `RegexMatch` (191): Executes non-backtracking NFA match, returning `MatchData` or `nil`.
+      
+      ### Array & StaticArray Collections (IDs 120 - 133)
+      - `ArrayNew` (120), `ArrayGet` (121), `ArraySet` (122), `ArrayPush` (123), `ArrayPop` (124), `ArraySize` (125), `ArrayClear` (126).
+      - `StaticArrayNew` (130), `StaticArrayGet` (131), `StaticArraySet` (132), `StaticArraySize` (133): Fixed-capacity inline arrays.
+      
+      ### Memory IO Subsystem (IDs 140 - 148)
+      - `MemoryIONew` (140), `MemoryIOWriteByte` (141), `MemoryIOWrite` (142), `MemoryIOPuts` (143), `MemoryIOToS` (144), `MemoryIORewind` (145), `MemoryIOPos` (146), `MemoryIOSize` (147), `MemoryIOClear` (148).
+    examples:
+      - |
+        ```crystal
+        # String interpolation and dynamic collections in Citrine
+        score = 42
+        formatted = "Score: #{score}"
+        tokens = formatted.split(":")
+
+        io = IO::Memory.new
+        io.puts("Streamed output")
+        str = io.to_s
+        ```

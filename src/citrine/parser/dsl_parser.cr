@@ -1,36 +1,47 @@
 require "compiler/crystal/syntax"
 require "./error"
 require "../compiler/macro_expander"
+require "../ast/vm_context"
 
 module Citrine
   class ParsedProgram
     property defs : Hash(String, Crystal::Def)
     property structs : Hash(String, Crystal::ClassDef)
     property modules : Hash(String, Crystal::ModuleDef)
+    property enums : Hash(String, Crystal::EnumDef)
     property top_level_nodes : Array(Crystal::ASTNode)
     property main_loop_body : Crystal::ASTNode?
     property filename : String?
     property loaded_requires : Set(String)
+    property vm_contexts : Hash(String, VmContextDef)
+    property active_context_name : String?
 
     def initialize(@filename : String? = nil)
       @defs = {} of String => Crystal::Def
       @structs = {} of String => Crystal::ClassDef
       @modules = {} of String => Crystal::ModuleDef
+      @enums = {} of String => Crystal::EnumDef
       @top_level_nodes = [] of Crystal::ASTNode
       @main_loop_body = nil
       @loaded_requires = Set(String).new
+      @vm_contexts = {} of String => VmContextDef
+      @active_context_name = nil
     end
-
   end
 
   class DslParser
     getter filename : String?
+    property current_context : VmContextDef? = nil
 
     def initialize(@filename : String? = nil)
     end
 
-    def parse(source : String) : ParsedProgram
-      program = ParsedProgram.new(@filename)
+    def parse(source : String, existing_program : ParsedProgram? = nil) : ParsedProgram
+      program = existing_program || ParsedProgram.new(@filename)
+      if (fn = @filename) && existing_program.nil?
+        canon = File.realpath(fn) rescue fn
+        program.loaded_requires << canon
+      end
 
       begin
         parser = Crystal::Parser.new(source)
@@ -53,28 +64,71 @@ module Citrine
     end
 
     private def process_node(node : Crystal::ASTNode, program : ParsedProgram)
-      case node
-      when Crystal::Expressions
-        node.expressions.each do |child|
-          process_top_level(child, program)
-        end
-      else
-        process_top_level(node, program)
-      end
+      process_top_level(node, program)
     end
 
-    private def process_top_level(node : Crystal::ASTNode, program : ParsedProgram)
+    private def process_top_level(node : Crystal::ASTNode, program : ParsedProgram, namespace : Array(String) = [] of String)
       case node
       when Crystal::Expressions
         node.expressions.each do |child|
-          process_top_level(child, program)
+          process_top_level(child, program, namespace)
         end
       when Crystal::Def
-        program.defs[node.name] = node
+        fn_names = [] of String
+        fn_names << node.name
+        unless namespace.empty?
+          ns_prefix = namespace.join("::")
+          fn_names << "#{ns_prefix}.#{node.name}"
+          fn_names << "#{ns_prefix}::#{node.name}"
+        end
+        fn_names.each do |fname|
+          if ctx = @current_context
+            ctx.defs[fname] = node
+          end
+          program.defs[fname] = node
+        end
       when Crystal::ClassDef
-        program.structs[node.name.to_s] = node
+        cls_names = [] of String
+        cls_names << node.name.to_s
+        unless namespace.empty?
+          ns_prefix = namespace.join("::")
+          cls_names << "#{ns_prefix}::#{node.name}"
+        end
+        cls_names.each do |cname|
+          if ctx = @current_context
+            ctx.structs[cname] = node
+          end
+          program.structs[cname] = node
+        end
+        if node.body && !node.body.is_a?(Crystal::Nop)
+          process_top_level(node.body, program, namespace + [node.name.to_s])
+        end
       when Crystal::ModuleDef
-        program.modules[node.name.to_s] = node
+        mod_names = [] of String
+        mod_names << node.name.to_s
+        unless namespace.empty?
+          ns_prefix = namespace.join("::")
+          mod_names << "#{ns_prefix}::#{node.name}"
+        end
+        mod_names.each do |mname|
+          if ctx = @current_context
+            ctx.modules[mname] = node
+          end
+          program.modules[mname] = node
+        end
+        if node.body && !node.body.is_a?(Crystal::Nop)
+          process_top_level(node.body, program, namespace + [node.name.to_s])
+        end
+      when Crystal::EnumDef
+        ename = node.name.to_s
+        enum_names = [ename]
+        unless namespace.empty?
+          ns_prefix = namespace.join("::")
+          enum_names << "#{ns_prefix}::#{ename}"
+        end
+        enum_names.each do |n|
+          program.enums[n] = node
+        end
       when Crystal::Require
         handle_require(node.string, program)
       when Crystal::Call
@@ -82,12 +136,51 @@ module Citrine
           if block = node.block
             program.main_loop_body = block.body
           end
+        elsif node.name == "make_vm_context" && (node.obj.nil? || node.obj.to_s == "Citrine")
+          ctx_name = extract_name(node.args.first?)
+          if ctx_name
+            ctx = program.vm_contexts[ctx_name] ||= VmContextDef.new(ctx_name, (program.vm_contexts.size + 1).to_u16)
+            if block = node.block
+              old_ctx = @current_context
+              @current_context = ctx
+              process_top_level(block.body, program, namespace)
+              @current_context = old_ctx
+            end
+          end
+          return
+        elsif node.name == "set_vm_context" && (node.obj.nil? || node.obj.to_s == "Citrine")
+          ctx_name = extract_name(node.args.first?)
+          program.active_context_name = ctx_name
+          program.top_level_nodes << node if namespace.empty?
+          return
+        elsif node.name == "vm_context" && (node.obj.nil? || node.obj.to_s == "Citrine")
+          ctx_name = extract_name(node.args.first?)
+          if ctx_name && (ctx = program.vm_contexts[ctx_name]?)
+            if block = node.block
+              old_ctx = @current_context
+              @current_context = ctx
+              process_top_level(block.body, program, namespace)
+              @current_context = old_ctx
+            end
+          end
+          program.top_level_nodes << node if namespace.empty?
+          return
         end
-        program.top_level_nodes << node
+        program.top_level_nodes << node if namespace.empty?
       when Crystal::Nop
         # Skip empty
       else
-        program.top_level_nodes << node
+        program.top_level_nodes << node if namespace.empty?
+      end
+    end
+
+    private def extract_name(arg : Crystal::ASTNode?) : String?
+      case arg
+      when Crystal::SymbolLiteral then arg.value
+      when Crystal::StringLiteral then arg.value
+      when Crystal::Var           then arg.name
+      when Crystal::Call          then arg.name
+      else nil
       end
     end
 
@@ -96,30 +189,42 @@ module Citrine
         program.loaded_requires << "citrine"
         return
       end
-      return if program.loaded_requires.includes?(req_name)
-      program.loaded_requires << req_name
+
+      if ctx = @current_context
+        ctx.requires << req_name
+      end
 
       target_file : String? = nil
-      if req_name.starts_with?("citrine/")
-        candidate = File.expand_path("../../stubs/#{req_name}.cr", __DIR__)
-        target_file = candidate if File.exists?(candidate)
-      elsif req_name.starts_with?(".") && @filename
+      if req_name.starts_with?("citrine/") || req_name.starts_with?("opal/")
+        candidates = [
+          File.expand_path("../../stubs/#{req_name}.cr", __DIR__),
+          File.expand_path("../../../lib/#{req_name}.cr", __DIR__),
+          File.expand_path("../../../lib/#{req_name}/src/#{req_name}.cr", __DIR__),
+          File.expand_path("../../../lib/opal/src/#{req_name}.cr", __DIR__)
+        ]
+        target_file = candidates.find { |c| File.exists?(c) }
+      elsif req_name.starts_with?(".")
+        base_dir = @filename ? File.dirname(@filename.not_nil!) : "."
         rel_path = req_name.ends_with?(".cr") ? req_name : "#{req_name}.cr"
-        candidate = File.expand_path(rel_path, File.dirname(@filename.not_nil!))
+        candidate = File.expand_path(rel_path, base_dir)
+        target_file = candidate if File.exists?(candidate)
+      elsif @filename
+        base_dir = File.dirname(@filename.not_nil!)
+        rel_path = req_name.ends_with?(".cr") ? req_name : "#{req_name}.cr"
+        candidate = File.expand_path(rel_path, base_dir)
         target_file = candidate if File.exists?(candidate)
       end
 
       if target_file && File.exists?(target_file)
+        program.loaded_requires << req_name
+        canon_path = File.realpath(target_file) rescue target_file
+        return if program.loaded_requires.includes?(canon_path)
+        program.loaded_requires << canon_path
+
         sub_source = File.read(target_file)
         sub_parser = DslParser.new(filename: target_file)
-        sub_prog = sub_parser.parse(sub_source)
-
-        sub_prog.defs.each { |k, v| program.defs[k] = v }
-        sub_prog.structs.each { |k, v| program.structs[k] = v }
-        sub_prog.modules.each { |k, v| program.modules[k] = v }
-        sub_prog.top_level_nodes.each { |n| program.top_level_nodes << n }
-
-        sub_prog.loaded_requires.each { |r| program.loaded_requires << r }
+        sub_parser.current_context = @current_context
+        sub_parser.parse(sub_source, existing_program: program)
       end
     end
   end

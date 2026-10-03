@@ -59,8 +59,23 @@ module Citrine
   #   <tbody>
   #     <tr>
   #       <td><code>VIRTUAL_MACHINE</code></td>
-  #       <td><strong>Citrine Virtual Machine Architecture</strong></td>
-  #       <td>Direct-threaded bytecode interpreter, register windows, and zero-GC memory model.</td>
+  #       <td><strong>Citrine Virtual Machine Architecture & Execution Model</strong></td>
+  #       <td>Register-based 32-bit virtual machine architecture, direct-threaded C runtime, and MIPS R5900 JIT emitter for PlayStation 2.</td>
+  #     </tr>
+  #     <tr>
+  #       <td><code>BYTECODE_OPCODES</code></td>
+  #       <td><strong>Complete VM Opcode Reference</strong></td>
+  #       <td>Exhaustive technical specification of all 43 Citrine VM instruction opcodes, operand encodings, and MIPS translations.</td>
+  #     </tr>
+  #     <tr>
+  #       <td><code>NATIVE_FUNCTION_REFERENCE</code></td>
+  #       <td><strong>Citrine Native System Call Reference (NativeId)</strong></td>
+  #       <td>Complete reference of all 50+ Citrine VM native subsystem calls, parameters, return values, and hardware bindings.</td>
+  #     </tr>
+  #     <tr>
+  #       <td><code>HYBRID_MEMORY_MODEL</code></td>
+  #       <td><strong>4-Tier Hybrid Console Memory Architecture</strong></td>
+  #       <td>Zero-pause console memory model combining per-frame scratch pools, context arenas, explicit pointers, and idle mark-sweep.</td>
   #     </tr>
   #   </tbody>
   # </table>
@@ -250,7 +265,10 @@ module Citrine
     # - `B_PS2_HARDWARE::PS2_HARDWARE`: **PlayStation 2 Hardware Architecture** &mdash; In-depth guide to the Emotion Engine, Scratchpad RAM, and Graphic Synthesizer.
     #
     # ##### 3. Virtual machine (`C_VIRTUAL_MACHINE`)
-    # - `C_VIRTUAL_MACHINE::VIRTUAL_MACHINE`: **Citrine Virtual Machine Architecture** &mdash; Direct-threaded bytecode interpreter, register windows, and zero-GC memory model.
+    # - `C_VIRTUAL_MACHINE::VIRTUAL_MACHINE`: **Citrine Virtual Machine Architecture & Execution Model** &mdash; Register-based 32-bit virtual machine architecture, direct-threaded C runtime, and MIPS R5900 JIT emitter for PlayStation 2.
+    # - `C_VIRTUAL_MACHINE::BYTECODE_OPCODES`: **Complete VM Opcode Reference** &mdash; Exhaustive technical specification of all 43 Citrine VM instruction opcodes, operand encodings, and MIPS translations.
+    # - `C_VIRTUAL_MACHINE::NATIVE_FUNCTION_REFERENCE`: **Citrine Native System Call Reference (NativeId)** &mdash; Complete reference of all 50+ Citrine VM native subsystem calls, parameters, return values, and hardware bindings.
+    # - `C_VIRTUAL_MACHINE::HYBRID_MEMORY_MODEL`: **4-Tier Hybrid Console Memory Architecture** &mdash; Zero-pause console memory model combining per-frame scratch pools, context arenas, explicit pointers, and idle mark-sweep.
     #
     # ##### 4. Raylib api (`D_RAYLIB_API`)
     # - `D_RAYLIB_API::RAYLIB_API`: **Raylib-style PlayStation 2 API** &mdash; Guide to 2D and 3D graphics, DualShock 2 input, and SPU2 audio playback.
@@ -292,7 +310,10 @@ module Citrine
     # - `B_PS2_HARDWARE::PS2_HARDWARE`: **PlayStation 2 Hardware Architecture** &mdash; In-depth guide to the Emotion Engine, Scratchpad RAM, and Graphic Synthesizer.
     #
     # ##### `C_VIRTUAL_MACHINE`
-    # - `C_VIRTUAL_MACHINE::VIRTUAL_MACHINE`: **Citrine Virtual Machine Architecture** &mdash; Direct-threaded bytecode interpreter, register windows, and zero-GC memory model.
+    # - `C_VIRTUAL_MACHINE::VIRTUAL_MACHINE`: **Citrine Virtual Machine Architecture & Execution Model** &mdash; Register-based 32-bit virtual machine architecture, direct-threaded C runtime, and MIPS R5900 JIT emitter for PlayStation 2.
+    # - `C_VIRTUAL_MACHINE::BYTECODE_OPCODES`: **Complete VM Opcode Reference** &mdash; Exhaustive technical specification of all 43 Citrine VM instruction opcodes, operand encodings, and MIPS translations.
+    # - `C_VIRTUAL_MACHINE::NATIVE_FUNCTION_REFERENCE`: **Citrine Native System Call Reference (NativeId)** &mdash; Complete reference of all 50+ Citrine VM native subsystem calls, parameters, return values, and hardware bindings.
+    # - `C_VIRTUAL_MACHINE::HYBRID_MEMORY_MODEL`: **4-Tier Hybrid Console Memory Architecture** &mdash; Zero-pause console memory model combining per-frame scratch pools, context arenas, explicit pointers, and idle mark-sweep.
     #
     # ##### `D_RAYLIB_API`
     # - `D_RAYLIB_API::RAYLIB_API`: **Raylib-style PlayStation 2 API** &mdash; Guide to 2D and 3D graphics, DualShock 2 input, and SPU2 audio playback.
@@ -335,6 +356,9 @@ end
 require "./docs/a_getting_started/getting_started"
 require "./docs/b_ps2_hardware/ps2_hardware"
 require "./docs/c_virtual_machine/virtual_machine"
+require "./docs/c_virtual_machine/bytecode_opcodes"
+require "./docs/c_virtual_machine/native_function_reference"
+require "./docs/c_virtual_machine/hybrid_memory_model"
 require "./docs/d_raylib_api/raylib_api"
 require "./docs/e_asset_pipeline/asset_pipeline"
 require "./docs/f_debugging/debugging"

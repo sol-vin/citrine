@@ -18,6 +18,7 @@
 
 # Testing / Scratch
 /docs/
+!/docs/BYTECODE_SPEC.md
 /scratch/
 /tmp/
 

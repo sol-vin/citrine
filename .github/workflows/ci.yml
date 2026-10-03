@@ -35,6 +35,9 @@ jobs:
       - name: Install Shards
         run: shards install --ignore-crystal-version
 
+      - name: Build Jasper Documentation
+        run: crystal run lib/jasper/src/jasper_cli.cr -- build
+
       - name: Build Citrine CLI
         shell: bash
         run: |
@@ -238,6 +241,9 @@ jobs:
 
       - name: Install Shards
         run: shards install --ignore-crystal-version
+
+      - name: Build Jasper Documentation
+        run: crystal run lib/jasper/src/jasper_cli.cr -- build
 
       - name: Generate API Documentation
         run: crystal docs

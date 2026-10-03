@@ -51,15 +51,35 @@ module Citrine
     end
   end
 
+  class ModuleInfo
+    getter module_id : UInt32
+    getter name : String
+    getter methods : Hash(String, Crystal::Def)
+
+    def initialize(@module_id : UInt32, @name : String)
+      @methods = Hash(String, Crystal::Def).new
+    end
+  end
+
   class ClassInfo
     getter class_id : UInt32
     getter name : String
+    property superclass_name : String? = nil
+    property superclass_id : UInt32? = nil
+    property included_module_ids : Array(UInt32) = [] of UInt32
+    property is_abstract : Bool = false
+    property is_struct : Bool = false
+    property abstract_methods : Set(String) = Set(String).new
     getter fields : Hash(String, Int32)
     getter methods : Hash(String, Crystal::Def)
+    getter class_fields : Hash(String, Int32)
+    getter class_methods : Hash(String, Crystal::Def)
 
     def initialize(@class_id : UInt32, @name : String)
       @fields = Hash(String, Int32).new
       @methods = Hash(String, Crystal::Def).new
+      @class_fields = Hash(String, Int32).new
+      @class_methods = Hash(String, Crystal::Def).new
     end
 
     def field_index(name : String) : Int32
@@ -71,6 +91,16 @@ module Citrine
         @fields[clean] = idx
         idx
       end
+    end
+
+    def ancestor_ids(all_classes : Hash(String, ClassInfo)) : Array(UInt32)
+      res = [@class_id] + @included_module_ids
+      if sc_name = @superclass_name
+        if sc_info = all_classes[sc_name]?
+          res += sc_info.ancestor_ids(all_classes)
+        end
+      end
+      res.uniq
     end
   end
 
@@ -135,9 +165,14 @@ module Citrine
     property opt_level : Int32 = 1
 
     getter classes : Hash(String, ClassInfo) = Hash(String, ClassInfo).new
+    getter modules : Hash(String, ModuleInfo) = Hash(String, ModuleInfo).new
+    getter class_prop_offsets : Hash(String, Int32) = Hash(String, Int32).new
+    CLASS_PROP_BASE = 0x00300000_u32
     property current_class : ClassInfo? = nil
     property current_self_reg : UInt8? = nil
     property program_defs : Hash(String, Crystal::Def) = Hash(String, Crystal::Def).new
+    property var_types : Hash(String, String) = Hash(String, String).new
+    getter enums : Hash(String, Hash(String, Int64)) = Hash(String, Hash(String, Int64)).new
     property inline_counter : Int32 = 0
 
     def initialize(@filename : String? = nil)
@@ -156,31 +191,79 @@ module Citrine
 
       @program_defs = program.defs.dup
       @classes.clear
+      @modules.clear
+      @enums.clear
+      @class_prop_offsets.clear
+      @var_types.clear
 
-      # 1. Process classes and structs
+      # 0. Process enums
+      program.enums.each do |ename, edef|
+        member_map = Hash(String, Int64).new
+        curr_val = 0_i64
+        edef.members.each do |m|
+          if m.is_a?(Crystal::Arg)
+            if def_val = m.default_value
+              if def_val.is_a?(Crystal::NumberLiteral)
+                clean_str = def_val.value.gsub("_", "")
+                curr_val = if clean_str.starts_with?("0x") || clean_str.starts_with?("0X")
+                             clean_str[2..-1].to_i64?(16) || curr_val
+                           else
+                             clean_str.to_i64? || curr_val
+                           end
+              end
+            end
+            member_map[m.name] = curr_val
+            curr_val += 1_i64
+          end
+        end
+        @enums[ename] = member_map
+      end
+
+      # 1. Process modules first
+      program.modules.each_with_index do |(mod_name, mod_node), idx|
+        mod_info = ModuleInfo.new((idx + 500).to_u32, mod_name)
+        extract_module_members(mod_node, mod_name, mod_info)
+        @modules[mod_name] = mod_info
+      end
+
+      # 2. Process classes and structs
       program.structs.each_with_index do |(cls_name, cls_node), idx|
         cls_info = ClassInfo.new((idx + 1).to_u32, cls_name)
         extract_class_members(cls_node, cls_info)
         @classes[cls_name] = cls_info
       end
 
-      # 2. Process modules
-      program.modules.each do |mod_name, mod_node|
-        extract_module_members(mod_node, mod_name)
+      # 3. Inherit superclass fields and methods
+      @classes.each do |cls_name, cls_info|
+        if sc_name = cls_info.superclass_name
+          if sc_info = @classes[sc_name]?
+            cls_info.superclass_id = sc_info.class_id
+            sc_info.fields.each do |f_name, f_idx|
+              cls_info.fields[f_name] ||= f_idx
+            end
+            sc_info.methods.each do |m_name, m_def|
+              unless cls_info.methods.has_key?(m_name)
+                cls_info.methods[m_name] = m_def
+                fn_name = "#{cls_name}##{m_name}"
+                @program_defs[fn_name] ||= m_def
+              end
+            end
+          end
+        end
       end
 
-      # 3. Pre-register all function signatures in @functions so recursive and forward calls resolve
+      # 4. Pre-register all function signatures in @functions so recursive and forward calls resolve
       @program_defs.each do |name, def_node|
         arg_names = def_node.args.map(&.name)
         @functions << CompiledFunction.new(name, arg_names.size.to_u8)
       end
 
-      # 4. Compile helper functions / methods
+      # 5. Compile helper functions / methods
       @program_defs.each do |name, def_node|
         compile_function(def_node, name)
       end
 
-      # 5. Compile main function
+      # 6. Compile main function
       main_fn = CompiledFunction.new("__main__", 0_u8)
       allocator = RegisterAllocator.new
       fn_instructions = [] of Instruction
@@ -198,7 +281,7 @@ module Citrine
       main_fn.instructions = fn_instructions
       @functions << main_fn
 
-      # 6. Run Bytecode Optimizer Passes
+      # 7. Run Bytecode Optimizer Passes
       effective_opt_level = @release_mode ? 2 : @opt_level
       if effective_opt_level > 0
         optimizer = BytecodeOptimizer.new(@constants, effective_opt_level)
@@ -207,47 +290,112 @@ module Citrine
         end
       end
 
-      # 7. Assemble binary bytecode (.cbc)
+      # 8. Assemble binary bytecode (.cbc)
       serialize_bytecode
     end
 
     private def extract_class_members(cls_node : Crystal::ClassDef, cls_info : ClassInfo)
+      cls_info.is_abstract = cls_node.abstract?
+      cls_info.is_struct = cls_node.struct?
+      if sc = cls_node.superclass
+        cls_info.superclass_name = sc.to_s
+      end
+
       body = cls_node.body
       nodes = body.is_a?(Crystal::Expressions) ? body.expressions : [body]
-      nodes.each do |child|
+      nodes.each do |raw_child|
+        child = raw_child
+        while child.is_a?(Crystal::VisibilityModifier)
+          child = child.exp
+        end
+
         case child
+        when Crystal::Include
+          mod_name = child.name.to_s
+          if mod_info = @modules[mod_name]?
+            cls_info.included_module_ids << mod_info.module_id
+            mod_info.methods.each do |m_name, m_def|
+              cls_info.methods[m_name] = m_def
+              fn_name = "#{cls_info.name}##{m_name}"
+              args = [Crystal::Arg.new("self")] + m_def.args.reject { |a| a.name == "self" }
+              new_def = Crystal::Def.new(fn_name, args, m_def.body)
+              @program_defs[fn_name] = new_def
+            end
+          end
+
+        when Crystal::Extend
+          mod_name = child.name.to_s
+          if mod_info = @modules[mod_name]?
+            mod_info.methods.each do |m_name, m_def|
+              cls_info.class_methods[m_name] = m_def
+              fn_name = "#{cls_info.name}.#{m_name}"
+              new_def = Crystal::Def.new(fn_name, m_def.args, m_def.body)
+              @program_defs[fn_name] = new_def
+              @program_defs["#{cls_info.name}::#{m_name}"] = new_def
+            end
+          end
+
         when Crystal::Def
-          cls_info.methods[child.name] = child
-          init_assigns = [] of Crystal::ASTNode
-          child.args.each do |arg|
-            if arg.name.starts_with?("@")
-              cls_info.field_index(arg.name)
-              clean_name = arg.name[1..-1]
-              init_assigns << Crystal::Assign.new(Crystal::InstanceVar.new(arg.name), Crystal::Var.new(clean_name))
+          if child.abstract?
+            cls_info.abstract_methods << child.name
+          elsif child.receiver
+            cls_info.class_methods[child.name] = child
+            fn_name = "#{cls_info.name}.#{child.name}"
+            new_def = Crystal::Def.new(fn_name, child.args, child.body)
+            @program_defs[fn_name] = new_def
+            @program_defs["#{cls_info.name}::#{child.name}"] = new_def
+          else
+            cls_info.methods[child.name] = child
+            init_assigns = [] of Crystal::ASTNode
+            child.args.each do |arg|
+              clean_name = arg.name.gsub(/^@/, "")
+              ivar_name = "@#{clean_name}"
+              if child.name == "initialize" || arg.name.starts_with?("@") || cls_info.fields.has_key?(ivar_name) || cls_info.fields.has_key?(clean_name)
+                cls_info.field_index(ivar_name)
+                init_assigns << Crystal::Assign.new(Crystal::InstanceVar.new(ivar_name), Crystal::Var.new(clean_name))
+              end
             end
-          end
-          fn_name = "#{cls_info.name}##{child.name}"
-          converted_args = child.args.map do |arg|
-            if arg.name.starts_with?("@")
-              Crystal::Arg.new(arg.name[1..-1])
-            else
-              arg
+            fn_name = "#{cls_info.name}##{child.name}"
+            converted_args = child.args.map do |arg|
+              Crystal::Arg.new(arg.name.gsub(/^@/, ""))
             end
+            args = [Crystal::Arg.new("self")] + converted_args
+            full_body = if init_assigns.empty?
+                          child.body
+                        elsif child.body.nil? || child.body.is_a?(Crystal::Nop)
+                          Crystal::Expressions.new(init_assigns)
+                        else
+                          existing_nodes = child.body.is_a?(Crystal::Expressions) ? child.body.as(Crystal::Expressions).expressions : [child.body]
+                          Crystal::Expressions.new(init_assigns + existing_nodes)
+                        end
+            new_def = Crystal::Def.new(fn_name, args, full_body)
+            @program_defs[fn_name] = new_def
           end
-          args = [Crystal::Arg.new("self")] + converted_args
-          full_body = if init_assigns.empty?
-                        child.body
-                      elsif child.body.nil? || child.body.is_a?(Crystal::Nop)
-                        Crystal::Expressions.new(init_assigns)
-                      else
-                        existing_nodes = child.body.is_a?(Crystal::Expressions) ? child.body.as(Crystal::Expressions).expressions : [child.body]
-                        Crystal::Expressions.new(init_assigns + existing_nodes)
-                      end
-          new_def = Crystal::Def.new(fn_name, args, full_body)
-          @program_defs[fn_name] = new_def
 
         when Crystal::Call
-          if (child.name == "property" || child.name == "getter") && child.args.size > 0
+          if (child.name == "include" || child.name == "extend") && child.args.size > 0
+            mod_name = child.args[0].to_s
+            if mod_info = @modules[mod_name]?
+              if child.name == "include"
+                cls_info.included_module_ids << mod_info.module_id
+                mod_info.methods.each do |m_name, m_def|
+                  cls_info.methods[m_name] = m_def
+                  fn_name = "#{cls_info.name}##{m_name}"
+                  args = [Crystal::Arg.new("self")] + m_def.args.reject { |a| a.name == "self" }
+                  new_def = Crystal::Def.new(fn_name, args, m_def.body)
+                  @program_defs[fn_name] = new_def
+                end
+              else
+                mod_info.methods.each do |m_name, m_def|
+                  cls_info.class_methods[m_name] = m_def
+                  fn_name = "#{cls_info.name}.#{m_name}"
+                  new_def = Crystal::Def.new(fn_name, m_def.args, m_def.body)
+                  @program_defs[fn_name] = new_def
+                  @program_defs["#{cls_info.name}::#{m_name}"] = new_def
+                end
+              end
+            end
+          elsif ["property", "getter", "setter"].includes?(child.name) && child.args.size > 0
             prop_arg = child.args[0]
             prop_name = if prop_arg.is_a?(Crystal::TypeDeclaration)
                           prop_arg.var.to_s
@@ -255,16 +403,30 @@ module Citrine
                           prop_arg.to_s
                         end
             cls_info.field_index(prop_name)
-            getter_name = "#{cls_info.name}##{prop_name}"
-            getter_def = Crystal::Def.new(getter_name, [Crystal::Arg.new("self")], Crystal::InstanceVar.new("@#{prop_name}"))
-            @program_defs[getter_name] = getter_def
+            if child.name == "property" || child.name == "getter"
+              getter_name = "#{cls_info.name}##{prop_name}"
+              getter_def = Crystal::Def.new(getter_name, [Crystal::Arg.new("self")], Crystal::InstanceVar.new("@#{prop_name}"))
+              @program_defs[getter_name] = getter_def
+              cls_info.methods[prop_name] = getter_def
+            end
 
-            if child.name == "property"
+            if child.name == "property" || child.name == "setter"
               setter_name = "#{cls_info.name}##{prop_name}="
               assign = Crystal::Assign.new(Crystal::InstanceVar.new("@#{prop_name}"), Crystal::Var.new("val"))
               setter_def = Crystal::Def.new(setter_name, [Crystal::Arg.new("self"), Crystal::Arg.new("val")], assign)
               @program_defs[setter_name] = setter_def
+              cls_info.methods["#{prop_name}="] = setter_def
             end
+          elsif ["class_property", "class_getter", "class_setter"].includes?(child.name) && child.args.size > 0
+            prop_arg = child.args[0]
+            prop_name = if prop_arg.is_a?(Crystal::TypeDeclaration)
+                          prop_arg.var.to_s
+                        else
+                          prop_arg.to_s
+                        end
+            cls_info.class_fields[prop_name] = cls_info.class_fields.size
+            prop_key = "#{cls_info.name}::#{prop_name}"
+            @class_prop_offsets[prop_key] ||= @class_prop_offsets.size
           end
 
         when Crystal::Assign
@@ -275,7 +437,7 @@ module Citrine
       end
     end
 
-    private def extract_module_members(mod_node : Crystal::ModuleDef, mod_name : String)
+    private def extract_module_members(mod_node : Crystal::ModuleDef, mod_name : String, mod_info : ModuleInfo? = nil)
       body = mod_node.body
       nodes = body.is_a?(Crystal::Expressions) ? body.expressions : [body]
       nodes.each do |child|
@@ -283,6 +445,7 @@ module Citrine
           fn_name = "#{mod_name}.#{child.name}"
           @program_defs[fn_name] = child
           @program_defs["#{mod_name}::#{child.name}"] = child
+          mod_info.try { |m| m.methods[child.name] = child }
         end
       end
     end
@@ -403,13 +566,86 @@ module Citrine
           return ret_dest
         end
 
+        if node.target.is_a?(Crystal::ClassVar)
+          val_reg = compile_node(node.value, allocator, instructions, fn)
+          cvar_name = node.target.to_s
+          scope = @current_class.try(&.name) || fn.name.split("#").first.split(".").first
+          prop_key = "#{scope}::#{cvar_name}"
+          prop_offset = @class_prop_offsets[prop_key] ||= @class_prop_offsets.size
+          addr_val = CLASS_PROP_BASE + (prop_offset.to_u32 * 4)
+          addr_reg = allocator.alloc_temp
+          idx_reg = allocator.alloc_temp
+          instructions << Instruction.encode_ab_imm(Opcode::LoadInt, idx_reg, 0_u16)
+          c_idx = add_constant(ConstValue.new(ConstType::Int32, int_val: addr_val.to_i32))
+          instructions << Instruction.encode_ab_imm(Opcode::LoadConst, addr_reg, c_idx.to_u16)
+          seq_base = allocator.alloc_contiguous(3)
+          instructions << Instruction.encode_abc(Opcode::Move, seq_base, addr_reg, 0_u8)
+          instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, idx_reg, 0_u8)
+          instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 2).to_u8, val_reg, 0_u8)
+          instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                      (val_reg.to_u32 << 16) |
+                      (seq_base.to_u32 << 8) |
+                      NativeId::PointerSet.value.to_u32
+          instructions << Instruction.new(instr_val)
+          allocator.free_temp(addr_reg)
+          allocator.free_temp(idx_reg)
+          3.times { |i| allocator.free_temp((seq_base + i).to_u8) }
+          return val_reg
+        end
+
         target_name = node.target.to_s
+        val_type : String? = nil
+        if node.value.is_a?(Crystal::Call)
+          call_node = node.value.as(Crystal::Call)
+          if (call_node.name == "new" || call_node.name == "malloc") && (recv = call_node.obj)
+            val_type = recv.to_s
+          elsif call_node.name == "to_s"
+            val_type = "String"
+          end
+        elsif node.value.is_a?(Crystal::Var)
+          val_type = @var_types[node.value.as(Crystal::Var).name]?
+        elsif node.value.is_a?(Crystal::Path)
+          path_node = node.value.as(Crystal::Path)
+          if path_node.names.size >= 2
+            val_type = path_node.names[0...-1].join("::")
+          end
+        elsif node.value.is_a?(Crystal::StringLiteral) || node.value.is_a?(Crystal::StringInterpolation)
+          val_type = "String"
+        elsif node.value.is_a?(Crystal::BoolLiteral)
+          val_type = "Bool"
+        elsif node.value.is_a?(Crystal::NumberLiteral)
+          val_type = "Int"
+        end
+        if val_type
+          @var_types[target_name] = val_type
+        end
+
         val_reg = compile_node(node.value, allocator, instructions, fn)
         local_reg = allocator.allocate_local(target_name)
-        instructions << Instruction.encode_abc(Opcode::Move, local_reg, val_reg, 0_u8)
+
+        if val_type && @classes[val_type]?.try(&.is_struct) && node.value.is_a?(Crystal::Var)
+          seq_base = allocator.alloc_contiguous(1)
+          instructions << Instruction.encode_abc(Opcode::Move, seq_base, val_reg, 0_u8)
+          copy_dest = allocator.alloc_temp
+          instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                      (copy_dest.to_u32 << 16) |
+                      (seq_base.to_u32 << 8) |
+                      NativeId::StructCopy.value.to_u32
+          instructions << Instruction.new(instr_val)
+          instructions << Instruction.encode_abc(Opcode::Move, local_reg, copy_dest, 0_u8)
+          allocator.free_temp(seq_base)
+          allocator.free_temp(copy_dest)
+        else
+          instructions << Instruction.encode_abc(Opcode::Move, local_reg, val_reg, 0_u8)
+        end
         @source_map.record_register(fn.name, local_reg.to_i32, target_name)
         allocator.free_temp(val_reg)
         local_reg
+
+      when Crystal::OpAssign
+        call = Crystal::Call.new(node.target, node.op, node.value)
+        assign = Crystal::Assign.new(node.target, call)
+        compile_node(assign, allocator, instructions, fn)
 
 
       when Crystal::Var
@@ -425,12 +661,17 @@ module Citrine
 
       when Crystal::NumberLiteral
         dest = allocator.alloc_temp
-        if node.kind == :i32 || node.kind == :i64 || node.value.includes?(".") == false
-          val = node.value.to_i32
-          if val >= -32768 && val <= 32767
-            instructions << Instruction.encode_ab_imm(Opcode::LoadInt, dest, (val & 0xFFFF).to_u16)
+        if node.kind == :i32 || node.kind == :i64 || node.kind == :u32 || node.kind == :u64 || node.value.includes?(".") == false
+          clean_str = node.value.gsub("_", "")
+          v64 = if clean_str.starts_with?("0x") || clean_str.starts_with?("0X")
+                  clean_str[2..-1].to_u64?(16).try(&.to_i64!) || 0_i64
+                else
+                  clean_str.to_i64? || clean_str.to_u64?.try(&.to_i64!) || 0_i64
+                end
+          if v64 >= -32768 && v64 <= 32767
+            instructions << Instruction.encode_ab_imm(Opcode::LoadInt, dest, v64.to_u16!)
           else
-            const_idx = add_constant(ConstValue.new(ConstType::Int32, int_val: val))
+            const_idx = add_constant(ConstValue.new(ConstType::Int32, int_val: v64.to_i32!, uint_val: v64.to_u32!))
             instructions << Instruction.encode_ab_imm(Opcode::LoadConst, dest, const_idx.to_u16)
           end
         else
@@ -446,6 +687,9 @@ module Citrine
         const_idx = add_constant(ConstValue.new(ConstType::String, int_val: str_idx, str_val: node.value))
         instructions << Instruction.encode_ab_imm(Opcode::LoadConst, dest, const_idx.to_u16)
         dest
+
+      when Crystal::StringInterpolation
+        compile_string_interpolation(node, allocator, instructions, fn)
 
       when Crystal::BoolLiteral
         dest = allocator.alloc_temp
@@ -551,11 +795,15 @@ module Citrine
         compile_call(node, allocator, instructions, fn)
 
       when Crystal::Path
-        # Constant reference e.g. Button::Cross, Color::Red
+        # Constant reference e.g. Button::Cross, Color::Red, Direction::North
         dest = allocator.alloc_temp
         val = resolve_constant_path(node)
-        const_idx = add_constant(val)
-        instructions << Instruction.encode_ab_imm(Opcode::LoadConst, dest, const_idx.to_u16)
+        if val.type == ConstType::Int32 && val.int_val >= -32768 && val.int_val <= 32767
+          instructions << Instruction.encode_ab_imm(Opcode::LoadInt, dest, val.int_val.to_u16!)
+        else
+          const_idx = add_constant(val)
+          instructions << Instruction.encode_ab_imm(Opcode::LoadConst, dest, const_idx.to_u16)
+        end
         dest
 
       when Crystal::Return
@@ -590,6 +838,32 @@ module Citrine
         else
           instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
         end
+        dest
+
+      when Crystal::ClassVar
+        dest = allocator.alloc_temp
+        cvar_name = node.name
+        scope = @current_class.try(&.name) || fn.name.split("#").first.split(".").first
+        prop_key = "#{scope}::#{cvar_name}"
+        prop_offset = @class_prop_offsets[prop_key] ||= @class_prop_offsets.size
+        addr_val = CLASS_PROP_BASE + (prop_offset.to_u32 * 4)
+        addr_reg = allocator.alloc_temp
+        idx_reg = allocator.alloc_temp
+        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, idx_reg, 0_u16)
+        c_idx = add_constant(ConstValue.new(ConstType::Int32, int_val: addr_val.to_i32))
+        instructions << Instruction.encode_ab_imm(Opcode::LoadConst, addr_reg, c_idx.to_u16)
+        seq_base = allocator.alloc_contiguous(2)
+        instructions << Instruction.encode_abc(Opcode::Move, seq_base, addr_reg, 0_u8)
+        instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, idx_reg, 0_u8)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (seq_base.to_u32 << 8) |
+                    NativeId::PointerGet.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(addr_reg)
+        allocator.free_temp(idx_reg)
+        allocator.free_temp(seq_base)
+        allocator.free_temp((seq_base + 1).to_u8)
         dest
 
       when Crystal::Self
@@ -629,12 +903,366 @@ module Citrine
         end
         dest
 
+      when Crystal::IsA
+        dest = allocator.alloc_temp
+        obj_reg = compile_node(node.obj, allocator, instructions, fn)
+
+        target_types = [] of String
+        case const_node = node.const
+        when Crystal::Union
+          const_node.types.each { |t| target_types << t.to_s }
+        else
+          target_types << const_node.to_s
+        end
+
+        target_ids = [] of UInt32
+        target_types.each do |tname|
+          if tid = resolve_type_id(tname)
+            matching = @classes.values.select { |c| c.ancestor_ids(@classes).includes?(tid) }.map(&.class_id)
+            if matching.empty?
+              target_ids << tid
+            else
+              target_ids.concat(matching)
+            end
+          end
+        end
+        target_ids.uniq!
+
+        if target_ids.empty?
+          instructions << Instruction.encode_ab_imm(Opcode::LoadBool, dest, 0_u16)
+        elsif target_ids.size == 1
+          tid_reg = allocator.alloc_temp
+          instructions << Instruction.encode_ab_imm(Opcode::LoadInt, tid_reg, target_ids[0].to_u16)
+          seq_base = allocator.alloc_contiguous(2)
+          instructions << Instruction.encode_abc(Opcode::Move, seq_base, obj_reg, 0_u8)
+          instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
+          instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                      (dest.to_u32 << 16) |
+                      (seq_base.to_u32 << 8) |
+                      NativeId::TypeIsA.value.to_u32
+          instructions << Instruction.new(instr_val)
+          allocator.free_temp(tid_reg)
+          allocator.free_temp(seq_base)
+          allocator.free_temp((seq_base + 1).to_u8)
+        else
+          match_dest = allocator.alloc_temp
+          instructions << Instruction.encode_ab_imm(Opcode::LoadBool, match_dest, 0_u16)
+          jump_end_indices = [] of Int32
+
+          target_ids.each do |tid|
+            tid_reg = allocator.alloc_temp
+            instructions << Instruction.encode_ab_imm(Opcode::LoadInt, tid_reg, tid.to_u16)
+            seq_base = allocator.alloc_contiguous(2)
+            instructions << Instruction.encode_abc(Opcode::Move, seq_base, obj_reg, 0_u8)
+            instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
+            cur_check = allocator.alloc_temp
+            instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                        (cur_check.to_u32 << 16) |
+                        (seq_base.to_u32 << 8) |
+                        NativeId::TypeIsA.value.to_u32
+            instructions << Instruction.new(instr_val)
+            allocator.free_temp(tid_reg)
+            allocator.free_temp(seq_base)
+            allocator.free_temp((seq_base + 1).to_u8)
+
+            j_next = instructions.size
+            instructions << Instruction.encode_branch(Opcode::JumpIfFalse, cur_check, 0_i16)
+            instructions << Instruction.encode_ab_imm(Opcode::LoadBool, match_dest, 1_u16)
+            j_end = instructions.size
+            instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, 0_i16)
+            jump_end_indices << j_end
+            instructions[j_next] = Instruction.encode_branch(Opcode::JumpIfFalse, cur_check, (instructions.size - j_next - 1).to_i16)
+            allocator.free_temp(cur_check)
+          end
+
+          end_pos = instructions.size
+          jump_end_indices.each do |j_end|
+            instructions[j_end] = Instruction.encode_branch(Opcode::Jump, 0_u8, (end_pos - j_end - 1).to_i16)
+          end
+          instructions << Instruction.encode_abc(Opcode::Move, dest, match_dest, 0_u8)
+          allocator.free_temp(match_dest)
+        end
+        allocator.free_temp(obj_reg)
+        dest
+
+      when Crystal::Cast
+        dest = allocator.alloc_temp
+        obj_reg = compile_node(node.obj, allocator, instructions, fn)
+        target_name = node.to.to_s
+        target_id = resolve_type_id(target_name) || 0_u32
+        tid_reg = allocator.alloc_temp
+        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, tid_reg, target_id.to_u16)
+        seq_base = allocator.alloc_contiguous(2)
+        instructions << Instruction.encode_abc(Opcode::Move, seq_base, obj_reg, 0_u8)
+        instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (seq_base.to_u32 << 8) |
+                    NativeId::TypeAsCast.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(obj_reg)
+        allocator.free_temp(tid_reg)
+        allocator.free_temp(seq_base)
+        allocator.free_temp((seq_base + 1).to_u8)
+        dest
+
+      when Crystal::RegexLiteral
+        dest = allocator.alloc_temp
+        pat_str = node.value.is_a?(Crystal::StringLiteral) ? node.value.as(Crystal::StringLiteral).value : node.value.to_s
+        str_idx = add_string(pat_str)
+        const_idx = add_constant(ConstValue.new(ConstType::String, int_val: str_idx, str_val: pat_str))
+        pat_reg = allocator.alloc_temp
+        instructions << Instruction.encode_ab_imm(Opcode::LoadConst, pat_reg, const_idx.to_u16)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (pat_reg.to_u32 << 8) |
+                    NativeId::RegexNew.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(pat_reg)
+        dest
+
+      when Crystal::Case
+        compile_case(node, allocator, instructions, fn)
 
       else
         dest = allocator.alloc_temp
         instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
         dest
       end
+    end
+
+    private def compile_case(
+      node : Crystal::Case,
+      allocator : RegisterAllocator,
+      instructions : Array(Instruction),
+      fn : CompiledFunction
+    ) : UInt8
+      dest = allocator.alloc_temp
+      exit_jumps = [] of Int32
+
+      if cond = node.cond
+        cond_reg = compile_node(cond, allocator, instructions, fn)
+
+        node.whens.each do |w|
+          body_jump_patches = [] of Int32
+          next_when_jump_patches = [] of Int32
+
+          w.conds.each_with_index do |c, c_idx|
+            is_last_cond = (c_idx == w.conds.size - 1)
+
+            case c
+            when Crystal::RangeLiteral
+              from_reg = compile_node(c.from, allocator, instructions, fn)
+              to_reg = compile_node(c.to, allocator, instructions, fn)
+
+              ge_reg = allocator.alloc_temp
+              instructions << Instruction.encode_abc(Opcode::Ge, ge_reg, cond_reg, from_reg)
+
+              le_reg = allocator.alloc_temp
+              if c.exclusive?
+                instructions << Instruction.encode_abc(Opcode::Lt, le_reg, cond_reg, to_reg)
+              else
+                instructions << Instruction.encode_abc(Opcode::Le, le_reg, cond_reg, to_reg)
+              end
+
+              range_match = allocator.alloc_temp
+              instructions << Instruction.encode_abc(Opcode::BitAnd, range_match, ge_reg, le_reg)
+              allocator.free_temp(from_reg)
+              allocator.free_temp(to_reg)
+              allocator.free_temp(ge_reg)
+              allocator.free_temp(le_reg)
+
+              if is_last_cond
+                j = instructions.size
+                instructions << Instruction.encode_branch(Opcode::JumpIfFalse, range_match, 0_i16)
+                next_when_jump_patches << j
+              else
+                j = instructions.size
+                instructions << Instruction.encode_branch(Opcode::JumpIfTrue, range_match, 0_i16)
+                body_jump_patches << j
+              end
+              allocator.free_temp(range_match)
+
+            when Crystal::Path, Crystal::Generic, Crystal::Union
+              target_types = [] of String
+              if c.is_a?(Crystal::Union)
+                c.types.each { |t| target_types << t.to_s }
+              else
+                target_types << c.to_s
+              end
+              target_ids = [] of UInt32
+              target_types.each do |tname|
+                if tid = resolve_type_id(tname)
+                  matching = @classes.values.select { |cl| cl.ancestor_ids(@classes).includes?(tid) }.map(&.class_id)
+                  if matching.empty?
+                    target_ids << tid
+                  else
+                    target_ids.concat(matching)
+                  end
+                end
+              end
+              target_ids.uniq!
+
+              type_match = allocator.alloc_temp
+              if target_ids.empty?
+                instructions << Instruction.encode_ab_imm(Opcode::LoadBool, type_match, 0_u16)
+              elsif target_ids.size == 1
+                tid_reg = allocator.alloc_temp
+                instructions << Instruction.encode_ab_imm(Opcode::LoadInt, tid_reg, target_ids[0].to_u16)
+                seq_base = allocator.alloc_contiguous(2)
+                instructions << Instruction.encode_abc(Opcode::Move, seq_base, cond_reg, 0_u8)
+                instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
+                instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                            (type_match.to_u32 << 16) |
+                            (seq_base.to_u32 << 8) |
+                            NativeId::TypeIsA.value.to_u32
+                instructions << Instruction.new(instr_val)
+                allocator.free_temp(tid_reg)
+                allocator.free_temp(seq_base)
+                allocator.free_temp((seq_base + 1).to_u8)
+              else
+                instructions << Instruction.encode_ab_imm(Opcode::LoadBool, type_match, 0_u16)
+                tid_jump_ends = [] of Int32
+                target_ids.each do |tid|
+                  tid_reg = allocator.alloc_temp
+                  instructions << Instruction.encode_ab_imm(Opcode::LoadInt, tid_reg, tid.to_u16)
+                  seq_base = allocator.alloc_contiguous(2)
+                  instructions << Instruction.encode_abc(Opcode::Move, seq_base, cond_reg, 0_u8)
+                  instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
+                  cur_check = allocator.alloc_temp
+                  instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                              (cur_check.to_u32 << 16) |
+                              (seq_base.to_u32 << 8) |
+                              NativeId::TypeIsA.value.to_u32
+                  instructions << Instruction.new(instr_val)
+                  allocator.free_temp(tid_reg)
+                  allocator.free_temp(seq_base)
+                  allocator.free_temp((seq_base + 1).to_u8)
+
+                  j_next = instructions.size
+                  instructions << Instruction.encode_branch(Opcode::JumpIfFalse, cur_check, 0_i16)
+                  instructions << Instruction.encode_ab_imm(Opcode::LoadBool, type_match, 1_u16)
+                  j_done = instructions.size
+                  instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, 0_i16)
+                  tid_jump_ends << j_done
+                  instructions[j_next] = Instruction.encode_branch(Opcode::JumpIfFalse, cur_check, (instructions.size - j_next - 1).to_i16)
+                  allocator.free_temp(cur_check)
+                end
+                tid_end_pos = instructions.size
+                tid_jump_ends.each do |tje|
+                  instructions[tje] = Instruction.encode_branch(Opcode::Jump, 0_u8, (tid_end_pos - tje - 1).to_i16)
+                end
+              end
+
+              if is_last_cond
+                j = instructions.size
+                instructions << Instruction.encode_branch(Opcode::JumpIfFalse, type_match, 0_i16)
+                next_when_jump_patches << j
+              else
+                j = instructions.size
+                instructions << Instruction.encode_branch(Opcode::JumpIfTrue, type_match, 0_i16)
+                body_jump_patches << j
+              end
+              allocator.free_temp(type_match)
+
+            else
+              val_reg = compile_node(c, allocator, instructions, fn)
+              eq_reg = allocator.alloc_temp
+              instructions << Instruction.encode_abc(Opcode::Eq, eq_reg, cond_reg, val_reg)
+              allocator.free_temp(val_reg)
+
+              if is_last_cond
+                j = instructions.size
+                instructions << Instruction.encode_branch(Opcode::JumpIfFalse, eq_reg, 0_i16)
+                next_when_jump_patches << j
+              else
+                j = instructions.size
+                instructions << Instruction.encode_branch(Opcode::JumpIfTrue, eq_reg, 0_i16)
+                body_jump_patches << j
+              end
+              allocator.free_temp(eq_reg)
+            end
+          end
+
+          cur_pos = instructions.size
+          body_jump_patches.each do |bp|
+            instructions[bp] = Instruction.encode_branch(Opcode::JumpIfTrue, instructions[bp].dst, (cur_pos - bp - 1).to_i16)
+          end
+
+          body_reg = compile_node(w.body, allocator, instructions, fn)
+          instructions << Instruction.encode_abc(Opcode::Move, dest, body_reg, 0_u8)
+          allocator.free_temp(body_reg)
+
+          j_exit = instructions.size
+          instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, 0_i16)
+          exit_jumps << j_exit
+
+          after_pos = instructions.size
+          next_when_jump_patches.each do |np|
+            instructions[np] = Instruction.encode_branch(Opcode::JumpIfFalse, instructions[np].dst, (after_pos - np - 1).to_i16)
+          end
+        end
+
+        allocator.free_temp(cond_reg)
+      else
+        # Condition-less case
+        node.whens.each do |w|
+          body_jump_patches = [] of Int32
+          next_when_jump_patches = [] of Int32
+
+          w.conds.each_with_index do |c, c_idx|
+            is_last = (c_idx == w.conds.size - 1)
+            cond_res = compile_node(c, allocator, instructions, fn)
+            if is_last
+              j = instructions.size
+              instructions << Instruction.encode_branch(Opcode::JumpIfFalse, cond_res, 0_i16)
+              next_when_jump_patches << j
+            else
+              j = instructions.size
+              instructions << Instruction.encode_branch(Opcode::JumpIfTrue, cond_res, 0_i16)
+              body_jump_patches << j
+            end
+            allocator.free_temp(cond_res)
+          end
+
+          cur_pos = instructions.size
+          body_jump_patches.each do |bp|
+            instructions[bp] = Instruction.encode_branch(Opcode::JumpIfTrue, instructions[bp].dst, (cur_pos - bp - 1).to_i16)
+          end
+
+          body_reg = compile_node(w.body, allocator, instructions, fn)
+          instructions << Instruction.encode_abc(Opcode::Move, dest, body_reg, 0_u8)
+          allocator.free_temp(body_reg)
+
+          j_exit = instructions.size
+          instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, 0_i16)
+          exit_jumps << j_exit
+
+          after_pos = instructions.size
+          next_when_jump_patches.each do |np|
+            instructions[np] = Instruction.encode_branch(Opcode::JumpIfFalse, instructions[np].dst, (after_pos - np - 1).to_i16)
+          end
+        end
+      end
+
+      if el = node.else
+        if !el.is_a?(Crystal::Nop)
+          el_reg = compile_node(el, allocator, instructions, fn)
+          instructions << Instruction.encode_abc(Opcode::Move, dest, el_reg, 0_u8)
+          allocator.free_temp(el_reg)
+        else
+          instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+        end
+      else
+        instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+      end
+
+      end_pos = instructions.size
+      exit_jumps.each do |ej|
+        instructions[ej] = Instruction.encode_branch(Opcode::Jump, 0_u8, (end_pos - ej - 1).to_i16)
+      end
+
+      dest
     end
 
     private def compile_call(
@@ -646,15 +1274,53 @@ module Citrine
       dest = allocator.alloc_temp
       obj_str = node.obj ? node.obj.to_s : ""
       # Binary and Unary Operators
-      if ["+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">="].includes?(node.name) && node.obj && node.args.size == 1
+      is_collection_push = obj_str.downcase.includes?("arr") || obj_str.downcase.includes?("list") ||
+                           obj_str.downcase.includes?("io") || obj_str.downcase.includes?("buf") ||
+                           node.obj.is_a?(Crystal::ArrayLiteral) || node.args.first?.is_a?(Crystal::StringLiteral)
+
+      if ["+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "&", "|", "^", "<<", ">>", "&*", "&+", "&-"].includes?(node.name) && node.obj && node.args.size == 1 && !(node.name == "<<" && is_collection_push)
+        is_string_add = (node.name == "+") && (
+          node.obj.is_a?(Crystal::StringLiteral) || node.obj.is_a?(Crystal::StringInterpolation) ||
+          node.args[0].is_a?(Crystal::StringLiteral) || node.args[0].is_a?(Crystal::StringInterpolation) ||
+          (node.obj.is_a?(Crystal::Var) && @var_types[node.obj.as(Crystal::Var).name]? == "String") ||
+          (node.args[0].is_a?(Crystal::Var) && @var_types[node.args[0].as(Crystal::Var).name]? == "String") ||
+          (node.obj.is_a?(Crystal::Call) && node.obj.as(Crystal::Call).name == "to_s") ||
+          (node.args[0].is_a?(Crystal::Call) && node.args[0].as(Crystal::Call).name == "to_s")
+        )
+        if is_string_add
+          left_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+          right_reg = compile_node(node.args[0], allocator, instructions, fn)
+          seq_base = allocator.alloc_contiguous(2)
+          instructions << Instruction.encode_abc(Opcode::Move, seq_base, left_reg, 0_u8)
+          instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, right_reg, 0_u8)
+          instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                      (dest.to_u32 << 16) |
+                      (seq_base.to_u32 << 8) |
+                      NativeId::StringConcat.value.to_u32
+          instructions << Instruction.new(instr_val)
+          allocator.free_temp(left_reg)
+          allocator.free_temp(right_reg)
+          allocator.free_temp(seq_base)
+          allocator.free_temp((seq_base + 1).to_u8)
+          return dest
+        end
+
         left_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
         right_reg = compile_node(node.args[0], allocator, instructions, fn)
         op = case node.name
              when "+" then Opcode::Add
+             when "&+" then Opcode::Add
              when "-" then Opcode::Sub
+             when "&-" then Opcode::Sub
              when "*" then Opcode::Mul
+             when "&*" then Opcode::Mul
              when "/" then Opcode::Div
              when "%" then Opcode::Mod
+             when "&" then Opcode::BitAnd
+             when "|" then Opcode::BitOr
+             when "^" then Opcode::BitXor
+             when "<<" then Opcode::ShiftLeft
+             when ">>" then Opcode::ShiftRight
              when "==" then Opcode::Eq
              when "!=" then Opcode::Ne
              when "<" then Opcode::Lt
@@ -679,6 +1345,19 @@ module Citrine
         inner_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
         instructions << Instruction.encode_abc(Opcode::Neg, dest, inner_reg, 0_u8)
         allocator.free_temp(inner_reg)
+        return dest
+      elsif node.name == "~" && node.obj && node.args.empty?
+        inner_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+        instructions << Instruction.encode_abc(Opcode::BitNot, dest, inner_reg, 0_u8)
+        allocator.free_temp(inner_reg)
+        return dest
+      end
+
+      # Number conversions: .to_i, .to_i32, .to_i64, .to_u8, .to_u16, .to_u32, .to_u64, .to_f, .to_f32, .to_f64
+      if ["to_i", "to_i32", "to_i64", "to_u8", "to_u16", "to_u32", "to_u64", "to_f", "to_f32", "to_f64"].includes?(node.name) && node.obj && node.args.empty?
+        obj_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+        instructions << Instruction.encode_abc(Opcode::Move, dest, obj_reg, 0_u8)
+        allocator.free_temp(obj_reg)
         return dest
       end
 
@@ -840,25 +1519,29 @@ module Citrine
         return dest
       end
 
-      if node.name == "x" && node.obj
-        obj_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        instructions << Instruction.encode_abc(Opcode::Vec2GetX, dest, obj_reg, 0_u8)
-        return dest
-      elsif node.name == "y" && node.obj
-        obj_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        instructions << Instruction.encode_abc(Opcode::Vec2GetY, dest, obj_reg, 0_u8)
-        return dest
-      elsif node.name == "x=" && node.obj && node.args.size > 0
-        obj_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        val_reg = compile_node(node.args[0], allocator, instructions, fn)
-        instructions << Instruction.encode_abc(Opcode::Vec2SetX, obj_reg, val_reg, 0_u8)
-        return obj_reg
-      elsif node.name == "y=" && node.obj && node.args.size > 0
-        obj_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        val_reg = compile_node(node.args[0], allocator, instructions, fn)
-        instructions << Instruction.encode_abc(Opcode::Vec2SetY, obj_reg, val_reg, 0_u8)
-        return obj_reg
+      has_class_method = @functions.any? { |f| f.name.ends_with?("##{node.name}") }
+      if !has_class_method
+        if node.name == "x" && node.obj
+          obj_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+          instructions << Instruction.encode_abc(Opcode::Vec2GetX, dest, obj_reg, 0_u8)
+          return dest
+        elsif node.name == "y" && node.obj
+          obj_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+          instructions << Instruction.encode_abc(Opcode::Vec2GetY, dest, obj_reg, 0_u8)
+          return dest
+        elsif node.name == "x=" && node.obj && node.args.size > 0
+          obj_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+          val_reg = compile_node(node.args[0], allocator, instructions, fn)
+          instructions << Instruction.encode_abc(Opcode::Vec2SetX, obj_reg, val_reg, 0_u8)
+          return obj_reg
+        elsif node.name == "y=" && node.obj && node.args.size > 0
+          obj_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+          val_reg = compile_node(node.args[0], allocator, instructions, fn)
+          instructions << Instruction.encode_abc(Opcode::Vec2SetY, obj_reg, val_reg, 0_u8)
+          return obj_reg
+        end
       end
+
 
       # times loop: e.g. 10.times do |i| ... end
       if node.name == "times" && node.obj && (block = node.block)
@@ -991,6 +1674,59 @@ module Citrine
         return dest
       end
 
+      # Range each: (min..max).each do |i| ... end
+      range_target = if node.obj.is_a?(Crystal::RangeLiteral)
+                       node.obj.as(Crystal::RangeLiteral)
+                     elsif node.obj.is_a?(Crystal::Expressions) && node.obj.as(Crystal::Expressions).expressions.size == 1 && node.obj.as(Crystal::Expressions).expressions.first.is_a?(Crystal::RangeLiteral)
+                       node.obj.as(Crystal::Expressions).expressions.first.as(Crystal::RangeLiteral)
+                     else
+                       nil
+                     end
+
+      if node.name == "each" && range_target && (block = node.block)
+        range = range_target
+        from_reg = compile_node(range.from, allocator, instructions, fn)
+        to_reg = compile_node(range.to, allocator, instructions, fn)
+        iter_reg = allocator.alloc_temp
+        instructions << Instruction.encode_abc(Opcode::Move, iter_reg, from_reg, 0_u8)
+
+        local_iter = if block_arg = block.args.first?
+                       allocator.allocate_local(block_arg.name)
+                       allocator.get_local(block_arg.name).not_nil!
+                     else
+                       iter_reg
+                     end
+
+        loop_start = instructions.size
+        cond_reg = allocator.alloc_temp
+        if range.exclusive?
+          instructions << Instruction.encode_abc(Opcode::Lt, cond_reg, iter_reg, to_reg)
+        else
+          instructions << Instruction.encode_abc(Opcode::Le, cond_reg, iter_reg, to_reg)
+        end
+        exit_jump_idx = instructions.size
+        instructions << Instruction.encode_branch(Opcode::JumpIfFalse, cond_reg, 0_i16)
+
+        instructions << Instruction.encode_abc(Opcode::Move, local_iter, iter_reg, 0_u8)
+        compile_node(block.body, allocator, instructions, fn)
+
+        one_reg = allocator.alloc_temp
+        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, one_reg, 1_u16)
+        instructions << Instruction.encode_abc(Opcode::Add, iter_reg, iter_reg, one_reg)
+        allocator.free_temp(one_reg)
+
+        back_offset = (loop_start - instructions.size - 1).to_i16
+        instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, back_offset)
+
+        exit_offset = (instructions.size - exit_jump_idx - 1).to_i16
+        instructions[exit_jump_idx] = Instruction.encode_branch(Opcode::JumpIfFalse, cond_reg, exit_offset)
+        allocator.free_temp(from_reg)
+        allocator.free_temp(to_reg)
+        allocator.free_temp(iter_reg)
+        allocator.free_temp(cond_reg)
+        return dest
+      end
+
       # Array each: arr.each do |item| ... end
       if node.name == "each" && node.obj && (block = node.block)
         arr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
@@ -1093,7 +1829,11 @@ module Citrine
       end
 
       # IO::Memory methods
-      if node.obj && (node.name == "write_byte" || node.name == "write" || node.name == "print" || node.name == "puts" || node.name == "to_s" || node.name == "rewind" || node.name == "pos" || node.name == "clear")
+      is_io = (io_obj = node.obj) && (
+        (io_obj.is_a?(Crystal::Var) && @var_types[io_obj.name]?.try { |t| t.includes?("Memory") || t.includes?("IO") }) ||
+        (io_obj.is_a?(Crystal::Call) && io_obj.name == "new" && io_obj.obj.to_s.includes?("Memory"))
+      )
+      if node.obj && ((is_io && node.name == "to_s") || ["write_byte", "write", "print", "puts", "rewind", "pos", "clear"].includes?(node.name))
         native_op = case node.name
                     when "write_byte" then NativeId::MemoryIOWriteByte
                     when "write", "print" then NativeId::MemoryIOWrite
@@ -1131,17 +1871,415 @@ module Citrine
         end
       end
 
+      # Pointer value dereference or Enum value getter: ptr.value / enum.value
+      if node.name == "value" && node.obj && node.args.empty?
+        obj = node.obj.not_nil!
+        is_pointer = (obj.is_a?(Crystal::Var) && @var_types[obj.name]?.try(&.starts_with?("Pointer"))) ||
+                     (obj.is_a?(Crystal::Call) && obj.name == "malloc")
+        if !is_pointer
+          obj_reg = compile_node(obj, allocator, instructions, fn)
+          instructions << Instruction.encode_abc(Opcode::Move, dest, obj_reg, 0_u8)
+          allocator.free_temp(obj_reg)
+          return dest
+        end
+
+        ptr_reg = compile_node(obj, allocator, instructions, fn)
+        zero_reg = allocator.alloc_temp
+        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, zero_reg, 0_u16)
+        seq_base = allocator.alloc_contiguous(2)
+        instructions << Instruction.encode_abc(Opcode::Move, seq_base, ptr_reg, 0_u8)
+        instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, zero_reg, 0_u8)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (seq_base.to_u32 << 8) |
+                    NativeId::PointerGet.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(ptr_reg)
+        allocator.free_temp(zero_reg)
+        allocator.free_temp(seq_base)
+        allocator.free_temp((seq_base + 1).to_u8)
+        return dest
+      end
+
+      # Pointer value assignment: ptr.value = val
+      if node.name == "value=" && node.obj && node.args.size == 1
+        ptr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+        zero_reg = allocator.alloc_temp
+        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, zero_reg, 0_u16)
+        val_reg = compile_node(node.args[0], allocator, instructions, fn)
+        seq_base = allocator.alloc_contiguous(3)
+        instructions << Instruction.encode_abc(Opcode::Move, seq_base, ptr_reg, 0_u8)
+        instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, zero_reg, 0_u8)
+        instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 2).to_u8, val_reg, 0_u8)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (seq_base.to_u32 << 8) |
+                    NativeId::PointerSet.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(ptr_reg)
+        allocator.free_temp(zero_reg)
+        allocator.free_temp(val_reg)
+        3.times { |i| allocator.free_temp((seq_base + i).to_u8) }
+        return dest
+      end
+
+      # Pointer address: ptr.address
+      if node.name == "address" && node.obj && node.args.empty?
+        ptr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (ptr_reg.to_u32 << 8) |
+                    NativeId::PointerAddress.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(ptr_reg)
+        return dest
+      end
+
+      # Pointer(T).malloc(size)
+      if obj_str.starts_with?("Pointer") && node.name == "malloc"
+        size_reg = if node.args.size > 0
+                     compile_node(node.args[0], allocator, instructions, fn)
+                   else
+                     r = allocator.alloc_temp
+                     instructions << Instruction.encode_ab_imm(Opcode::LoadInt, r, 1_u16)
+                     r
+                   end
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (size_reg.to_u32 << 8) |
+                    NativeId::PointerMalloc.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(size_reg)
+        return dest
+      end
+
+      # Pointer(T).new(addr)
+      if obj_str.starts_with?("Pointer") && node.name == "new" && node.args.size > 0
+        addr_reg = compile_node(node.args[0], allocator, instructions, fn)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (addr_reg.to_u32 << 8) |
+                    NativeId::PointerNew.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(addr_reg)
+        return dest
+      end
+
+      # Box(T).box(val)
+      if obj_str.starts_with?("Box") && node.name == "box" && node.args.size > 0
+        val_reg = compile_node(node.args[0], allocator, instructions, fn)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (val_reg.to_u32 << 8) |
+                    NativeId::BoxNew.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(val_reg)
+        return dest
+      end
+
+      # Box(T).unbox(ptr)
+      if obj_str.starts_with?("Box") && node.name == "unbox" && node.args.size > 0
+        ptr_reg = compile_node(node.args[0], allocator, instructions, fn)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (ptr_reg.to_u32 << 8) |
+                    NativeId::BoxUnbox.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(ptr_reg)
+        return dest
+      end
+
+      # Context with block auto-cleanup: vm_context(:name) do ... end
+      if node.name == "vm_context" && (obj_str.empty? || obj_str == "Citrine") && (block = node.block)
+        arg_node = node.args.first?
+        ctx_val = case arg_node
+                  when Crystal::SymbolLiteral then arg_node.value
+                  when Crystal::StringLiteral then arg_node.value
+                  else arg_node.to_s
+                  end
+        s_idx = add_string(ctx_val)
+        ctx_reg = allocator.alloc_temp
+        c_idx = add_constant(ConstValue.new(ConstType::String, int_val: s_idx, str_val: ctx_val))
+        instructions << Instruction.encode_ab_imm(Opcode::LoadConst, ctx_reg, c_idx.to_u16)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (ctx_reg.to_u32 << 8) |
+                    NativeId::ContextSet.value.to_u32
+        instructions << Instruction.new(instr_val)
+
+        # Compile body of block inside context
+        compile_node(block.body, allocator, instructions, fn)
+
+        # Auto-rewind/clear context arena on block exit
+        clear_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (ctx_reg.to_u32 << 8) |
+                    NativeId::ContextClear.value.to_u32
+        instructions << Instruction.new(clear_val)
+        allocator.free_temp(ctx_reg)
+        return dest
+      end
+
+      # Context Clear: clear_vm_context(:name) / reset_vm_context(:name)
+      if (node.name == "clear_vm_context" || node.name == "reset_vm_context") && (obj_str.empty? || obj_str == "Citrine")
+        arg_node = node.args.first?
+        ctx_val = case arg_node
+                  when Crystal::SymbolLiteral then arg_node.value
+                  when Crystal::StringLiteral then arg_node.value
+                  else arg_node.to_s
+                  end
+        s_idx = add_string(ctx_val)
+        ctx_reg = allocator.alloc_temp
+        c_idx = add_constant(ConstValue.new(ConstType::String, int_val: s_idx, str_val: ctx_val))
+        instructions << Instruction.encode_ab_imm(Opcode::LoadConst, ctx_reg, c_idx.to_u16)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (ctx_reg.to_u32 << 8) |
+                    NativeId::ContextClear.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(ctx_reg)
+        return dest
+      end
+
+      # Memory Stats: Citrine::Memory.stats / Citrine::Memory.heap_bytes / memory_stats
+      if ((node.name == "stats" || node.name == "heap_bytes") && obj_str.ends_with?("Memory")) || node.name == "memory_stats"
+        zero_reg = allocator.alloc_temp
+        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, zero_reg, 0_u16)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (zero_reg.to_u32 << 8) |
+                    NativeId::MemoryStats.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(zero_reg)
+        return dest
+      end
+
+      # Context Switch: set_vm_context(:name) / vm_context(:name)
+      if (node.name == "set_vm_context" || node.name == "vm_context") && (obj_str.empty? || obj_str == "Citrine")
+        arg_node = node.args.first?
+        ctx_val = case arg_node
+                  when Crystal::SymbolLiteral then arg_node.value
+                  when Crystal::StringLiteral then arg_node.value
+                  else arg_node.to_s
+                  end
+        s_idx = add_string(ctx_val)
+        ctx_reg = allocator.alloc_temp
+        c_idx = add_constant(ConstValue.new(ConstType::String, int_val: s_idx, str_val: ctx_val))
+        instructions << Instruction.encode_ab_imm(Opcode::LoadConst, ctx_reg, c_idx.to_u16)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (ctx_reg.to_u32 << 8) |
+                    NativeId::ContextSet.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(ctx_reg)
+        return dest
+      end
+
+      # Pointer.free(ptr) or ptr.free
+      if (node.name == "free") && ((obj_str.starts_with?("Pointer") && node.args.size > 0) || node.obj)
+        ptr_target = (obj_str.starts_with?("Pointer") && node.args.size > 0) ? node.args[0] : node.obj.not_nil!
+        ptr_reg = compile_node(ptr_target, allocator, instructions, fn)
+        seq_base = allocator.alloc_contiguous(1)
+        instructions << Instruction.encode_abc(Opcode::Move, seq_base, ptr_reg, 0_u8)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (seq_base.to_u32 << 8) |
+                    NativeId::PointerFree.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(ptr_reg)
+        allocator.free_temp(seq_base)
+        return dest
+      end
+
+      # GC.collect
+      if (obj_str == "GC" || obj_str.ends_with?("::GC")) && node.name == "collect"
+        zero_reg = allocator.alloc_temp
+        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, zero_reg, 0_u16)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (zero_reg.to_u32 << 8) |
+                    NativeId::GCCycle.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(zero_reg)
+        return dest
+      end
+
+      # Enum.new(val) constructor
+      if node.name == "new" && @enums.has_key?(obj_str) && node.args.size > 0
+        arg_reg = compile_node(node.args.first, allocator, instructions, fn)
+        instructions << Instruction.encode_abc(Opcode::Move, dest, arg_reg, 0_u8)
+        allocator.free_temp(arg_reg)
+        return dest
+      end
+
+      # .to_s on any value/expression
+      if node.name == "to_s" && node.args.empty? && node.obj
+        obj = node.obj.not_nil!
+        if obj.is_a?(Crystal::StringLiteral)
+          obj_reg = compile_node(obj, allocator, instructions, fn)
+          instructions << Instruction.encode_abc(Opcode::Move, dest, obj_reg, 0_u8)
+          allocator.free_temp(obj_reg)
+          return dest
+        elsif obj.is_a?(Crystal::Var) && @var_types[obj.name]? == "String"
+          obj_reg = compile_node(obj, allocator, instructions, fn)
+          instructions << Instruction.encode_abc(Opcode::Move, dest, obj_reg, 0_u8)
+          allocator.free_temp(obj_reg)
+          return dest
+        else
+          hint = 0_u16
+          if obj.is_a?(Crystal::BoolLiteral) || (obj.is_a?(Crystal::Var) && @var_types[obj.name]? == "Bool")
+            hint = 2_u16
+          end
+          val_reg = compile_node(obj, allocator, instructions, fn)
+          res_reg = emit_to_string(val_reg, hint, allocator, instructions)
+          instructions << Instruction.encode_abc(Opcode::Move, dest, res_reg, 0_u8)
+          allocator.free_temp(res_reg)
+          return dest
+        end
+      end
+
+      # Regex.new(pattern)
+      if (obj_str == "Regex" || obj_str.ends_with?("::Regex")) && node.name == "new" && node.args.size > 0
+        pat_reg = compile_node(node.args[0], allocator, instructions, fn)
+        seq_base = allocator.alloc_contiguous(1)
+        instructions << Instruction.encode_abc(Opcode::Move, seq_base, pat_reg, 0_u8)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (seq_base.to_u32 << 8) |
+                    NativeId::RegexNew.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(pat_reg)
+        allocator.free_temp(seq_base)
+        return dest
+      end
+
+      # Regex match / =~ operator: regex =~ str or str =~ regex
+      if node.name == "=~" && node.obj && node.args.size == 1
+        left_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+        right_reg = compile_node(node.args[0], allocator, instructions, fn)
+        seq_base = allocator.alloc_contiguous(2)
+        instructions << Instruction.encode_abc(Opcode::Move, seq_base, left_reg, 0_u8)
+        instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, right_reg, 0_u8)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (seq_base.to_u32 << 8) |
+                    NativeId::RegexMatch.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(left_reg)
+        allocator.free_temp(right_reg)
+        allocator.free_temp(seq_base)
+        allocator.free_temp((seq_base + 1).to_u8)
+        return dest
+      end
+
+      # Regex#matches? or Regex#match
+      if (node.name == "matches?" || node.name == "match") && node.obj && node.args.size == 1
+        obj_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+        str_reg = compile_node(node.args[0], allocator, instructions, fn)
+        match_pos = allocator.alloc_temp
+        seq_base = allocator.alloc_contiguous(2)
+        instructions << Instruction.encode_abc(Opcode::Move, seq_base, str_reg, 0_u8)
+        instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, obj_reg, 0_u8)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (match_pos.to_u32 << 16) |
+                    (seq_base.to_u32 << 8) |
+                    NativeId::RegexMatch.value.to_u32
+        instructions << Instruction.new(instr_val)
+        zero_reg = allocator.alloc_temp
+        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, zero_reg, 0_u16)
+        instructions << Instruction.encode_abc(Opcode::Ge, dest, match_pos, zero_reg)
+        allocator.free_temp(obj_reg)
+        allocator.free_temp(str_reg)
+        allocator.free_temp(seq_base)
+        allocator.free_temp((seq_base + 1).to_u8)
+        allocator.free_temp(match_pos)
+        allocator.free_temp(zero_reg)
+        return dest
+      end
+
+      # String helper methods: strip, downcase, upcase
+      if ["strip", "downcase", "upcase"].includes?(node.name) && node.obj && node.args.empty?
+        s_op = case node.name
+               when "strip" then NativeId::StringStrip
+               when "downcase" then NativeId::StringDowncase
+               when "upcase" then NativeId::StringUpcase
+               else NativeId::StringStrip
+               end
+        str_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+        seq_base = allocator.alloc_contiguous(1)
+        instructions << Instruction.encode_abc(Opcode::Move, seq_base, str_reg, 0_u8)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (seq_base.to_u32 << 8) |
+                    s_op.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(str_reg)
+        allocator.free_temp(seq_base)
+        return dest
+      end
+
+      # String helper methods: starts_with?, ends_with?, includes?, split
+      if ["starts_with?", "ends_with?", "includes?", "split"].includes?(node.name) && node.obj
+        s_op = case node.name
+               when "starts_with?" then NativeId::StringStartsWith
+               when "ends_with?" then NativeId::StringEndsWith
+               when "includes?" then NativeId::StringIncludes
+               when "split" then NativeId::StringSplit
+               else NativeId::StringIncludes
+               end
+        str_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+        arg_reg = if node.args.size > 0
+                    compile_node(node.args[0], allocator, instructions, fn)
+                  else
+                    sp_reg = allocator.alloc_temp
+                    sp_idx = add_string(" ")
+                    c_idx = add_constant(ConstValue.new(ConstType::String, int_val: sp_idx, str_val: " "))
+                    instructions << Instruction.encode_ab_imm(Opcode::LoadConst, sp_reg, c_idx.to_u16)
+                    sp_reg
+                  end
+        seq_base = allocator.alloc_contiguous(2)
+        instructions << Instruction.encode_abc(Opcode::Move, seq_base, str_reg, 0_u8)
+        instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, arg_reg, 0_u8)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (dest.to_u32 << 16) |
+                    (seq_base.to_u32 << 8) |
+                    s_op.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(str_reg)
+        allocator.free_temp(arg_reg)
+        allocator.free_temp(seq_base)
+        allocator.free_temp((seq_base + 1).to_u8)
+        return dest
+      end
+
       # Class instantiation: Foo.new(...)
       if @classes.has_key?(obj_str) && node.name == "new"
         cls_info = @classes[obj_str]
+        if cls_info.is_abstract
+          panic_str = "Cannot instantiate abstract class #{obj_str}"
+          s_idx = add_string(panic_str)
+          c_idx = add_constant(ConstValue.new(ConstType::String, int_val: s_idx, str_val: panic_str))
+          p_reg = allocator.alloc_temp
+          instructions << Instruction.encode_ab_imm(Opcode::LoadConst, p_reg, c_idx.to_u16)
+          instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                      (dest.to_u32 << 16) |
+                      (p_reg.to_u32 << 8) |
+                      NativeId::Panic.value.to_u32
+          instructions << Instruction.new(instr_val)
+          allocator.free_temp(p_reg)
+          return dest
+        end
         cid_reg = allocator.alloc_temp
         cnt_reg = allocator.alloc_temp
+        is_struct_reg = allocator.alloc_temp
         instructions << Instruction.encode_ab_imm(Opcode::LoadInt, cid_reg, cls_info.class_id.to_u16)
         f_count = cls_info.fields.size > 0 ? cls_info.fields.size : 1
         instructions << Instruction.encode_ab_imm(Opcode::LoadInt, cnt_reg, f_count.to_u16)
-        seq_base = allocator.alloc_contiguous(2)
+        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, is_struct_reg, cls_info.is_struct ? 1_u16 : 0_u16)
+        seq_base = allocator.alloc_contiguous(3)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, cid_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, cnt_reg, 0_u8)
+        instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 2).to_u8, is_struct_reg, 0_u8)
         obj_val = (Opcode::CallNative.value.to_u32 << 24) |
                   (dest.to_u32 << 16) |
                   (seq_base.to_u32 << 8) |
@@ -1149,8 +2287,8 @@ module Citrine
         instructions << Instruction.new(obj_val)
         allocator.free_temp(cid_reg)
         allocator.free_temp(cnt_reg)
-        allocator.free_temp(seq_base)
-        allocator.free_temp((seq_base + 1).to_u8)
+        allocator.free_temp(is_struct_reg)
+        3.times { |i| allocator.free_temp((seq_base + i).to_u8) }
 
         # Call initialize if present
         init_name = "#{obj_str}#initialize"
@@ -1217,6 +2355,63 @@ module Citrine
           (node.args.size + 1).times { |i| allocator.free_temp((dest_call + 1_u8 + i.to_u8).to_u8) }
           instructions << Instruction.encode_abc(Opcode::Move, dest, dest_call, 0_u8)
           allocator.free_temp(dest_call)
+          return dest
+        end
+      end
+
+      # Class property getter / setter access
+      clean_prop_name = node.name.ends_with?("=") ? node.name[0...-1] : node.name
+      prop_cls = obj_str
+      prop_offset : Int32? = nil
+      while !prop_cls.empty?
+        if off = @class_prop_offsets["#{prop_cls}::#{clean_prop_name}"]?
+          prop_offset = off
+          break
+        end
+        prop_cls = @classes[prop_cls]?.try(&.superclass_name) || ""
+      end
+
+      if prop_offset
+        addr_val = CLASS_PROP_BASE + (prop_offset.to_u32 * 4)
+        if node.name.ends_with?("=") && node.args.size == 1
+          val_reg = compile_node(node.args[0], allocator, instructions, fn)
+          addr_reg = allocator.alloc_temp
+          idx_reg = allocator.alloc_temp
+          instructions << Instruction.encode_ab_imm(Opcode::LoadInt, idx_reg, 0_u16)
+          c_idx = add_constant(ConstValue.new(ConstType::Int32, int_val: addr_val.to_i32))
+          instructions << Instruction.encode_ab_imm(Opcode::LoadConst, addr_reg, c_idx.to_u16)
+          seq_base = allocator.alloc_contiguous(3)
+          instructions << Instruction.encode_abc(Opcode::Move, seq_base, addr_reg, 0_u8)
+          instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, idx_reg, 0_u8)
+          instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 2).to_u8, val_reg, 0_u8)
+          instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                      (dest.to_u32 << 16) |
+                      (seq_base.to_u32 << 8) |
+                      NativeId::PointerSet.value.to_u32
+          instructions << Instruction.new(instr_val)
+          allocator.free_temp(addr_reg)
+          allocator.free_temp(idx_reg)
+          allocator.free_temp(val_reg)
+          3.times { |i| allocator.free_temp((seq_base + i).to_u8) }
+          return dest
+        elsif node.args.empty?
+          addr_reg = allocator.alloc_temp
+          idx_reg = allocator.alloc_temp
+          instructions << Instruction.encode_ab_imm(Opcode::LoadInt, idx_reg, 0_u16)
+          c_idx = add_constant(ConstValue.new(ConstType::Int32, int_val: addr_val.to_i32))
+          instructions << Instruction.encode_ab_imm(Opcode::LoadConst, addr_reg, c_idx.to_u16)
+          seq_base = allocator.alloc_contiguous(2)
+          instructions << Instruction.encode_abc(Opcode::Move, seq_base, addr_reg, 0_u8)
+          instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, idx_reg, 0_u8)
+          instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                      (dest.to_u32 << 16) |
+                      (seq_base.to_u32 << 8) |
+                      NativeId::PointerGet.value.to_u32
+          instructions << Instruction.new(instr_val)
+          allocator.free_temp(addr_reg)
+          allocator.free_temp(idx_reg)
+          allocator.free_temp(seq_base)
+          allocator.free_temp((seq_base + 1).to_u8)
           return dest
         end
       end
@@ -1375,6 +2570,106 @@ module Citrine
       dest
     end
 
+    private def compile_string_interpolation(node : Crystal::StringInterpolation, allocator : RegisterAllocator, instructions : Array(Instruction), fn : CompiledFunction) : UInt8
+      if node.expressions.empty?
+        dest = allocator.alloc_temp
+        str_idx = add_string("")
+        const_idx = add_constant(ConstValue.new(ConstType::String, int_val: str_idx, str_val: ""))
+        instructions << Instruction.encode_ab_imm(Opcode::LoadConst, dest, const_idx.to_u16)
+        return dest
+      end
+
+      cur_reg = compile_interpolated_piece(node.expressions[0], allocator, instructions, fn)
+
+      node.expressions[1..-1].each do |piece|
+        next_reg = compile_interpolated_piece(piece, allocator, instructions, fn)
+        res_reg = allocator.alloc_temp
+        seq_base = allocator.alloc_contiguous(2)
+        instructions << Instruction.encode_abc(Opcode::Move, seq_base, cur_reg, 0_u8)
+        instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, next_reg, 0_u8)
+        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                    (res_reg.to_u32 << 16) |
+                    (seq_base.to_u32 << 8) |
+                    NativeId::StringConcat.value.to_u32
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(cur_reg)
+        allocator.free_temp(next_reg)
+        allocator.free_temp(seq_base)
+        allocator.free_temp((seq_base + 1).to_u8)
+        cur_reg = res_reg
+      end
+
+      cur_reg
+    end
+
+    private def compile_interpolated_piece(piece : Crystal::ASTNode, allocator : RegisterAllocator, instructions : Array(Instruction), fn : CompiledFunction) : UInt8
+      case piece
+      when Crystal::StringLiteral
+        dest = allocator.alloc_temp
+        str_idx = add_string(piece.value)
+        const_idx = add_constant(ConstValue.new(ConstType::String, int_val: str_idx, str_val: piece.value))
+        instructions << Instruction.encode_ab_imm(Opcode::LoadConst, dest, const_idx.to_u16)
+        dest
+      when Crystal::NumberLiteral
+        dest = allocator.alloc_temp
+        str_idx = add_string(piece.value)
+        const_idx = add_constant(ConstValue.new(ConstType::String, int_val: str_idx, str_val: piece.value))
+        instructions << Instruction.encode_ab_imm(Opcode::LoadConst, dest, const_idx.to_u16)
+        dest
+      when Crystal::BoolLiteral
+        val_s = piece.value ? "true" : "false"
+        dest = allocator.alloc_temp
+        str_idx = add_string(val_s)
+        const_idx = add_constant(ConstValue.new(ConstType::String, int_val: str_idx, str_val: val_s))
+        instructions << Instruction.encode_ab_imm(Opcode::LoadConst, dest, const_idx.to_u16)
+        dest
+      when Crystal::Var
+        if @var_types[piece.name]? == "String"
+          if reg = allocator.get_local(piece.name)
+            dest = allocator.alloc_temp
+            instructions << Instruction.encode_abc(Opcode::Move, dest, reg, 0_u8)
+            dest
+          else
+            dest = allocator.alloc_temp
+            instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+            dest
+          end
+        else
+          val_reg = compile_node(piece, allocator, instructions, fn)
+          hint = @var_types[piece.name]? == "Bool" ? 2_u16 : 0_u16
+          emit_to_string(val_reg, hint, allocator, instructions)
+        end
+      when Crystal::Call
+        if piece.name == "to_s"
+          compile_node(piece, allocator, instructions, fn)
+        else
+          val_reg = compile_node(piece, allocator, instructions, fn)
+          emit_to_string(val_reg, 0_u16, allocator, instructions)
+        end
+      when Crystal::StringInterpolation
+        compile_node(piece, allocator, instructions, fn)
+      else
+        val_reg = compile_node(piece, allocator, instructions, fn)
+        emit_to_string(val_reg, 0_u16, allocator, instructions)
+      end
+    end
+
+    private def emit_to_string(val_reg : UInt8, hint : UInt16, allocator : RegisterAllocator, instructions : Array(Instruction)) : UInt8
+      dest = allocator.alloc_temp
+      seq_base = allocator.alloc_contiguous(2)
+      instructions << Instruction.encode_abc(Opcode::Move, seq_base, val_reg, 0_u8)
+      instructions << Instruction.encode_ab_imm(Opcode::LoadInt, (seq_base + 1).to_u8, hint)
+      instr_val = (Opcode::CallNative.value.to_u32 << 24) |
+                  (dest.to_u32 << 16) |
+                  (seq_base.to_u32 << 8) |
+                  NativeId::ToString.value.to_u32
+      instructions << Instruction.new(instr_val)
+      allocator.free_temp(val_reg)
+      allocator.free_temp(seq_base)
+      allocator.free_temp((seq_base + 1).to_u8)
+      dest
+    end
+
     private def map_native_call(name : String, is_gl : Bool = false) : NativeId?
       if is_gl
         case name
@@ -1459,7 +2754,47 @@ module Citrine
       end
     end
 
+    private def resolve_type_id(type_name : String) : UInt32?
+      clean = type_name.split("(").first.strip
+      case clean
+      when "Nil" then TypeKind::Nil.value
+      when "Bool" then TypeKind::Bool.value
+      when "Int", "Int32", "Int64", "UInt8", "UInt16", "UInt32", "UInt64", "Number" then TypeKind::Int32.value
+      when "Float", "Float32", "Float64" then TypeKind::Float32.value
+      when "String" then TypeKind::String.value
+      when "Array" then TypeKind::Array.value
+      when "StaticArray" then TypeKind::StaticArray.value
+      when "Pointer" then TypeKind::Pointer.value
+      when "Box" then TypeKind::Box.value
+      else
+        if cls = @classes[clean]?
+          cls.class_id
+        elsif mod = @modules[clean]?
+          mod.module_id
+        else
+          nil
+        end
+      end
+    end
+
     private def resolve_constant_path(node : Crystal::Path) : ConstValue
+      if node.names.size >= 2
+        ename = node.names[0...-1].join("::")
+        mname = node.names.last
+        if emap = @enums[ename]?
+          if val = emap[mname]?
+            return ConstValue.new(ConstType::Int32, int_val: val.to_i32)
+          end
+        end
+      elsif node.names.size == 1
+        mname = node.names.first
+        @enums.each do |_, emap|
+          if val = emap[mname]?
+            return ConstValue.new(ConstType::Int32, int_val: val.to_i32)
+          end
+        end
+      end
+
       str = node.names.join("::")
       case str
       when "GL::POINTS", "GLMode::Points", "Citrine::GL::POINTS", "Citrine::GL::Mode::Points" then ConstValue.new(ConstType::Int32, int_val: 0)

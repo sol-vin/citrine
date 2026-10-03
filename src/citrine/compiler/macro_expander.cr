@@ -1,8 +1,36 @@
 require "compiler/crystal/syntax"
 
 module Citrine
+  class VarInfo
+    getter name : String
+    getter type_name : String
+
+    def initialize(@name : String, @type_name : String)
+    end
+  end
+
+  class MethodInfo
+    getter name : String
+    getter args : Array(String)
+
+    def initialize(@name : String, @args : Array(String) = [] of String)
+    end
+  end
+
+  class TypeInfo
+    getter name : String
+    getter instance_vars : Array(VarInfo)
+    getter methods : Array(MethodInfo)
+
+    def initialize(@name : String)
+      @instance_vars = [] of VarInfo
+      @methods = [] of MethodInfo
+    end
+  end
+
   class MacroExpander
     getter macros : Hash(String, Crystal::Macro)
+    property current_type : TypeInfo? = nil
 
     def initialize
       @macros = {} of String => Crystal::Macro
@@ -24,11 +52,33 @@ module Citrine
             else
               expanded_exprs << expand(expanded)
             end
+          elsif child.is_a?(Crystal::MacroFor)
+            expanded = expand_macro_for(child)
+            if expanded.is_a?(Crystal::Expressions)
+              expanded.expressions.each { |e| expanded_exprs << expand(e) }
+            else
+              expanded_exprs << expand(expanded)
+            end
           else
             expanded_exprs << expand(child)
           end
         end
         Crystal::Expressions.new(expanded_exprs)
+
+      when Crystal::ClassDef
+        cls_name = node.name.to_s
+        type_info = TypeInfo.new(cls_name)
+        prescan_class_body(node.body, type_info)
+
+        old_type = @current_type
+        @current_type = type_info
+
+        if body = node.body
+          node.body = expand(body)
+        end
+
+        @current_type = old_type
+        node
 
       when Crystal::Def
         if body = node.body
@@ -36,11 +86,8 @@ module Citrine
         end
         node
 
-      when Crystal::ClassDef
-        if body = node.body
-          node.body = expand(body)
-        end
-        node
+      when Crystal::MacroFor
+        expand_macro_for(node)
 
       when Crystal::Assign
         node.target = expand(node.target)
@@ -85,6 +132,48 @@ module Citrine
       end
     end
 
+    private def prescan_class_body(node : Crystal::ASTNode?, type_info : TypeInfo)
+      return unless node
+      nodes = node.is_a?(Crystal::Expressions) ? node.expressions : [node]
+
+      nodes.each do |child|
+        case child
+        when Crystal::TypeDeclaration
+          if child.var.is_a?(Crystal::InstanceVar)
+            vname = child.var.to_s.gsub(/^@/, "")
+            tname = child.declared_type.to_s
+            type_info.instance_vars << VarInfo.new(vname, tname) unless type_info.instance_vars.any? { |v| v.name == vname }
+          end
+        when Crystal::Assign
+          if child.target.is_a?(Crystal::InstanceVar)
+            vname = child.target.to_s.gsub(/^@/, "")
+            type_info.instance_vars << VarInfo.new(vname, "Object") unless type_info.instance_vars.any? { |v| v.name == vname }
+          end
+        when Crystal::Call
+          if ["property", "getter", "setter"].includes?(child.name) && child.args.size > 0
+            arg0 = child.args[0]
+            if arg0.is_a?(Crystal::TypeDeclaration)
+              vname = arg0.var.to_s.gsub(/^@/, "")
+              tname = arg0.declared_type.to_s
+              type_info.instance_vars << VarInfo.new(vname, tname) unless type_info.instance_vars.any? { |v| v.name == vname }
+            else
+              vname = arg0.to_s.gsub(/^@/, "")
+              type_info.instance_vars << VarInfo.new(vname, "Object") unless type_info.instance_vars.any? { |v| v.name == vname }
+            end
+          end
+        when Crystal::Def
+          type_info.methods << MethodInfo.new(child.name, child.args.map(&.name))
+          child.args.each do |a|
+            if a.name.starts_with?("@")
+              vname = a.name.gsub(/^@/, "")
+              tname = a.restriction.try(&.to_s) || "Object"
+              type_info.instance_vars << VarInfo.new(vname, tname) unless type_info.instance_vars.any? { |v| v.name == vname }
+            end
+          end
+        end
+      end
+    end
+
     private def is_macro_call?(call : Crystal::Call) : Bool
       call.name.ends_with?("!") ||
         call.name == "fsm" ||
@@ -110,6 +199,9 @@ module Citrine
     # Expands user macro by substituting arguments and re-parsing
     private def expand_user_macro(mac : Crystal::Macro, call : Crystal::Call) : Crystal::ASTNode
       arg_map = {} of String => String
+      if t = @current_type
+        arg_map["@type.name"] = t.name
+      end
       mac.args.each_with_index do |param, idx|
         if actual = call.args[idx]?
           arg_map[param.name] = actual.to_s
@@ -128,23 +220,107 @@ module Citrine
       end
     end
 
-    private def dump_macro_body(node : Crystal::ASTNode, arg_map : Hash(String, String), io : IO)
+    private def expand_macro_for(node : Crystal::MacroFor) : Crystal::ASTNode
+      var_name = node.vars.first?.try(&.name) || "item"
+      exp_str = node.exp.to_s
+
+      expanded_exprs = [] of Crystal::ASTNode
+
+      if (exp_str.includes?("@type.instance_vars") || exp_str.includes?("instance_vars")) && (t = @current_type)
+        t.instance_vars.each do |iv|
+          env = {
+            var_name => iv.name,
+            "#{var_name}.name" => iv.name,
+            "#{var_name}.type" => iv.type_name,
+            "@type.name" => t.name
+          }
+          code_str = String.build do |io|
+            dump_macro_body(node.body, env, io)
+          end
+          begin
+            parsed = Crystal::Parser.new(code_str).parse
+            if parsed.is_a?(Crystal::Expressions)
+              parsed.expressions.each { |e| expanded_exprs << e }
+            else
+              expanded_exprs << parsed
+            end
+          rescue
+          end
+        end
+      elsif (exp_str.includes?("@type.methods") || exp_str.includes?("methods")) && (t = @current_type)
+        t.methods.each do |m|
+          env = {
+            var_name => m.name,
+            "#{var_name}.name" => m.name,
+            "@type.name" => t.name
+          }
+          code_str = String.build do |io|
+            dump_macro_body(node.body, env, io)
+          end
+          begin
+            parsed = Crystal::Parser.new(code_str).parse
+            if parsed.is_a?(Crystal::Expressions)
+              parsed.expressions.each { |e| expanded_exprs << e }
+            else
+              expanded_exprs << parsed
+            end
+          rescue
+          end
+        end
+      end
+
+      Crystal::Expressions.new(expanded_exprs)
+    end
+
+    private def dump_macro_body(node : Crystal::ASTNode, env : Hash(String, String), io : IO)
       case node
       when Crystal::Expressions
-        node.expressions.each { |child| dump_macro_body(child, arg_map, io) }
+        node.expressions.each { |child| dump_macro_body(child, env, io) }
       when Crystal::MacroLiteral
         io << node.value
       when Crystal::MacroExpression
         if exp = node.exp
-          if exp.is_a?(Crystal::Var) && arg_map.has_key?(exp.name)
-            io << arg_map[exp.name]
+          key = exp.to_s
+          if env.has_key?(key)
+            io << env[key]
+          elsif exp.is_a?(Crystal::Call) && exp.obj.is_a?(Crystal::Var) && exp.name == "name"
+            v = exp.obj.as(Crystal::Var).name
+            io << env["#{v}.name"]? || env[v]? || ""
+          elsif exp.is_a?(Crystal::Call) && exp.obj.is_a?(Crystal::Var) && exp.name == "type"
+            v = exp.obj.as(Crystal::Var).name
+            io << env["#{v}.type"]? || ""
+          elsif exp.is_a?(Crystal::Call) && exp.obj.to_s == "@type" && exp.name == "name"
+            io << env["@type.name"]? || @current_type.try(&.name) || ""
+          elsif exp.is_a?(Crystal::Var) && env.has_key?(exp.name)
+            io << env[exp.name]
           else
             io << exp.to_s
           end
         end
+      when Crystal::MacroIf
+        cond_str = node.cond.to_s
+        is_true = true
+        env.each do |k, v|
+          cond_str = cond_str.gsub(k, %("#{v}"))
+        end
+        if cond_str.includes?("==")
+          parts = cond_str.split("==").map(&.strip)
+          is_true = (parts[0] == parts[1]) if parts.size == 2
+        elsif cond_str.includes?("!=")
+          parts = cond_str.split("!=").map(&.strip)
+          is_true = (parts[0] != parts[1]) if parts.size == 2
+        end
+        if is_true
+          dump_macro_body(node.then, env, io)
+        elsif node_else = node.else
+          dump_macro_body(node_else, env, io)
+        end
+      when Crystal::MacroFor
+        expanded = expand_macro_for(node)
+        io << expanded.to_s
       when Crystal::Var
-        if arg_map.has_key?(node.name)
-          io << arg_map[node.name]
+        if env.has_key?(node.name)
+          io << env[node.name]
         else
           io << node.to_s
         end

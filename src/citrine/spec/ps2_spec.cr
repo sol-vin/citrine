@@ -15,6 +15,8 @@ module Citrine
       getter status : Process::Status?
       getter spram_canary_valid : Bool
       getter boot_time_seconds : Float64
+      getter screenshot_path : String?
+      getter memory_reads : Hash(UInt64, Bytes) = Hash(UInt64, Bytes).new
 
       def initialize(
         @lines : Array(String) = [] of String,
@@ -23,7 +25,9 @@ module Citrine
         @crash_report : Debugger::CrashReport? = nil,
         @status : Process::Status? = nil,
         @spram_canary_valid : Bool = true,
-        @boot_time_seconds : Float64 = 0.0
+        @boot_time_seconds : Float64 = 0.0,
+        @screenshot_path : String? = nil,
+        @memory_reads : Hash(UInt64, Bytes) = Hash(UInt64, Bytes).new
       )
       end
 
@@ -71,10 +75,47 @@ module Citrine
         end
       end
 
+      def should_have_no_memory_leaks(file = __FILE__, line = __LINE__)
+        return if check_pcsx2_availability(file, line)
+        leak_lines = @lines.select { |l| l.includes?("[Citrine Leak]") || l.includes?("Memory leak:") }
+        unless leak_lines.empty?
+          fail "Expected zero memory leaks, but found:\n  #{leak_lines.join("\n  ")}", file, line
+        end
+      end
+
+      def should_not_have_memory_faults(file = __FILE__, line = __LINE__)
+        return if check_pcsx2_availability(file, line)
+        fault_lines = @lines.select { |l| l.includes?("[CITRINE MEMORY ERROR]") || l.includes?("Use-after-free") || l.includes?("Double free") }
+        unless fault_lines.empty?
+          fail "Expected zero memory faults, but found:\n  #{fault_lines.join("\n  ")}", file, line
+        end
+      end
+
+      def memory_at(address : UInt64) : Bytes?
+        @memory_reads[address]?
+      end
+
+      def memory_word(address : UInt64) : UInt32?
+        if b = @memory_reads[address]?
+          return nil unless b.size >= 4
+          b[0].to_u32 | (b[1].to_u32 << 8) | (b[2].to_u32 << 16) | (b[3].to_u32 << 24)
+        else
+          nil
+        end
+      end
+
       def should_not_exceed_boot_time(max_time : ::Time::Span | Float64, file = __FILE__, line = __LINE__)
         limit = max_time.is_a?(::Time::Span) ? max_time.total_seconds : max_time
         if @boot_time_seconds > limit
           fail "Expected boot time to not exceed #{limit}s, but took #{@boot_time_seconds}s.", file, line
+        end
+      end
+
+      def should_have_screenshot(file = __FILE__, line = __LINE__)
+        return if check_pcsx2_availability(file, line)
+        path = @screenshot_path
+        if path.nil? || !File.exists?(path) || File.size(path) == 0
+          fail "Expected screenshot to be captured, but file '#{path || "nil"}' does not exist or is empty.", file, line
         end
       end
     end
@@ -86,6 +127,10 @@ module Citrine
       property max_registers : UInt8 = 0_u8
       property total_bytecode_bytes : Int32 = 0
       property input_schedule : Array(Citrine::VirtualInput) = [] of Citrine::VirtualInput
+      property screenshot_frame : Int32? = nil
+      property screenshot_output : String? = nil
+      property gdb_port : Int32? = nil
+      property memory_queries : Array(Tuple(UInt64, Int32)) = [] of Tuple(UInt64, Int32)
 
       def initialize(@name : String)
       end
@@ -96,6 +141,19 @@ module Citrine
 
       def target(path : String)
         @target_file = path
+      end
+
+      def enable_gdb(port : Int32 = 28011)
+        @gdb_port = port
+      end
+
+      def inspect_memory(address : UInt64, length : Int32)
+        @memory_queries << {address, length}
+      end
+
+      def capture_screenshot(frame : Int32 = 30, output_path : String? = nil)
+        @screenshot_frame = frame
+        @screenshot_output = output_path || "tmp_snap_#{@name.gsub(/[^a-zA-Z0-9_]/, "_")}.png"
       end
 
       def inject_input(frame : Int32, button : Citrine::PadButton | Int32, duration : Int32 = 2)
@@ -132,8 +190,31 @@ module Citrine
         crash_rep : Debugger::CrashReport? = nil
 
         status : Process::Status? = nil
+        snap_path : String? = nil
+        if @screenshot_frame && (out_p = @screenshot_output)
+          snap_path = out_p
+          spawn do
+            sleep 2.8.seconds
+            bridge.capture_screenshot(out_p)
+            bridge.copy_to_artifacts(out_p, "screen.png") rescue nil
+          end
+        end
+
+        mem_reads = Hash(UInt64, Bytes).new
+        active_port = @gdb_port || (@memory_queries.empty? ? nil : 28011)
+        if p = active_port
+          spawn do
+            sleep 2.5.seconds
+            @memory_queries.each do |(addr, len)|
+              if b = bridge.read_memory_gdb(addr, len, p)
+                mem_reads[addr] = b
+              end
+            end
+          end
+        end
+
         begin
-          status = bridge.spawn_pcsx2(temp_iso, batch: true, timeout: timeout) do |line|
+          status = bridge.spawn_pcsx2(temp_iso, batch: true, gdb_port: active_port, timeout: timeout) do |line|
             lines << line
             if rep = Debugger::CrashAnalyzer.analyze(line, sm)
               panic_found = true
@@ -152,14 +233,17 @@ module Citrine
           panic_message: panic_msg,
           crash_report: crash_rep,
           status: status,
-          spram_canary_valid: canary_ok
+          spram_canary_valid: canary_ok,
+          screenshot_path: snap_path,
+          memory_reads: mem_reads
         )
       rescue ex
         # If PCSX2 executable is missing in CI or environment, fall back gracefully
         Ps2ExecutionResult.new(
           lines: ["PCSX2 runner not available: #{ex.message}"],
           panic_detected: false,
-          spram_canary_valid: true
+          spram_canary_valid: true,
+          memory_reads: Hash(UInt64, Bytes).new
         )
       end
     end

@@ -1,0 +1,307 @@
+id: BYTECODE_OPCODES
+title: Complete VM Opcode Reference
+summary: Exhaustive technical specification of all 43 Citrine VM instruction opcodes, operand encodings, and MIPS translations.
+track: 03_virtual_machine
+overview: |
+  The Citrine Virtual Machine defines a lean, high-density instruction set consisting of 43 core opcodes.
+  Each opcode occupies 8 bits (`UInt8`), with opcode values partitioned logically into functional groups:
+  - Control Flow & Register Movement (`0x00` - `0x05`, `0x28` - `0x34`, `0x46`)
+  - Integer Arithmetic & Bitwise Logic (`0x0A` - `0x13`, `0x1B` - `0x1C`)
+  - 2D Vector & Color Primitives (`0x14` - `0x1A`)
+  - Relational & Comparison Operations (`0x1E` - `0x23`)
+  - Fiber Coroutines & Multitasking (`0x3C` - `0x3E`)
+related_sources:
+  - "src/citrine/compiler/opcode.cr"
+  - "src/citrine/compiler/bytecode_compiler.cr"
+  - "src/citrine/iso/elf_builder.cr"
+  - "runtime/src/citrine_vm.c"
+sections:
+  - id: control_and_movement
+    title: Register Movement & Control Flow Opcodes
+    summary: Fundamental instruction flow, register moves, immediate loading, and jumps.
+    content: |
+      ### Nop (`0x00` / 0)
+      - **Format**: `ABC`
+      - **Operands**: Unused
+      - **Semantics**: Performs no operation. Advances PC by 1.
+      - **MIPS Mapping**: `nop` (`sll $zero, $zero, 0`)
+      
+      ### Move (`0x01` / 1)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `src_a`
+      - **Semantics**: Copies value from register `src_a` into `dst` (`R[dst] = R[src_a]`).
+      - **MIPS Mapping**: `or $dst, $src_a, $zero` / `move $dst, $src_a`
+      
+      ### LoadNil (`0x02` / 2)
+      - **Format**: `ABC`
+      - **Operands**: `dst`
+      - **Semantics**: Sets `R[dst] = NIL` (0x00000000 with Nil type tag).
+      
+      ### LoadBool (`0x03` / 3)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `b` (0 = false, 1 = true)
+      - **Semantics**: Sets boolean value `R[dst] = (b != 0)`.
+      
+      ### LoadInt (`0x04` / 4)
+      - **Format**: `AB_IMM`
+      - **Operands**: `dst`, `imm16` (signed 16-bit integer)
+      - **Semantics**: Sign-extends 16-bit immediate into `R[dst]`.
+      - **MIPS Mapping**: `addiu $dst, $zero, imm16`
+      
+      ### LoadConst (`0x05` / 5)
+      - **Format**: `AB_IMM`
+      - **Operands**: `dst`, `const_index`
+      - **Semantics**: Loads a constant object from the `.cbc` constant pool (Strings, Float32, Int32, Colors) into `R[dst]`.
+      
+      ### Jump (`0x28` / 40)
+      - **Format**: `BRANCH`
+      - **Operands**: `offset` (16-bit signed relative PC offset)
+      - **Semantics**: Unconditional jump. Sets `PC = PC + 1 + offset`.
+      - **MIPS Mapping**: `b label` / `j target`
+      
+      ### JumpIfTrue (`0x29` / 41)
+      - **Format**: `BRANCH`
+      - **Operands**: `cond_reg`, `offset`
+      - **Semantics**: If `R[cond_reg]` is truthy (not nil and not false), sets `PC = PC + 1 + offset`.
+      - **MIPS Mapping**: `bne $cond, $zero, label`
+      
+      ### JumpIfFalse (`0x2A` / 42)
+      - **Format**: `BRANCH`
+      - **Operands**: `cond_reg`, `offset`
+      - **Semantics**: If `R[cond_reg]` is falsy (nil or false/0), sets `PC = PC + 1 + offset`.
+      - **MIPS Mapping**: `beq $cond, $zero, label`
+      
+      ### Call (`0x32` / 50)
+      - **Format**: `AB_IMM`
+      - **Operands**: `dst`, `fn_index`
+      - **Semantics**: Pushes return address and current frame to call stack, then jumps to function `fn_index`. Result is returned in `R[dst]`.
+      - **MIPS Mapping**: `jal function_label; nop`
+      
+      ### Return (`0x33` / 51)
+      - **Format**: `ABC`
+      - **Operands**: `src` (register containing return value)
+      - **Semantics**: Copies `R[src]` to caller destination register, pops frame from call stack, and resumes caller PC.
+      - **MIPS Mapping**: `move $v0, $src; jr $ra; nop`
+      
+      ### CallNative (`0x34` / 52)
+      - **Format**: `AB_IMM`
+      - **Operands**: `arg_base`, `native_id` (16-bit NativeId enum)
+      - **Semantics**: Dispatches system call to Citrine host / hardware runtime with arguments starting at `R[arg_base]`. Return value stored in `R[arg_base]`.
+      
+      ### Halt (`0x46` / 70)
+      - **Format**: `ABC`
+      - **Operands**: Unused
+      - **Semantics**: Terminates execution immediately, flushing telemetry buffers and parking EE CPU.
+    examples:
+      - |
+        ```crystal
+        # Crystal code emitting LoadInt, LoadConst, and conditional branch:
+        score = 100
+        message = "High Score!"
+
+        if score > 50
+          puts message
+        end
+        ```
+  - id: arithmetic_and_bitwise
+    title: Arithmetic & Bitwise Logic Opcodes
+    summary: Integer arithmetic, negation, bitwise shifts, AND, OR, XOR, and bitwise NOT.
+    content: |
+      All arithmetic operations operate on signed 32-bit two's-complement integers.
+      
+      ### Add (`0x0A` / 10)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `a`, `b`
+      - **Semantics**: `R[dst] = R[a] + R[b]`. Also performs string concatenation when operands are string addresses.
+      - **MIPS Mapping**: `addu $dst, $a, $b`
+      
+      ### Sub (`0x0B` / 11)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `a`, `b`
+      - **Semantics**: `R[dst] = R[a] - R[b]`.
+      - **MIPS Mapping**: `subu $dst, $a, $b`
+      
+      ### Mul (`0x0C` / 12)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `a`, `b`
+      - **Semantics**: `R[dst] = R[a] * R[b]`.
+      - **MIPS Mapping**: `mult $a, $b; mflo $dst`
+      
+      ### Div (`0x0D` / 13)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `a`, `b`
+      - **Semantics**: `R[dst] = R[a] / R[b]` (guarded division; returns 0 if `R[b] == 0`).
+      - **MIPS Mapping**: `div $a, $b; mflo $dst`
+      
+      ### Mod (`0x0E` / 14)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `a`, `b`
+      - **Semantics**: `R[dst] = R[a] % R[b]` (guarded modulo; returns 0 if `R[b] == 0`).
+      - **MIPS Mapping**: `div $a, $b; mfhi $dst`
+      
+      ### Neg (`0x0F` / 15)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `a`
+      - **Semantics**: `R[dst] = -R[a]`.
+      - **MIPS Mapping**: `subu $dst, $zero, $a`
+      
+      ### BitAnd (`0x10` / 16)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `a`, `b`
+      - **Semantics**: `R[dst] = R[a] & R[b]`.
+      - **MIPS Mapping**: `and $dst, $a, $b`
+      
+      ### BitOr (`0x11` / 17)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `a`, `b`
+      - **Semantics**: `R[dst] = R[a] | R[b]`.
+      - **MIPS Mapping**: `or $dst, $a, $b`
+      
+      ### BitXor (`0x12` / 18)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `a`, `b`
+      - **Semantics**: `R[dst] = R[a] ^ R[b]`.
+      - **MIPS Mapping**: `xor $dst, $a, $b`
+      
+      ### ShiftLeft (`0x13` / 19)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `a`, `b`
+      - **Semantics**: `R[dst] = R[a] << R[b]`.
+      - **MIPS Mapping**: `sllv $dst, $a, $b`
+      
+      ### ShiftRight (`0x1B` / 27)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `a`, `b`
+      - **Semantics**: `R[dst] = R[a] >> R[b]` (arithmetic signed shift right).
+      - **MIPS Mapping**: `srav $dst, $a, $b`
+      
+      ### BitNot (`0x1C` / 28)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `a`
+      - **Semantics**: `R[dst] = ~R[a]`.
+      - **MIPS Mapping**: `nor $dst, $a, $zero`
+    examples:
+      - |
+        ```crystal
+        # Fast bitwise operations on Emotion Engine:
+        flags = 0x0F
+        mask = (flags << 2) | 0x01
+        is_active = (mask & 0x04) != 0
+        ```
+  - id: vector_and_color
+    title: Vector2 & Color Primitive Opcodes
+    summary: High-performance 2D math and RGBA color construction for PlayStation 2 rendering.
+    content: |
+      ### Vec2New (`0x14` / 20)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `reg_x`, `reg_y`
+      - **Semantics**: Allocates/constructs a `Vector2(x, y)` primitive in `R[dst]`.
+      
+      ### Vec2GetX (`0x15` / 21) & Vec2GetY (`0x16` / 22)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `src_vec`
+      - **Semantics**: Extracts X or Y component from `Vector2` stored in `R[src_vec]`.
+      
+      ### Vec2SetX (`0x17` / 23) & Vec2SetY (`0x18` / 24)
+      - **Format**: `ABC`
+      - **Operands**: `dst_vec`, `src_val`
+      - **Semantics**: Mutates X or Y component of `Vector2` in `R[dst_vec]`.
+      
+      ### Vec2Add (`0x19` / 25)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `vec_a`, `vec_b`
+      - **Semantics**: Performs component-wise vector addition: `dst.x = a.x + b.x`, `dst.y = a.y + b.y`.
+      
+      ### ColorNew (`0x1A` / 26)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `r_base`, `_`
+      - **Semantics**: Packs 4 consecutive registers starting at `r_base` (`R, G, B, A`) into a 32-bit RGBA color word:
+        `Color = (R & 0xFF) | ((G & 0xFF) << 8) | ((B & 0xFF) << 16) | ((A & 0xFF) << 24)`.
+    examples:
+      - |
+        ```crystal
+        # Vector and Color construction in Crystal
+        pos = Vector2.new(320.0, 240.0)
+        vel = Vector2.new(2.5, -1.0)
+        new_pos = pos + vel
+
+        color = Color.new(255_u8, 128_u8, 0_u8, 255_u8)
+        ```
+  - id: comparison_opcodes
+    title: Relational & Comparison Opcodes
+    summary: Equality, inequality, and ordering comparisons with automatic string content inspection.
+    content: |
+      Comparison opcodes produce a boolean result (`true` / `false`) placed in `R[dst]`.
+      
+      ### Eq (`0x1E` / 30)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `a`, `b`
+      - **Semantics**: `R[dst] = (R[a] == R[b])`. If `R[a]` and `R[b]` are string pointers, compares string byte content.
+      
+      ### Ne (`0x1F` / 31)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `a`, `b`
+      - **Semantics**: `R[dst] = (R[a] != R[b])`.
+      
+      ### Lt (`0x20` / 32)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `a`, `b`
+      - **Semantics**: `R[dst] = (R[a] < R[b])`.
+      - **MIPS Mapping**: `slt $dst, $a, $b`
+      
+      ### Le (`0x21` / 33)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `a`, `b`
+      - **Semantics**: `R[dst] = (R[a] <= R[b])`.
+      - **MIPS Mapping**: `slt $dst, $b, $a; xori $dst, $dst, 1`
+      
+      ### Gt (`0x22` / 34)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `a`, `b`
+      - **Semantics**: `R[dst] = (R[a] > R[b])`.
+      - **MIPS Mapping**: `slt $dst, $b, $a`
+      
+      ### Ge (`0x23` / 35)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `a`, `b`
+      - **Semantics**: `R[dst] = (R[a] >= R[b])`.
+      - **MIPS Mapping**: `slt $dst, $a, $b; xori $dst, $dst, 1`
+    examples:
+      - |
+        ```crystal
+        # Content-based string comparison and numerical comparisons
+        name = "Player 1"
+        is_player = (name == "Player 1") # Evaluates byte content
+        has_lives = (lives > 0)
+        ```
+  - id: fiber_opcodes
+    title: Fiber Coroutines & Multitasking Opcodes
+    summary: Lightweight cooperative fiber spawning, context yielding, and resumption.
+    content: |
+      Citrine includes first-class cooperative fibers for entity behaviors, state machines, and concurrency.
+      
+      ### SpawnFiber (`0x3C` / 60)
+      - **Format**: `AB_IMM`
+      - **Operands**: `dst`, `fn_index`
+      - **Semantics**: Allocates a new lightweight fiber execution context initialized to function `fn_index`. Returns fiber ID handle in `R[dst]`.
+      
+      ### Yield (`0x3D` / 61)
+      - **Format**: `ABC`
+      - **Operands**: Unused
+      - **Semantics**: Suspends the currently executing fiber, saving PC and virtual registers, and switches to the next runnable fiber or main loop.
+      
+      ### ResumeFiber (`0x3E` / 62)
+      - **Format**: `ABC`
+      - **Operands**: `dst`, `fiber_id`
+      - **Semantics**: Resumes execution of the suspended fiber identified by `R[fiber_id]`. Returns fiber status in `R[dst]`.
+    examples:
+      - |
+        ```crystal
+        # Cooperative fiber routine
+        fiber = Citrine.spawn_fiber do
+          loop do
+            Citrine.log("Fiber heartbeat")
+            Citrine.yield
+          end
+        end
+        ```

@@ -1,7 +1,8 @@
 # Citrine IO::Memory stubs for PlayStation 2 EE runtime
 # Allows user code to typecheck and use IO::Memory with zero overhead
 
-module IO
+{% unless @top_level.has_constant?("IO") %}
+abstract class IO
   class Memory
     property pos : Int32
     property size : Int32
@@ -43,3 +44,4 @@ module IO
     end
   end
 end
+{% end %}

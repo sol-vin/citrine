@@ -1,5 +1,6 @@
 require "process"
 require "file_utils"
+require "socket"
 
 module Citrine
   module Debugger
@@ -156,6 +157,7 @@ module Citrine
         iso_path : String,
         batch : Bool = false,
         debugger_gui : Bool = false,
+        gdb_port : Int32? = nil,
         timeout : Time::Span? = nil,
         &block : String -> Nil
       ) : Process::Status?
@@ -177,6 +179,10 @@ module Citrine
 
         if debugger_gui
           args << "-debugger"
+        end
+
+        if port = gdb_port
+          args << "-gdb" << port.to_s
         end
 
         args << File.expand_path(iso_path)
@@ -384,6 +390,167 @@ module Citrine
           true
         rescue
           false
+        end
+      end
+
+      # Captures a screenshot from the running PCSX2 instance to output_path (PNG format).
+      # Returns true on success.
+      def capture_screenshot(output_path : String) : Bool
+        abs_output = File.expand_path(output_path).gsub('/', '\\')
+        Dir.mkdir_p(File.dirname(abs_output))
+
+        {% if flag?(:windows) %}
+        # Check PCSX2 snaps directory
+        home = Path.home
+        snap_dirs = [
+          home.join("Documents", "PCSX2", "snaps").to_s,
+          "C:\\Program Files\\PCSX2\\snaps",
+          "C:\\Users\\Ian\\Documents\\PCSX2\\snaps"
+        ]
+        active_snap_dir = snap_dirs.find { |d| Dir.exists?(d) } || snap_dirs.first
+        before_snaps = Dir.glob(File.join(active_snap_dir, "*.png")) rescue [] of String
+
+        script = <<-POWERSHELL
+        $ErrorActionPreference = 'SilentlyContinue'
+        $env:LIB = ""
+        Add-Type -AssemblyName System.Drawing
+        Add-Type @"
+        using System;
+        using System.Runtime.InteropServices;
+        public class WinSnap {
+            [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+        }
+        "@
+        $proc = Get-Process -Name "pcsx2-qt" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($proc -and $proc.MainWindowHandle -ne [IntPtr]::Zero) {
+            # Send F8 snapshot hotkey (WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101, VK_F8 = 0x77)
+            [WinSnap]::PostMessage($proc.MainWindowHandle, 0x0100, [IntPtr]0x77, [IntPtr]0)
+            [WinSnap]::PostMessage($proc.MainWindowHandle, 0x0101, [IntPtr]0x77, [IntPtr]0)
+            Start-Sleep -Milliseconds 600
+
+            # GDI Capture fallback
+            $rect = New-Object WinSnap+RECT
+            [WinSnap]::GetWindowRect($proc.MainWindowHandle, [ref]$rect)
+            $w = [Math]::Max(100, $rect.Right - $rect.Left)
+            $h = [Math]::Max(100, $rect.Bottom - $rect.Top)
+            $bmp = New-Object System.Drawing.Bitmap($w, $h)
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($rect.Left, $rect.Top, 0, 0, (New-Object System.Drawing.Size($w, $h)))
+            $g.Dispose()
+            $bmp.Save($outputPath, [System.Drawing.Imaging.ImageFormat]::Png)
+            $bmp.Dispose()
+        }
+        POWERSHELL
+
+        Process.run("powershell", ["-NoProfile", "-Command", "$outputPath = '#{abs_output.gsub('\'', "''")}'; " + script]) rescue nil
+
+        # If F8 produced a native GS framebuffer snapshot in snaps/, use that high-res file!
+        after_snaps = (Dir.glob(File.join(active_snap_dir, "*.png")) rescue [] of String) - before_snaps
+        if newest = after_snaps.last?
+          FileUtils.cp(newest, abs_output) rescue nil
+        end
+        {% end %}
+
+        File.exists?(abs_output) && File.size(abs_output) > 0
+      end
+
+      # Copies a captured screenshot to the Antigravity conversation artifact directory for inline viewing.
+      def copy_to_artifacts(src_png : String, artifact_name : String = "screen.png") : String?
+        artifact_dir = "C:/Users/Ian/.gemini/antigravity/brain/800ae8f6-80d0-4428-93ad-3dc0043d07e3"
+        if Dir.exists?(artifact_dir) && File.exists?(src_png)
+          dest = File.join(artifact_dir, artifact_name)
+          FileUtils.cp(src_png, dest) rescue nil
+          return dest
+        end
+        nil
+      end
+
+      # Computes 2-digit hex checksum for GDB RSP packet data
+      def self.gdb_checksum(cmd : String) : String
+        sum = cmd.bytes.reduce(0_u8) { |acc, b| acc &+ b }
+        sum.to_s(16).rjust(2, '0').downcase
+      end
+
+      # Sends a GDB RSP command packet and reads the response payload
+      def self.send_gdb_packet(socket : IO, cmd : String) : String?
+        chk = gdb_checksum(cmd)
+        socket.print("$#{cmd}##{chk}")
+        socket.flush
+
+        # Expect ACK '+'
+        ack = socket.read_char
+        return nil unless ack == '+'
+
+        # Wait for '$' response start
+        char = socket.read_char
+        while char && char != '$'
+          char = socket.read_char
+        end
+        return nil unless char == '$'
+
+        resp = IO::Memory.new
+        while (c = socket.read_char) && c != '#'
+          resp << c
+        end
+        # Read 2 checksum characters
+        socket.read_char
+        socket.read_char
+
+        resp.to_s
+      end
+
+      # Connects to PCSX2's GDB stub (port 28011 by default) and reads a block of EE memory.
+      def read_memory_gdb(address : UInt64, length : Int32, port : Int32 = 28011) : Bytes?
+        begin
+          socket = TCPSocket.new("127.0.0.1", port, connect_timeout: 1.second)
+          socket.read_timeout = 2.seconds
+
+          # Send interrupt byte (0x03) to briefly halt EE CPU if running
+          socket.write_byte(0x03_u8)
+          socket.flush
+          sleep 0.05.seconds
+
+          # Drain any stop packet
+          socket.read_timeout = 0.2.seconds
+          begin
+            buf = Bytes.new(128)
+            socket.read(buf)
+          rescue
+          end
+          socket.read_timeout = 2.seconds
+
+          # GDB command: m<hex_addr>,<hex_length>
+          cmd = "m#{address.to_s(16)},#{length.to_s(16)}"
+          resp = Pcsx2Bridge.send_gdb_packet(socket, cmd)
+
+          # Send continue '$c#63' so EE execution resumes seamlessly
+          Pcsx2Bridge.send_gdb_packet(socket, "c") rescue nil
+          socket.close rescue nil
+
+          if resp && !resp.starts_with?("E")
+            bytes = Bytes.new(resp.size // 2)
+            (0...bytes.size).each do |i|
+              bytes[i] = resp[i * 2, 2].to_u8(16)
+            end
+            bytes
+          else
+            nil
+          end
+        rescue
+          nil
+        end
+      end
+
+      # Reads the 32-bit SPRAM canary at 0x70000000 via GDB
+      def inspect_spram_canary_gdb(port : Int32 = 28011) : UInt32?
+        if bytes = read_memory_gdb(0x70000000_u64, 4, port)
+          return nil unless bytes.size == 4
+          # Little-endian 32-bit word
+          bytes[0].to_u32 | (bytes[1].to_u32 << 8) | (bytes[2].to_u32 << 16) | (bytes[3].to_u32 << 24)
+        else
+          nil
         end
       end
     end

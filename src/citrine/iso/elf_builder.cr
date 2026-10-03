@@ -4,6 +4,7 @@ require "../gs/gs_config"
 require "../gs/gif_packet_builder"
 require "../subsystems/controller"
 require "./elf_writer"
+require "./regex_engine"
 
 module Citrine
   # Generates a valid 32-bit Little-Endian MIPS R5900 PlayStation 2 ELF executable.
@@ -61,6 +62,19 @@ module Citrine
       property caller_dest : Int32
       property caller_reg_base : Int32
       def initialize(@return_pc, @caller_instructions, @caller_dest, @caller_reg_base)
+      end
+    end
+
+    struct AllocationRecord
+      property base_addr : Int64
+      property size_bytes : Int32
+      property context_name : String
+      property freed : Bool
+      property is_object : Bool
+      property is_struct : Bool
+      property field_count : Int32
+
+      def initialize(@base_addr, @size_bytes, @context_name, @freed = false, @is_object = false, @is_struct = false, @field_count = 0)
       end
     end
 
@@ -1363,6 +1377,25 @@ module Citrine
       ElfWriter.write(text_data, rodata_data, data_data, symbols, 0x00100000_u32)
     end
 
+    def build_headless_elf(boot_messages : Array(String) = [] of String) : Bytes
+      emitter = MipsEmitter.new
+      emitter.lui(SP, 0x01FF)
+      emitter.ori(SP, SP, 0xFFF0)
+      emitter.lui(T0, 0x1000)
+      emitter.ori(T0, T0, 0xF180) # EE TTY data register
+
+      emitter.label("headless_loop")
+      emitter.j("headless_loop")
+      emitter.nop
+
+      text_slice = emitter.to_slice
+      symbols = [
+        SymbolEntry.new("_start", 0x00100000_u32, 16_u32, STT_FUNC, STB_GLOBAL, 1_u16),
+        SymbolEntry.new("main", 0x00100000_u32, text_slice.size.to_u32, STT_FUNC, STB_GLOBAL, 1_u16)
+      ]
+      ElfWriter.write(text_slice, Bytes.empty, Bytes.empty, symbols, 0x00100000_u32)
+    end
+
     def parse_cbc(cbc_bytes : Bytes?) : Tuple(Array(Phase), Array(String), Int32, Bool, Bool)
       boot_messages = [] of String
       loop_start_phase = 0
@@ -1441,6 +1474,18 @@ module Citrine
             next_arr_id = 1000_i64
             io_streams = Hash(Int64, IO::Memory).new
             next_io_id = 2000_i64
+            memory = Hash(Int64, Int64).new
+            next_heap_addr = 0x00200000_i64
+            object_classes = Hash(Int64, UInt32).new
+            active_context_name = ""
+            scratch_pool_base = 0x00400000_i64
+            scratch_pool_ptr = scratch_pool_base
+            allocations = Hash(Int64, AllocationRecord).new
+            free_list = [] of Tuple(Int64, Int32)
+            compiled_regexes = Hash(Int64, SimpleRegex).new
+            next_regex_id = 5000_i64
+            vec2_store = Hash(Int64, Tuple(Int64, Int64)).new
+            next_vec2_id = 10000_i64
             current_commands = [] of DrawCommand
             phases = [] of Phase
             pc = 0
@@ -1458,7 +1503,7 @@ module Citrine
             has_drawing = instructions.any? do |instr|
               op = (instr >> 24) & 0xFF
               nat = instr & 0xFF
-              op == 52 && nat == 11
+              op == 52 && (nat == 10 || nat == 11 || (nat >= 20 && nat <= 34) || (nat >= 100 && nat <= 111))
             end
             simulated_button_press = false
             button_phase_count = 0
@@ -1499,23 +1544,131 @@ module Citrine
               when 4 # LoadInt
                 regs[dst_r] = imm16
               when 5 # LoadConst
-                regs[dst_r] = imm16
+                if imm16 < constants.size
+                  c = constants[imm16]
+                  case c.type
+                  when 2 # Int32
+                    regs[dst_r] = c.u32_val.to_i32.to_i64
+                  when 5 # Color
+                    regs[dst_r] = c.u32_val.to_i64
+                  when 1 # Bool
+                    regs[dst_r] = c.u32_val.to_i64
+                  else
+                    regs[dst_r] = imm16.to_i64
+                  end
+                else
+                  regs[dst_r] = imm16.to_i64
+                end
               when 10 # Add
-                regs[dst_r] = regs[a_r] + regs[b_r]
+                regs[dst_r] = regs[a_r] &+ regs[b_r]
               when 11 # Sub
-                regs[dst_r] = regs[a_r] - regs[b_r]
+                regs[dst_r] = regs[a_r] &- regs[b_r]
               when 12 # Mul
-                regs[dst_r] = regs[a_r] * regs[b_r]
+                regs[dst_r] = regs[a_r] &* regs[b_r]
               when 13 # Div
                 regs[dst_r] = regs[b_r] != 0 ? (regs[a_r] // regs[b_r]) : 0_i64
               when 14 # Mod
                 regs[dst_r] = regs[b_r] != 0 ? (regs[a_r] % regs[b_r]) : 0_i64
               when 15 # Neg
-                regs[dst_r] = -regs[a_r]
+                regs[dst_r] = 0_i64 &- regs[a_r]
+              when 16 # BitAnd
+                regs[dst_r] = regs[a_r] & regs[b_r]
+              when 17 # BitOr
+                regs[dst_r] = regs[a_r] | regs[b_r]
+              when 18 # BitXor
+                regs[dst_r] = regs[a_r] ^ regs[b_r]
+              when 19 # ShiftLeft
+                shift = (regs[b_r] & 0x3F).to_i
+                regs[dst_r] = ((regs[a_r].to_u64! << shift) & 0xFFFFFFFFFFFFFFFF_u64).to_i64!
+              when 20 # Vec2New
+                id = next_vec2_id
+                next_vec2_id += 1
+                vec2_store[id] = {regs[a_r], regs[b_r]}
+                regs[dst_r] = id
+              when 21 # Vec2GetX
+                id = regs[a_r]
+                regs[dst_r] = vec2_store[id]?.try(&.[0]) || 0_i64
+              when 22 # Vec2GetY
+                id = regs[a_r]
+                regs[dst_r] = vec2_store[id]?.try(&.[1]) || 0_i64
+              when 23 # Vec2SetX
+                id = regs[dst_r]
+                if entry = vec2_store[id]?
+                  vec2_store[id] = {regs[a_r], entry[1]}
+                end
+              when 24 # Vec2SetY
+                id = regs[dst_r]
+                if entry = vec2_store[id]?
+                  vec2_store[id] = {entry[0], regs[a_r]}
+                end
+              when 25 # Vec2Add
+                id1 = regs[a_r]
+                id2 = regs[b_r]
+                v1 = vec2_store[id1]? || {0_i64, 0_i64}
+                v2 = vec2_store[id2]? || {0_i64, 0_i64}
+                new_id = next_vec2_id
+                next_vec2_id += 1
+                vec2_store[new_id] = {v1[0] &+ v2[0], v1[1] &+ v2[1]}
+                regs[dst_r] = new_id
+              when 27 # ShiftRight
+                shift = (regs[b_r] & 0x3F).to_i
+                regs[dst_r] = (regs[a_r].to_u64! >> shift).to_i64!
+              when 28 # BitNot
+                regs[dst_r] = ~regs[a_r]
               when 30 # Eq
-                regs[dst_r] = (regs[a_r] == regs[b_r]) ? 1_i64 : 0_i64
+                val_a = regs[a_r]
+                val_b = regs[b_r]
+                is_eq = if val_a == val_b
+                          true
+                        else
+                          str_a = if val_a >= 0 && val_a < constants.size && constants[val_a.to_i]?.try(&.type) == 6_u8
+                                    constants[val_a.to_i].str_val
+                                  elsif val_a >= 0 && val_a <= Int32::MAX && strings[val_a.to_i32!]?
+                                    strings[val_a.to_i32!]
+                                  else
+                                    nil
+                                  end
+                          str_b = if val_b >= 0 && val_b < constants.size && constants[val_b.to_i]?.try(&.type) == 6_u8
+                                    constants[val_b.to_i].str_val
+                                  elsif val_b >= 0 && val_b <= Int32::MAX && strings[val_b.to_i32!]?
+                                    strings[val_b.to_i32!]
+                                  else
+                                    nil
+                                  end
+                          if str_a && str_b
+                            str_a == str_b
+                          else
+                            false
+                          end
+                        end
+                regs[dst_r] = is_eq ? 1_i64 : 0_i64
               when 31 # Ne
-                regs[dst_r] = (regs[a_r] != regs[b_r]) ? 1_i64 : 0_i64
+                val_a = regs[a_r]
+                val_b = regs[b_r]
+                is_eq = if val_a == val_b
+                          true
+                        else
+                          str_a = if val_a >= 0 && val_a < constants.size && constants[val_a.to_i]?.try(&.type) == 6_u8
+                                    constants[val_a.to_i].str_val
+                                  elsif val_a >= 0 && val_a <= Int32::MAX && strings[val_a.to_i32!]?
+                                    strings[val_a.to_i32!]
+                                  else
+                                    nil
+                                  end
+                          str_b = if val_b >= 0 && val_b < constants.size && constants[val_b.to_i]?.try(&.type) == 6_u8
+                                    constants[val_b.to_i].str_val
+                                  elsif val_b >= 0 && val_b <= Int32::MAX && strings[val_b.to_i32!]?
+                                    strings[val_b.to_i32!]
+                                  else
+                                    nil
+                                  end
+                          if str_a && str_b
+                            str_a == str_b
+                          else
+                            false
+                          end
+                        end
+                regs[dst_r] = !is_eq ? 1_i64 : 0_i64
               when 32 # Lt
                 regs[dst_r] = (regs[a_r] < regs[b_r]) ? 1_i64 : 0_i64
               when 33 # Le
@@ -1589,6 +1742,17 @@ module Citrine
                     regs[dst_r] = 0_i64
                   end
                 when 11 # EndDrawing
+                  # Rewind Tier 1 Per-Frame Scratch Pool at V-Blank (O(1))
+                  scratch_pool_ptr = scratch_pool_base
+                  allocations.reject! do |addr, a|
+                    if a.is_struct || addr >= scratch_pool_base
+                      (a.size_bytes // 4).times { |i| memory.delete(addr + (i * 4)) }
+                      true
+                    else
+                      false
+                    end
+                  end
+
                   if current_commands.size > 0
                     if !animation_checked
                       if phases.empty?
@@ -1656,62 +1820,62 @@ module Citrine
                     end
                   end
                 when 12 # ClearBackground
-                  c_idx = regs[base_r].to_i
-                  color = constants[c_idx]?.try(&.u32_val) || 0_u32
+                  val = (regs[base_r] & 0xFFFFFFFF_i64).to_u32
+                  color = constants[val.to_i32!]?.try(&.u32_val) || val
                   current_commands << DrawCommand.new(DrawCommand::Type::Clear, color: color)
                 when 20 # DrawRectangle
-                  x = regs[base_r].to_i
-                  y = regs[base_r + 1].to_i
-                  w = regs[base_r + 2].to_i
-                  h = regs[base_r + 3].to_i
-                  c_idx = regs[base_r + 4].to_i
-                  color = constants[c_idx]?.try(&.u32_val) || 0xFFFFFFFF_u32
+                  x = (regs[base_r] & 0xFFFFFFFF_i64).to_i32!
+                  y = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
+                  w = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
+                  h = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_i32!
+                  val = (regs[base_r + 4] & 0xFFFFFFFF_i64).to_u32
+                  color = constants[val.to_i32!]?.try(&.u32_val) || val
                   current_commands << DrawCommand.new(DrawCommand::Type::Rect, x, y, x + w, y + h, color: color)
                 when 21 # DrawCircle
-                  cx = regs[base_r].to_i
-                  cy = regs[base_r + 1].to_i
-                  radius = regs[base_r + 2].to_i
-                  c_idx = regs[base_r + 3].to_i
-                  color = constants[c_idx]?.try(&.u32_val) || 0xFFFFFFFF_u32
+                  cx = (regs[base_r] & 0xFFFFFFFF_i64).to_i32!
+                  cy = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
+                  radius = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
+                  val = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_u32
+                  color = constants[val.to_i32!]?.try(&.u32_val) || val
                   current_commands << DrawCommand.new(DrawCommand::Type::Circle, cx, cy, 0, 0, 0, 0, radius: radius, color: color)
                 when 22 # DrawLine
-                  x1 = regs[base_r].to_i
-                  y1 = regs[base_r + 1].to_i
-                  x2 = regs[base_r + 2].to_i
-                  y2 = regs[base_r + 3].to_i
-                  c_idx = regs[base_r + 4].to_i
-                  color = constants[c_idx]?.try(&.u32_val) || 0xFFFFFFFF_u32
+                  x1 = (regs[base_r] & 0xFFFFFFFF_i64).to_i32!
+                  y1 = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
+                  x2 = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
+                  y2 = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_i32!
+                  val = (regs[base_r + 4] & 0xFFFFFFFF_i64).to_u32
+                  color = constants[val.to_i32!]?.try(&.u32_val) || val
                   current_commands << DrawCommand.new(DrawCommand::Type::Line, x1, y1, x2, y2, color: color)
                 when 23 # DrawTriangle
-                  x1 = regs[base_r].to_i
-                  y1 = regs[base_r + 1].to_i
-                  x2 = regs[base_r + 2].to_i
-                  y2 = regs[base_r + 3].to_i
-                  x3 = regs[base_r + 4].to_i
-                  y3 = regs[base_r + 5].to_i
-                  c_idx = regs[base_r + 6].to_i
-                  color = constants[c_idx]?.try(&.u32_val) || 0xFFFFFFFF_u32
+                  x1 = (regs[base_r] & 0xFFFFFFFF_i64).to_i32!
+                  y1 = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
+                  x2 = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
+                  y2 = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_i32!
+                  x3 = (regs[base_r + 4] & 0xFFFFFFFF_i64).to_i32!
+                  y3 = (regs[base_r + 5] & 0xFFFFFFFF_i64).to_i32!
+                  val = (regs[base_r + 6] & 0xFFFFFFFF_i64).to_u32
+                  color = constants[val.to_i32!]?.try(&.u32_val) || val
                   current_commands << DrawCommand.new(DrawCommand::Type::Triangle, x1, y1, x2, y2, x3, y3, color: color)
                 when 24 # DrawText
-                  t_idx = regs[base_r].to_i
-                  text = constants[t_idx]?.try(&.str_val) || ""
-                  x = regs[base_r + 1].to_i
-                  y = regs[base_r + 2].to_i
-                  size = regs[base_r + 3].to_i
-                  c_idx = regs[base_r + 4].to_i
-                  color = constants[c_idx]?.try(&.u32_val) || 0xFFFFFFFF_u32
+                  t_val = (regs[base_r] & 0xFFFFFFFF_i64).to_u32
+                  text = constants[t_val.to_i32!]?.try(&.str_val) || ""
+                  x = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
+                  y = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
+                  size = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_i32!
+                  val = (regs[base_r + 4] & 0xFFFFFFFF_i64).to_u32
+                  color = constants[val.to_i32!]?.try(&.u32_val) || val
                   current_commands << DrawCommand.new(DrawCommand::Type::Text, x, y, size, 0, color: color, text: text)
                 when 25 # DrawQuad (decomposes to 2 triangles)
-                  x1 = regs[base_r].to_i
-                  y1 = regs[base_r + 1].to_i
-                  x2 = regs[base_r + 2].to_i
-                  y2 = regs[base_r + 3].to_i
-                  x3 = regs[base_r + 4].to_i
-                  y3 = regs[base_r + 5].to_i
-                  x4 = regs[base_r + 6].to_i
-                  y4 = regs[base_r + 7].to_i
-                  c_idx = regs[base_r + 8].to_i
-                  color = constants[c_idx]?.try(&.u32_val) || 0xFFFFFFFF_u32
+                  x1 = (regs[base_r] & 0xFFFFFFFF_i64).to_i32!
+                  y1 = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
+                  x2 = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
+                  y2 = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_i32!
+                  x3 = (regs[base_r + 4] & 0xFFFFFFFF_i64).to_i32!
+                  y3 = (regs[base_r + 5] & 0xFFFFFFFF_i64).to_i32!
+                  x4 = (regs[base_r + 6] & 0xFFFFFFFF_i64).to_i32!
+                  y4 = (regs[base_r + 7] & 0xFFFFFFFF_i64).to_i32!
+                  val = (regs[base_r + 8] & 0xFFFFFFFF_i64).to_u32
+                  color = constants[val.to_i32!]?.try(&.u32_val) || val
                   current_commands << DrawCommand.new(DrawCommand::Type::Quad, x1, y1, x2, y2, x3, y3, x4, y4, color: color)
                 when 65 # Sleep(seconds)
                   sec = regs[base_r].to_i
@@ -1772,7 +1936,18 @@ module Citrine
                 when 121 # ArrayGet
                   arr_id = regs[base_r]
                   idx = regs[base_r + 1].to_i
-                  regs[dst_r] = arrays[arr_id]?.try(&.[idx]?) || 0_i64
+                  if arr = arrays[arr_id]?
+                    regs[dst_r] = arr[idx]? || 0_i64
+                  elsif arr_id >= 0x00100000_i64
+                    target_addr = arr_id + (idx.to_i64 * 4)
+                    if target_addr == 0x70000010_i64 || target_addr == 0x70000018_i64
+                      regs[dst_r] = simulated_button_press ? 0x4000_i64 : 0_i64
+                    else
+                      regs[dst_r] = memory[target_addr]? || 0_i64
+                    end
+                  else
+                    regs[dst_r] = 0_i64
+                  end
                 when 122 # ArraySet
                   arr_id = regs[base_r]
                   idx = regs[base_r + 1].to_i
@@ -1782,6 +1957,9 @@ module Citrine
                       arr << 0_i64
                     end
                     arr[idx] = val
+                  elsif arr_id >= 0x00100000_i64
+                    target_addr = arr_id + (idx.to_i64 * 4)
+                    memory[target_addr] = val
                   end
                   regs[dst_r] = val
                 when 123 # ArrayPush
@@ -1870,26 +2048,531 @@ module Citrine
                   io_streams[io_id]?.try(&.clear)
                   regs[dst_r] = 0_i64
                 when 150 # ObjectNew
+                  cid = regs[base_r].to_u32
                   field_count = regs[base_r + 1].to_i
-                  obj_id = next_obj_id
-                  next_obj_id += 1
-                  objects[obj_id] = Array(Int64).new(field_count, 0_i64)
-                  regs[dst_r] = obj_id
+                  is_struct = (regs[base_r + 2]? || 0_i64) == 1_i64
+                  size_bytes = (8 + (field_count * 4) + 7) & ~7 # 8-byte aligned
+
+                  if is_struct
+                    obj_addr = scratch_pool_ptr
+                    scratch_pool_ptr += size_bytes
+                  else
+                    found_idx = free_list.index { |(_, sz)| sz >= size_bytes }
+                    if found_idx
+                      obj_addr, _ = free_list.delete_at(found_idx)
+                    else
+                      obj_addr = next_heap_addr
+                      next_heap_addr += size_bytes
+                    end
+                  end
+
+                  memory[obj_addr] = cid.to_i64
+                  memory[obj_addr + 4] = field_count.to_i64
+                  field_count.times do |i|
+                    memory[obj_addr + 8 + (i * 4)] = 0_i64
+                  end
+
+                  allocations[obj_addr] = AllocationRecord.new(
+                    obj_addr, size_bytes, active_context_name,
+                    freed: false, is_object: true, is_struct: is_struct, field_count: field_count
+                  )
+                  object_classes[obj_addr] = cid
+                  objects[obj_addr] = Array(Int64).new(field_count, 0_i64)
+                  regs[dst_r] = obj_addr
                 when 151 # ObjectGetField
                   obj_id = regs[base_r]
                   f_idx = regs[base_r + 1].to_i
-                  regs[dst_r] = objects[obj_id]?.try(&.[f_idx]?) || 0_i64
+                  if alloc = allocations[obj_id]?
+                    if alloc.freed
+                      boot_messages << "[CITRINE MEMORY ERROR] Use-after-free: read from freed object at 0x#{obj_id.to_s(16)}"
+                      regs[dst_r] = 0_i64
+                    elsif f_idx < 0 || f_idx >= alloc.field_count
+                      boot_messages << "[CITRINE PANIC] Object field index out of bounds: slot #{f_idx} for field_count #{alloc.field_count}"
+                      regs[dst_r] = 0_i64
+                    else
+                      regs[dst_r] = memory[obj_id + 8 + (f_idx * 4)]? || 0_i64
+                    end
+                  elsif obj = objects[obj_id]?
+                    if f_idx < 0 || f_idx >= obj.size
+                      boot_messages << "[CITRINE PANIC] Object field index out of bounds: slot #{f_idx} for size #{obj.size}"
+                      regs[dst_r] = 0_i64
+                    else
+                      regs[dst_r] = obj[f_idx]? || 0_i64
+                    end
+                  else
+                    regs[dst_r] = memory[obj_id + 8 + (f_idx * 4)]? || 0_i64
+                  end
                 when 152 # ObjectSetField
                   obj_id = regs[base_r]
                   f_idx = regs[base_r + 1].to_i
                   val = regs[base_r + 2]
-                  if obj = objects[obj_id]?
-                    while obj.size <= f_idx
-                      obj << 0_i64
+                  if alloc = allocations[obj_id]?
+                    if alloc.freed
+                      boot_messages << "[CITRINE MEMORY ERROR] Use-after-free: write to freed object at 0x#{obj_id.to_s(16)}"
+                    elsif f_idx < 0 || f_idx >= alloc.field_count
+                      boot_messages << "[CITRINE PANIC] Object field index out of bounds: slot #{f_idx} for field_count #{alloc.field_count}"
+                    else
+                      memory[obj_id + 8 + (f_idx * 4)] = val
+                      if obj = objects[obj_id]?
+                        while obj.size <= f_idx; obj << 0_i64; end
+                        obj[f_idx] = val
+                      end
                     end
-                    obj[f_idx] = val
+                  elsif obj = objects[obj_id]?
+                    if f_idx < 0
+                      boot_messages << "[CITRINE PANIC] Object field index out of bounds: slot #{f_idx} < 0"
+                    else
+                      while obj.size <= f_idx; obj << 0_i64; end
+                      obj[f_idx] = val
+                      memory[obj_id + 8 + (f_idx * 4)] = val
+                    end
+                  else
+                    memory[obj_id + 8 + (f_idx * 4)] = val
                   end
                   regs[dst_r] = val
+                when 153 # StructCopy
+                  src_addr = regs[base_r]
+                  if alloc = allocations[src_addr]?
+                    size_bytes = alloc.size_bytes
+                    copy_addr = scratch_pool_ptr
+                    scratch_pool_ptr += size_bytes
+                    (size_bytes // 4).times do |i|
+                      memory[copy_addr + (i * 4)] = memory[src_addr + (i * 4)]? || 0_i64
+                    end
+                    allocations[copy_addr] = AllocationRecord.new(
+                      copy_addr, size_bytes, active_context_name,
+                      freed: false, is_object: true, is_struct: true, field_count: alloc.field_count
+                    )
+                    if cid = object_classes[src_addr]?
+                      object_classes[copy_addr] = cid
+                    end
+                    if obj = objects[src_addr]?
+                      objects[copy_addr] = obj.dup
+                    end
+                    regs[dst_r] = copy_addr
+                  else
+                    regs[dst_r] = src_addr
+                  end
+                when 160 # PointerMalloc
+                  cnt = regs[base_r].to_i
+                  cnt = 1 if cnt <= 0
+                  size_bytes = ((cnt * 4) + 7) & ~7 # 8-byte aligned
+
+                  found_idx = free_list.index { |(_, sz)| sz >= size_bytes }
+                  if found_idx
+                    ptr_addr, _ = free_list.delete_at(found_idx)
+                  else
+                    ptr_addr = next_heap_addr
+                    next_heap_addr += size_bytes
+                  end
+
+                  cnt.times { |i| memory[ptr_addr + (i.to_i64 * 4)] = 0_i64 }
+                  allocations[ptr_addr] = AllocationRecord.new(
+                    ptr_addr, size_bytes, active_context_name,
+                    freed: false, is_object: false, is_struct: false
+                  )
+                  regs[dst_r] = ptr_addr
+                when 161 # PointerGet
+                  addr = regs[base_r]
+                  idx = regs[base_r + 1]
+                  if addr < 0x00100000_i64 && idx == 0_i64
+                    regs[dst_r] = addr
+                  else
+                    target_addr = addr + (idx * 4)
+                    if alloc = allocations[addr]?
+                      if alloc.freed
+                        boot_messages << "[CITRINE MEMORY ERROR] Use-after-free detected at address 0x#{target_addr.to_s(16)}"
+                      end
+                    end
+                    if target_addr == 0x70000010_i64 || target_addr == 0x70000018_i64
+                    regs[dst_r] = simulated_button_press ? 0x4000_i64 : 0_i64
+                  elsif target_addr == 0x10000800_i64
+                    regs[dst_r] = (steps * 13) & 0xFFFF_i64
+                  elsif target_addr == 0x12001000_i64
+                    regs[dst_r] = (steps * 7) & 0xFFFF_i64
+                  elsif arr = arrays[addr]?
+                    if idx < 0 || idx >= arr.size
+                      boot_messages << "[CITRINE PANIC] Array index out of bounds: #{idx}"
+                      regs[dst_r] = 0_i64
+                    else
+                      regs[dst_r] = arr[idx.to_i]? || 0_i64
+                    end
+                  else
+                    regs[dst_r] = memory[target_addr]? || 0_i64
+                  end
+                end
+                when 162 # PointerSet
+                  addr = regs[base_r]
+                  idx = regs[base_r + 1]
+                  val = regs[base_r + 2]
+                  target_addr = addr + (idx * 4)
+                  if alloc = allocations[addr]?
+                    if alloc.freed
+                      boot_messages << "[CITRINE MEMORY ERROR] Use-after-free detected at address 0x#{target_addr.to_s(16)}"
+                    end
+                  end
+                  if target_addr >= 0x00100000_i64 && target_addr < 0x00200000_i64
+                    boot_messages << "[CITRINE PANIC] Memory protection violation: attempt to write to read-only code space at 0x#{target_addr.to_s(16)}"
+                  elsif arr = arrays[addr]?
+                    if idx < 0
+                      boot_messages << "[CITRINE PANIC] Array index out of bounds: #{idx} < 0"
+                    else
+                      while arr.size <= idx.to_i
+                        arr << 0_i64
+                      end
+                      arr[idx.to_i] = val
+                    end
+                  else
+                    memory[target_addr] = val
+                  end
+                  regs[dst_r] = val
+                when 163 # PointerOffset
+                  addr = regs[base_r]
+                  off = regs[base_r + 1]
+                  regs[dst_r] = addr + (off * 4)
+                when 164 # PointerAddress
+                  regs[dst_r] = regs[base_r]
+                when 165 # PointerNew
+                  regs[dst_r] = regs[base_r]
+                when 166 # BoxNew
+                  val = regs[base_r]
+                  box_addr = next_heap_addr
+                  next_heap_addr += 4_i64
+                  memory[box_addr] = val
+                  regs[dst_r] = box_addr
+                when 167 # BoxUnbox
+                  box_addr = regs[base_r]
+                  regs[dst_r] = memory[box_addr]? || 0_i64
+                when 168 # PointerFree
+                  addr = regs[base_r]
+                  if alloc = allocations[addr]?
+                    if alloc.freed
+                      boot_messages << "[CITRINE MEMORY ERROR] Double free detected on pointer 0x#{addr.to_s(16)}"
+                    else
+                      alloc.freed = true
+                      (alloc.size_bytes // 4).times do |i|
+                        memory.delete(addr + (i * 4))
+                      end
+                      objects.delete(addr)
+                      arrays.delete(addr)
+                      free_list << {addr, alloc.size_bytes}
+                    end
+                  elsif memory.has_key?(addr) || objects.has_key?(addr) || arrays.has_key?(addr)
+                    memory.delete(addr)
+                    objects.delete(addr)
+                    arrays.delete(addr)
+                  else
+                    boot_messages << "[CITRINE MEMORY ERROR] Free called on unallocated pointer 0x#{addr.to_s(16)}"
+                  end
+                  regs[dst_r] = 0_i64
+                when 170 # TypeIsA
+                  val = regs[base_r]
+                  target_id = regs[base_r + 1].to_u32
+                  is_match = false
+                  if target_id == TypeKind::Nil.value
+                    is_match = val == 0_i64
+                  elsif target_id == TypeKind::Bool.value
+                    is_match = val == 0_i64 || val == 1_i64
+                  elsif target_id == TypeKind::Int32.value
+                    is_match = val >= -2147483648_i64 && val <= 2147483647_i64
+                  elsif target_id == TypeKind::Float32.value
+                    is_match = true
+                  elsif target_id == TypeKind::String.value
+                    is_match = val < constants.size && constants[val.to_i]?.try(&.type) == 6_u8
+                  elsif target_id == TypeKind::Array.value
+                    is_match = arrays.has_key?(val)
+                  elsif target_id == TypeKind::Pointer.value
+                    is_match = val >= 0x00100000_i64
+                  elsif target_id == TypeKind::Box.value
+                    is_match = val >= 0x00100000_i64
+                  elsif obj_cid = object_classes[val]?
+                    is_match = obj_cid == target_id
+                  end
+                  regs[dst_r] = is_match ? 1_i64 : 0_i64
+                when 171 # TypeAsCast
+                  val = regs[base_r]
+                  regs[dst_r] = val
+                when 180 # ContextSet
+                  s_idx = regs[base_r].to_i
+                  ctx_str = constants[s_idx]?.try(&.str_val) || ""
+                  active_context_name = ctx_str
+                  regs[dst_r] = s_idx.to_i64
+                when 181 # ContextClear
+                  s_idx = regs[base_r].to_i
+                  ctx_str = constants[s_idx]?.try(&.str_val) || ""
+                  reclaimed_bytes = 0_i64
+                  allocations.reject! do |addr, a|
+                    if a.context_name == ctx_str
+                      a.freed = true
+                      (a.size_bytes // 4).times { |i| memory.delete(addr + (i * 4)) }
+                      objects.delete(addr)
+                      arrays.delete(addr)
+                      free_list << {addr, a.size_bytes}
+                      reclaimed_bytes += a.size_bytes
+                      true
+                    else
+                      false
+                    end
+                  end
+                  regs[dst_r] = reclaimed_bytes
+                when 182 # MemoryStats
+                  active_bytes = allocations.values.reject(&.freed).sum(&.size_bytes)
+                  regs[dst_r] = active_bytes.to_i64
+                when 185 # GCCycle / GC.collect
+                  marked_objects = Set(Int64).new
+                  marked_arrays = Set(Int64).new
+                  (0...regs.size).each do |r|
+                    val = regs[r]
+                    marked_objects << val if objects.has_key?(val)
+                    marked_arrays << val if arrays.has_key?(val)
+                  end
+                  memory.each do |addr, val|
+                    if addr >= 0x00300000_i64 && addr < 0x00310000_i64
+                      marked_objects << val if objects.has_key?(val)
+                      marked_arrays << val if arrays.has_key?(val)
+                    end
+                  end
+                  changed = true
+                  while changed
+                    changed = false
+                    marked_objects.to_a.each do |oid|
+                      if fields = objects[oid]?
+                        fields.each do |fval|
+                          if objects.has_key?(fval) && !marked_objects.includes?(fval)
+                            marked_objects << fval
+                            changed = true
+                          elsif arrays.has_key?(fval) && !marked_arrays.includes?(fval)
+                            marked_arrays << fval
+                            changed = true
+                          end
+                        end
+                      end
+                    end
+                    marked_arrays.to_a.each do |aid|
+                      if elems = arrays[aid]?
+                        elems.each do |eval|
+                          if objects.has_key?(eval) && !marked_objects.includes?(eval)
+                            marked_objects << eval
+                            changed = true
+                          elsif arrays.has_key?(eval) && !marked_arrays.includes?(eval)
+                            marked_arrays << eval
+                            changed = true
+                          end
+                        end
+                      end
+                    end
+                  end
+                  reclaimed = 0_i64
+                  objects.reject! do |oid, _|
+                    if marked_objects.includes?(oid)
+                      false
+                    else
+                      reclaimed += 1
+                      true
+                    end
+                  end
+                  arrays.reject! do |aid, _|
+                    if marked_arrays.includes?(aid)
+                      false
+                    else
+                      reclaimed += 1
+                      true
+                    end
+                  end
+                  regs[dst_r] = reclaimed
+                when 186 # StringStrip
+                  s_val = regs[base_r]
+                  raw = if s_val < constants.size && constants[s_val.to_i]?.try(&.type) == 6_u8
+                          constants[s_val.to_i].str_val
+                        else
+                          strings[s_val.to_i]? || ""
+                        end
+                  stripped = raw.strip
+                  strings << stripped unless strings.includes?(stripped)
+                  c_idx = constants.index { |c| c.type == 6_u8 && c.str_val == stripped } ||
+                          (constants << CVal.new(6_u8, 0_u32, stripped); constants.size - 1)
+                  regs[dst_r] = c_idx.to_i64
+                when 187 # StringDowncase
+                  s_val = regs[base_r]
+                  raw = if s_val < constants.size && constants[s_val.to_i]?.try(&.type) == 6_u8
+                          constants[s_val.to_i].str_val
+                        else
+                          strings[s_val.to_i]? || ""
+                        end
+                  down = raw.downcase
+                  strings << down unless strings.includes?(down)
+                  c_idx = constants.index { |c| c.type == 6_u8 && c.str_val == down } ||
+                          (constants << CVal.new(6_u8, 0_u32, down); constants.size - 1)
+                  regs[dst_r] = c_idx.to_i64
+                when 188 # StringUpcase
+                  s_val = regs[base_r]
+                  raw = if s_val < constants.size && constants[s_val.to_i]?.try(&.type) == 6_u8
+                          constants[s_val.to_i].str_val
+                        else
+                          strings[s_val.to_i]? || ""
+                        end
+                  up = raw.upcase
+                  strings << up unless strings.includes?(up)
+                  c_idx = constants.index { |c| c.type == 6_u8 && c.str_val == up } ||
+                          (constants << CVal.new(6_u8, 0_u32, up); constants.size - 1)
+                  regs[dst_r] = c_idx.to_i64
+                when 189 # StringIncludes
+                  s_val = regs[base_r]
+                  sub_val = regs[base_r + 1]
+                  raw = if s_val < constants.size && constants[s_val.to_i]?.try(&.type) == 6_u8
+                          constants[s_val.to_i].str_val
+                        else
+                          strings[s_val.to_i]? || ""
+                        end
+                  sub = if sub_val < constants.size && constants[sub_val.to_i]?.try(&.type) == 6_u8
+                          constants[sub_val.to_i].str_val
+                        else
+                          strings[sub_val.to_i]? || ""
+                        end
+                  regs[dst_r] = raw.includes?(sub) ? 1_i64 : 0_i64
+                when 190 # RegexNew
+                  s_val = regs[base_r]
+                  pat = if s_val < constants.size && constants[s_val.to_i]?.try(&.type) == 6_u8
+                          constants[s_val.to_i].str_val
+                        else
+                          strings[s_val.to_i]? || ""
+                        end
+                  rid = next_regex_id
+                  next_regex_id += 1
+                  compiled_regexes[rid] = SimpleRegex.new(pat)
+                  regs[dst_r] = rid
+                when 191 # RegexMatch
+                  arg0 = regs[base_r]
+                  arg1 = regs[base_r + 1]
+                  target_str = ""
+                  re : SimpleRegex? = nil
+
+                  if compiled_regexes.has_key?(arg1)
+                    re = compiled_regexes[arg1]
+                    target_str = if arg0 < constants.size && constants[arg0.to_i]?.try(&.type) == 6_u8
+                                   constants[arg0.to_i].str_val
+                                 else
+                                   strings[arg0.to_i]? || ""
+                                 end
+                  elsif compiled_regexes.has_key?(arg0)
+                    re = compiled_regexes[arg0]
+                    target_str = if arg1 < constants.size && constants[arg1.to_i]?.try(&.type) == 6_u8
+                                   constants[arg1.to_i].str_val
+                                 else
+                                   strings[arg1.to_i]? || ""
+                                 end
+                  else
+                    pat = if arg1 < constants.size && constants[arg1.to_i]?.try(&.type) == 6_u8
+                            constants[arg1.to_i].str_val
+                          else
+                            strings[arg1.to_i]? || ""
+                          end
+                    re = SimpleRegex.new(pat)
+                    target_str = if arg0 < constants.size && constants[arg0.to_i]?.try(&.type) == 6_u8
+                                   constants[arg0.to_i].str_val
+                                 else
+                                   strings[arg0.to_i]? || ""
+                                 end
+                  end
+
+                  m_pos = re.try(&.match(target_str))
+                  regs[dst_r] = m_pos ? m_pos.to_i64 : -1_i64
+                when 192 # StringStartsWith
+                  s_val = regs[base_r]
+                  sub_val = regs[base_r + 1]
+                  raw = if s_val < constants.size && constants[s_val.to_i]?.try(&.type) == 6_u8
+                          constants[s_val.to_i].str_val
+                        else
+                          strings[s_val.to_i]? || ""
+                        end
+                  sub = if sub_val < constants.size && constants[sub_val.to_i]?.try(&.type) == 6_u8
+                          constants[sub_val.to_i].str_val
+                        else
+                          strings[sub_val.to_i]? || ""
+                        end
+                  regs[dst_r] = raw.starts_with?(sub) ? 1_i64 : 0_i64
+                when 193 # StringEndsWith
+                  s_val = regs[base_r]
+                  sub_val = regs[base_r + 1]
+                  raw = if s_val < constants.size && constants[s_val.to_i]?.try(&.type) == 6_u8
+                          constants[s_val.to_i].str_val
+                        else
+                          strings[s_val.to_i]? || ""
+                        end
+                  sub = if sub_val < constants.size && constants[sub_val.to_i]?.try(&.type) == 6_u8
+                          constants[sub_val.to_i].str_val
+                        else
+                          strings[sub_val.to_i]? || ""
+                        end
+                  regs[dst_r] = raw.ends_with?(sub) ? 1_i64 : 0_i64
+                when 194 # StringSplit
+                  s_val = regs[base_r]
+                  delim_val = regs[base_r + 1]
+                  raw = if s_val < constants.size && constants[s_val.to_i]?.try(&.type) == 6_u8
+                          constants[s_val.to_i].str_val
+                        else
+                          strings[s_val.to_i]? || ""
+                        end
+                  delim = if delim_val < constants.size && constants[delim_val.to_i]?.try(&.type) == 6_u8
+                            constants[delim_val.to_i].str_val
+                          else
+                            strings[delim_val.to_i]? || " "
+                          end
+                  parts = raw.split(delim)
+                  arr_id = next_arr_id
+                  next_arr_id += 1
+                  arr_elems = [] of Int64
+                  parts.each do |part|
+                    strings << part unless strings.includes?(part)
+                    c_idx = constants.index { |c| c.type == 6_u8 && c.str_val == part } ||
+                            (constants << CVal.new(6_u8, 0_u32, part); constants.size - 1)
+                    arr_elems << c_idx.to_i64
+                  end
+                  arrays[arr_id] = arr_elems
+                  regs[dst_r] = arr_id
+                when 195 # StringConcat
+                  s1_val = regs[base_r]
+                  s2_val = regs[base_r + 1]
+                  raw1 = if s1_val >= 0 && s1_val < constants.size && constants[s1_val.to_i]?.try(&.type) == 6_u8
+                           constants[s1_val.to_i].str_val
+                         elsif strings[s1_val.to_i]?
+                           strings[s1_val.to_i]
+                         else
+                           s1_val.to_s
+                         end
+                  raw2 = if s2_val >= 0 && s2_val < constants.size && constants[s2_val.to_i]?.try(&.type) == 6_u8
+                           constants[s2_val.to_i].str_val
+                         elsif strings[s2_val.to_i]?
+                           strings[s2_val.to_i]
+                         else
+                           s2_val.to_s
+                         end
+                  joined = raw1 + raw2
+                  strings << joined unless strings.includes?(joined)
+                  c_idx = constants.index { |c| c.type == 6_u8 && c.str_val == joined } ||
+                          (constants << CVal.new(6_u8, 0_u32, joined); constants.size - 1)
+                  regs[dst_r] = c_idx.to_i64
+                when 196 # ToString
+                  val = regs[base_r]
+                  hint = (base_r + 1 < regs.size) ? regs[base_r + 1] : 0_i64
+                  val_str = case hint
+                            when 2 # Bool
+                              val != 0_i64 ? "true" : "false"
+                            when 3 # String
+                              if val >= 0 && val < constants.size && constants[val.to_i]?.try(&.type) == 6_u8
+                                constants[val.to_i].str_val
+                              elsif strings[val.to_i]?
+                                strings[val.to_i]
+                              else
+                                val.to_s
+                              end
+                            else # 0 (Int), 1 (Float), default
+                              val.to_s
+                            end
+                  strings << val_str unless strings.includes?(val_str)
+                  c_idx = constants.index { |c| c.type == 6_u8 && c.str_val == val_str } ||
+                          (constants << CVal.new(6_u8, 0_u32, val_str); constants.size - 1)
+                  regs[dst_r] = c_idx.to_i64
                 end
               end
             end
@@ -1911,7 +2594,7 @@ module Citrine
             end
 
             loop_start = (phases.size > 1 && phases[0].message.nil? && !has_button_checks && !is_animated) ? 1 : 0
-            return {phases, boot_messages, loop_start, is_animated, false} if phases.size > 0
+            return {phases, boot_messages, loop_start, is_animated, false}
           end
         rescue ex
           STDERR.puts "[parse_cbc Exception] #{ex.class}: #{ex.message}\n#{ex.backtrace.join("\n")}"

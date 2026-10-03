@@ -74,6 +74,10 @@ module Citrine
       # Do not free if it's a declared local variable
       unless @local_map.values.includes?(reg)
         @free_temps << reg unless @free_temps.includes?(reg)
+        while @next_reg > 0 && @free_temps.includes?((@next_reg - 1).to_u8)
+          @free_temps.delete((@next_reg - 1).to_u8)
+          @next_reg -= 1
+        end
       end
     end
 

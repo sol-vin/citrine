@@ -13,6 +13,11 @@ module Citrine
       def self.run(args : Array(String))
         target = args.reject(&.starts_with?("-")).first?
 
+        if args.includes?("--mem-check")
+          MemCheckCommand.run(args.reject { |a| a == "--mem-check" })
+          return
+        end
+
         is_ci = args.includes?("--ci") || args.includes?("--batch")
         with_r2 = args.includes?("--r2")
         no_break = args.includes?("--no-break") || args.includes?("--run")

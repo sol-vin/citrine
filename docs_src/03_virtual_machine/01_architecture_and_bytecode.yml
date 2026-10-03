@@ -1,25 +1,156 @@
 id: VIRTUAL_MACHINE
-title: Citrine Virtual Machine Architecture
-summary: Direct-threaded bytecode interpreter, register windows, and zero-GC memory model.
+title: Citrine Virtual Machine Architecture & Execution Model
+summary: Register-based 32-bit virtual machine architecture, direct-threaded C runtime, and MIPS R5900 JIT emitter for PlayStation 2.
 track: 03_virtual_machine
 overview: |
-  Citrine VM executes fixed-width 32-bit instructions with a register-based architecture optimized for MIPS.
-  It enforces zero-allocation loops through frame bump allocators, avoiding Garbage Collector pauses.
+  The Citrine Virtual Machine (Citrine VM) is a high-performance register-based virtual machine designed specifically
+  for the Sony PlayStation 2 Emotion Engine (EE MIPS R5900 @ 294.912 MHz) and Graphic Synthesizer (GS).
+  
+  Unlike stack-based runtimes which require excessive push/pop operations and memory bus round-trips, Citrine VM
+  employs a compact, 32-bit fixed-length register architecture. Every instruction fits cleanly into a 32-bit word,
+  matching the native bus width and instruction cacheline alignment of the Emotion Engine.
+  
+  Execution occurs through dual complementary engines:
+  1. Direct-threaded C runtime (`runtime/src/citrine_vm.c`) utilizing GCC computed gotos (`&&label`) and pointer-indexed jump tables for maximal branch-prediction throughput on host and real hardware.
+  2. Native MIPS R5900 JIT / Machine Code Emitter (`src/citrine/iso/elf_builder.cr` and `src/citrine/mips/mips_emitter.cr`) which translates Citrine bytecode directly into native MIPS instructions executed directly by the Emotion Engine pipeline.
 related_sources:
   - "runtime/src/citrine_vm.c"
+  - "src/citrine/compiler/opcode.cr"
   - "src/citrine/compiler/bytecode_compiler.cr"
+  - "src/citrine/iso/elf_builder.cr"
+  - "src/citrine/mips/mips_emitter.cr"
 sections:
   - id: instruction_encoding
-    title: 32-bit Opcode Encoding
-    summary: Compact 32-bit instruction format with 8-bit registers and 16-bit immediate fields.
+    title: 32-Bit Instruction Word Formats
+    summary: Compact 32-bit fixed-width instruction encodings optimized for MIPS cacheline alignment.
     content: |
-      Instructions follow 3 primary encodings:
-      - `ABC`: 8-bit Opcode, 8-bit Reg Dest, 8-bit Reg A, 8-bit Reg B
-      - `AB_IMM`: 8-bit Opcode, 8-bit Reg Dest, 16-bit Immediate (Unsigned)
-      - `BRANCH`: 8-bit Opcode, 8-bit Reg Cond, 16-bit Relative Signed Offset
-  - id: zero_gc_arena
-    title: Zero-GC Memory Arenas
-    summary: Per-frame linear bump arenas reset every V-Blank interval.
+      All Citrine instructions are exactly 32 bits (4 bytes) wide, stored in Little-Endian byte order.
+      There are three primary instruction encodings:
+      
+      ### 1. Three-Register Format (ABC)
+      Used for register-to-register arithmetic, bitwise logic, and comparisons.
+      ```text
+       31       24 23       16 15        8 7         0
+      +-----------+-----------+-----------+-----------+
+      |  Opcode   |  Dst Reg  |   Reg A   |   Reg B   |
+      |  (8 bits) |  (8 bits) |  (8 bits) |  (8 bits) |
+      +-----------+-----------+-----------+-----------+
+      ```
+      - `Opcode [31:24]`: 8-bit instruction opcode identifier (0x00 - 0xFF).
+      - `Dst Reg [23:16]`: Destination register index ($r0 - $r255).
+      - `Reg A   [15:8]`: First source register index ($r0 - $r255).
+      - `Reg B   [7:0]`: Second source register index ($r0 - $r255).
+      
+      ### 2. Immediate Format (AB_IMM)
+      Used for loading 16-bit integer constants, native function dispatch, and indexing.
+      ```text
+       31       24 23       16 15                    0
+      +-----------+-----------+-----------------------+
+      |  Opcode   |  Dst Reg  |    Immediate Value    |
+      |  (8 bits) |  (8 bits) |   (16-bit unsigned)   |
+      +-----------+-----------+-----------------------+
+      ```
+      - `Opcode [31:24]`: 8-bit instruction opcode identifier.
+      - `Dst Reg [23:16]`: Destination register index or parameter base register.
+      - `Immediate [15:0]`: 16-bit unsigned immediate value or Native Function ID.
+      
+      ### 3. Branch / Relative Jump Format (BRANCH)
+      Used for conditional and unconditional relative branching.
+      ```text
+       31       24 23       16 15                    0
+      +-----------+-----------+-----------------------+
+      |  Opcode   | Cond Reg  |   Relative PC Offset  |
+      |  (8 bits) |  (8 bits) |    (16-bit signed)    |
+      +-----------+-----------+-----------------------+
+      ```
+      - `Opcode [31:24]`: Branch opcode (`Jump`, `JumpIfTrue`, `JumpIfFalse`).
+      - `Cond Reg [23:16]`: Condition test register (evaluated for truthiness).
+      - `Relative PC Offset [15:0]`: 16-bit signed instruction offset relative to the next instruction (`PC = PC + 1 + offset`).
+    examples:
+      - |
+        ```crystal
+        # Encoding ABC and AB_IMM instructions
+        inst_add = Citrine::Instruction.encode_abc(Citrine::Opcode::Add, dst: 0_u8, a: 1_u8, b: 2_u8)
+        inst_imm = Citrine::Instruction.encode_ab_imm(Citrine::Opcode::LoadInt, dst: 4_u8, imm: 100_u16)
+        ```
+  - id: register_file
+    title: "Virtual Register Architecture ($r0..$r255)"
+    summary: Flat 256-register file per execution frame with zero register and calling conventions.
     content: |
-      Dynamic allocations inside the frame loop use the 64KB frame arena. At each `Citrine.begin_drawing`
-      call, the bump arena offset is reset to zero, ensuring constant 60 FPS frame times without GC pauses.
+      Citrine VM provides a flat 256-slot virtual register file per frame, mapped to registers `$r0` through `$r255`.
+      Each register stores a 64-bit tagged value or raw word representing:
+      - 32-bit signed / unsigned integers
+      - 32-bit IEEE 754 single-precision floats (`Float32`)
+      - Pointers to heap objects, strings, arrays, and structs
+      - 32-bit RGBA packed colors (`ColorVal`)
+      - Vector2 coordinates (`Vec2Val`)
+      
+      ### Register Conventions
+      - `$r0`: Return value register and primary accumulator. For functions returning a result, the return value is always placed in `$r0`.
+      - `$r1` - `$r15`: Parameter passing registers. Arguments to function calls are placed sequentially in `$r1`, `$r2`, etc.
+      - `$r16` - `$r255`: Local variables, intermediate expression temporaries, and register allocations managed by `Citrine::Compiler::RegisterAllocator`.
+    examples:
+      - |
+        ```crystal
+        # Function parameters map directly to virtual registers $r1, $r2:
+        def calculate_velocity(pos : Int32, delta_time : Int32) : Int32
+          # pos is in $r1, delta_time is in $r2
+          # Return product in $r0
+          pos * delta_time
+        end
+        ```
+  - id: call_frames_and_stack
+    title: Function Call Frames & Calling Convention
+    summary: Call stack semantics, return address preservation, and recursion limits.
+    content: |
+      When a function call is dispatched via `Opcode::Call` (0x32):
+      1. The caller prepares argument registers starting at the callee's expected register base.
+      2. The VM pushes a `CallFrame` containing:
+         - `return_pc`: Program counter of the instruction immediately following the call.
+         - `caller_instructions`: Bytecode instruction pointer of the caller routine.
+         - `caller_dest`: Register index where the return value `$r0` will be copied.
+         - `caller_reg_base`: Base register offset of the caller frame.
+      3. The VM transfers execution to the target function's entry point.
+      4. Upon encountering `Opcode::Return` (0x33), the callee's `$r0` is copied into `caller_dest`, the call frame is popped, and `PC` resumes at `return_pc`.
+      
+      The call stack supports up to 256 nested activation records, preventing stack overflow on PlayStation 2's constrained 32 MB main memory.
+    examples:
+      - |
+        ```crystal
+        # Function calling convention in action
+        def add_points(a : Int32, b : Int32) : Int32
+          a + b # Returns in $r0
+        end
+
+        score = add_points(100, 250)
+        ```
+  - id: dual_execution_model
+    title: "Dual Execution Model: Direct-Threaded C & MIPS JIT"
+    summary: Host-level simulation via direct-threaded C engine and hardware-level execution via MIPS R5900 emitter.
+    content: |
+      Citrine employs two distinct runtime pathways:
+      
+      ### 1. Direct-Threaded C Runtime (`citrine_vm.c`)
+      In the host runner and C runtime, the interpreter loop uses GCC computed labels for instruction dispatch:
+      ```c
+      static void* dispatch_table[] = {
+          &&DO_NOP, &&DO_MOVE, &&DO_LOAD_NIL, &&DO_LOAD_BOOL,
+          &&DO_LOAD_INT, &&DO_LOAD_CONST, /* ... */
+      };
+      #define DISPATCH() goto *dispatch_table[OPCODE(*pc)]
+      ```
+      This eliminates the pipeline stalls associated with large `switch-case` branches, yielding up to 3x higher dispatch throughput.
+      
+      ### 2. MIPS R5900 JIT / Direct Emitter (`elf_builder.cr`)
+      When producing standalone PS2 ELF executables, Citrine's `ElfBuilder` and `MipsEmitter` compile bytecode instructions directly into MIPS machine code:
+      - `Opcode::Add` -> `addu $t0, $t1, $t2`
+      - `Opcode::Sub` -> `subu $t0, $t1, $t2`
+      - `Opcode::LoadInt` -> `lui $t0, %hi(imm); ori $t0, $t0, %lo(imm)`
+      - `Opcode::Jump` -> `j target; nop` (with branch delay slot scheduling)
+      - GS Drawing commands -> Direct DMA Channel 2 (GIF) packet transfers to Graphic Synthesizer registers.
+    examples:
+      - |
+        ```crystal
+        # Building standalone PS2 ELF directly from Crystal code:
+        # citrine iso src/main.cr -o build/game.iso
+        ```

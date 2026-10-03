@@ -1,0 +1,20 @@
+#!/usr/bin/env r2 -i
+# Auto-generated Citrine PS2 Memory Audit Script
+e asm.arch = mips
+e asm.cpu = r5900
+e asm.bits = 32
+e dbg.backend = gdb
+
+# Citrine Memory Map
+f heap.start    = 0x00200000
+f scratch.start = 0x00400000
+f spram.canary  = 0x70000000
+
+# Struct formats
+pf.citrine_obj ii (dword)class_id (dword)field_count
+
+# Automated Memory Inspection Macros
+(ps2_heap_check; pxw 32 @ 0x00200000)
+(ps2_scratch_check; pxw 32 @ 0x00400000)
+(ps2_canary_check; pxw 4 @ 0x70000000)
+(ps2_obj_dump; pf.citrine_obj @ 0x00200000; pxw 16 @ 0x00200008)

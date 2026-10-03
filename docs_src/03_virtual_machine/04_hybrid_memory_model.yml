@@ -1,0 +1,178 @@
+id: HYBRID_MEMORY_MODEL
+title: 4-Tier Hybrid Console Memory Architecture
+summary: Zero-pause console memory model combining per-frame scratch pools, context arenas, explicit pointers, and idle mark-sweep.
+track: 03_virtual_machine
+overview: |
+  Desktop programming languages typically rely on continuous tracing Garbage Collectors (GC) such as Boehm-Demers-Weiser GC.
+  However, on the PlayStation 2's Emotion Engine CPU (294 MHz, 16 KB instruction cache, 8 KB data cache, 32 MB RAM),
+  traditional stop-the-world GCs cause severe frame drops and stuttering.
+  
+  Citrine solves this dilemma through a **4-Tier Hybrid Console Memory Architecture** inspired by AAA PlayStation 2
+  game engines:
+  
+  1. **Tier 1: Per-Frame Scratch Pool (256 KB ring buffer)**: All short-lived strings, interpolations, and math temporaries. Rewound at V-Blank in O(1) time with zero leaks.
+  2. **Tier 2: VM Context Arenas (2–8 MB)**: Bound to scene or game state lifecycles (`make_vm_context(:scene)`). The entire arena is cleared in O(1) upon state transitions.
+  3. **Tier 3: Explicit Pointer Deallocation (`Pointer.malloc` / `ptr.free`)**: For long-lived textures, meshes, sound samples, and heavy buffers where lifecycles are deterministic. Recycles blocks via free-lists and detects use-after-free.
+  4. **Tier 4: Idle V-Blank Mark-Sweep**: Optional safety net executing strictly during the 4–8 ms of idle CPU time while waiting for GS VSync. Cleans up long-lived cyclic objects with zero frame drops.
+related_sources:
+  - "src/citrine/iso/elf_builder.cr"
+  - "src/citrine/cli/mem_check_command.cr"
+  - "runtime/src/citrine_core.c"
+sections:
+  - id: tier_1_scratch_pool
+    title: "Tier 1: Per-Frame Scratch Pool (O(1) Rewind)"
+    summary: Zero-overhead allocation for frame-local strings, math temporaries, and structs.
+    content: |
+      Over 90% of dynamic allocations in games are temporary values needed only during the active frame
+      (e.g., string interpolation `"Score: #{score}"`, temporary vector math, collision queries, and `struct` copies).
+      
+      ### Allocation Semantics
+      - Allocated linearly via a fast bump pointer starting at base `0x00400000`.
+      - Allocation cost is 2 CPU cycles (`ptr = bump; bump += size`).
+      - Every V-Blank (`Citrine.begin_drawing` / `Citrine.end_drawing`), the bump pointer is reset back to base in O(1) time.
+      - **Zero memory leaks and zero GC pauses**.
+      
+      ### Struct Allocation Guarantee
+      In Citrine, all `struct` instances are allocated in Tier 1 scratch memory:
+      ```crystal
+      struct Particle
+        property x : Float32, y : Float32
+      end
+      
+      p = Particle.new # Allocated in Tier 1 scratch pool
+      ```
+      Struct instances are automatically reclaimed at VSync without manual freeing or GC tracking.
+    examples:
+      - |
+        ```crystal
+        # All frame temporaries and structs rewind at EndDrawing with zero GC
+        main_loop do
+          Citrine.begin_drawing
+          score_text = "Score: #{100 * 2}" # Allocates in Tier 1 scratch pool
+          Citrine.draw_text(score_text, 10, 10, 20, Citrine::Color::WHITE)
+          Citrine.end_drawing # O(1) rewind: score_text is automatically reclaimed
+        end
+        ```
+  - id: tier_2_context_arenas
+    title: "Tier 2: VM Context Arenas (make_vm_context)"
+    summary: State-bound memory pools for menus, levels, and scenes.
+    content: |
+      Gameplay assets have lifecycles tied directly to game states. For example, all UI elements, level entities,
+      and dialogue trees created during `:title_screen` are obsolete when entering `:gameplay`.
+      
+      Citrine ties allocations to the active VM Context:
+      ```crystal
+      Citrine.make_vm_context(:level_1) do
+        # All classes and long-lived collections allocated here
+        # belong to the :level_1 context arena.
+      end
+      
+      # Exiting context triggers bulk-freeing of all associated memory in O(1) time!
+      ```
+      This guarantees zero memory fragmentation across scene transitions.
+    examples:
+      - |
+        ```crystal
+        # Scene transition with bulk arena wipe
+        Citrine.make_vm_context(:pause_menu) do
+          menu_options = ["Resume", "Restart", "Quit"]
+          # Render menu...
+        end
+        # menu_options and UI widgets are completely wiped in O(1) upon exit
+        ```
+  - id: tier_3_explicit_pointers
+    title: "Tier 3: Explicit Pointer Deallocation & Safety"
+    summary: Deterministic memory management for textures, sound buffers, and heavy arrays.
+    content: |
+      For large resources such as textures, sound samples, and geometry buffers, developers know the exact lifetime.
+      Citrine exposes deterministic pointer operations:
+      ```crystal
+      ptr = Pointer(UInt32).malloc(256)
+      ptr[0] = 0xDEADBEEF_u32
+      ptr.free
+      ```
+      
+      ### Safety Guarantees & Free-List Recycling
+      - `Pointer.free(ptr)` records the block in an 8-byte aligned free-list for immediate recycling.
+      - Deallocated blocks are flagged as freed in debug builds.
+      - Citrine's debug supervisor traps and reports Use-After-Free (UAF) violations:
+        `[CITRINE MEMORY ERROR] Use-after-free: read from freed object at 0x...`
+    examples:
+      - |
+        ```crystal
+        # Allocating and freeing heavy buffers with RAII or explicit free
+        buffer = Pointer(UInt32).malloc(1024)
+        buffer[0] = 0x12345678_u32
+        buffer.free # recycled into free-list, preventing fragmentation
+        ```
+  - id: tier_4_idle_mark_sweep
+    title: "Tier 4: Idle V-Blank Mark-Sweep Safety Net"
+    summary: Zero-frame-drop conservative collector operating strictly during GS VSync wait.
+    content: |
+      In typical 60 FPS gameplay, the Emotion Engine finishes computing the frame in 8–12 ms, leaving 4–8 ms
+      of idle time while waiting for the Graphic Synthesizer to finish scanning out the raster beam.
+      
+      Rather than wasting these cycles in a busy-wait loop, Citrine utilizes this idle window to run an incremental
+      mark-sweep pass (`NativeId::GCCycle` = 185):
+      - Scans virtual registers `$r0..$r255` and context roots.
+      - Traverses live object graphs.
+      - Sweeps unreachable heap objects into the free-list.
+      - Pauses immediately when V-Blank arrives, resuming on the next frame's idle interval.
+      - **Zero frame drops or gameplay hitches**.
+    examples:
+      - |
+        ```crystal
+        # Triggering explicit GC cycle during idle period if desired
+        Citrine.gc_cycle # Runs mark-sweep during idle VSync wait
+        ```
+  - id: spram_canary_protection
+    title: "Scratchpad RAM (SPRAM) Canary Protection"
+    summary: Hardware-level stack overrun detection using 0xDEADBEEF canary at 0x70000000.
+    content: |
+      The PlayStation 2 Emotion Engine features 16 KB of ultra-fast Scratchpad RAM (SPRAM) mapped at virtual address
+      `0x70000000`. Citrine places critical game engine state, input buffers, and telemetry counters in SPRAM.
+      
+      To detect stack overflows and memory corruption, Citrine plants a 32-bit canary sentinel:
+      - Memory address: `0x70000000`
+      - Canary value: `0xDEADBEEF`
+      - Verification: Checked every frame at V-Blank.
+      - Failure action: If corrupted, execution halts immediately with `[CITRINE PANIC] SPRAM Canary corrupted`.
+    examples:
+      - |
+        ```crystal
+        # Inspecting canary integrity in memory audit
+        # citrine mem-check build/game.cbc
+        # [PASS] SPRAM Canary intact (0xDEADBEEF at 0x70000000)
+        ```
+  - id: audit_and_leak_tools
+    title: "Memory Auditing & Debugging Tools (citrine mem-check)"
+    summary: Command-line audit tools, radare2 scripts, and live emulator telemetry.
+    content: |
+      Citrine provides dedicated tooling for diagnosing memory leaks and safety:
+      
+      ### Automated Memory Audit
+      ```bash
+      citrine mem-check build/game.cbc
+      ```
+      Audits:
+      - Tier 1 Scratch Pool rewind compliance.
+      - Tier 2 Context Arena unclosed allocations.
+      - Tier 3 Unfreed pointers and double-free / use-after-free risks.
+      - SPRAM canary integrity.
+      
+      ### Dynamic radare2 Inspection
+      Attach radare2 to the PCSX2 GDB stub:
+      ```bash
+      citrine debug build/game.cbc --port 28011
+      ```
+      Examine heap and scratchpad memory in r2:
+      ```text
+      [0x00100000]> px 64 @ 0x70000000     # Inspect SPRAM canary and state
+      [0x00100000]> dm                     # Display memory map
+      ```
+    examples:
+      - |
+        ```bash
+        # Audit game memory and canary integrity
+        citrine mem-check examples/01_hello_pad/game.cbc
+        ```

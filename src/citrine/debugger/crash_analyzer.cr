@@ -96,7 +96,30 @@ module Citrine
           )
         end
 
-        # 2. EE Hardware Exception
+        # 2. Memory Safety Error
+        if log_line.includes?("[CITRINE MEMORY ERROR]")
+          msg = log_line.gsub(/.*\[CITRINE MEMORY ERROR\]\s*/, "").strip
+          fault_type = "Citrine Memory Safety Violation"
+          remedy = "Verify pointer lifetime, check for double frees, use-after-free, or out-of-bounds pointer arithmetic."
+          if msg.includes?("Double free")
+            fault_type = "Heap Double Free Detected"
+            remedy = "Ensure Pointer.free is called at most once per allocated buffer, or rely on VM context arenas."
+          elsif msg.includes?("Use-after-free")
+            fault_type = "Heap Use-After-Free Detected"
+            remedy = "Do not access pointer or object fields after freeing the memory block or exiting the context arena."
+          elsif msg.includes?("unallocated")
+            fault_type = "Free on Unallocated Pointer"
+            remedy = "Pointer.free was called on an invalid or already remapped memory address."
+          end
+
+          return CrashReport.new(
+            fault_type: fault_type,
+            message: msg,
+            remedy: remedy
+          )
+        end
+
+        # 3. EE Hardware Exception
         if log_line.includes?("Unhandled Exception") || log_line.includes?("TLB Miss") || log_line.includes?("Bus Error")
           return CrashReport.new(
             fault_type: "Emotion Engine Hardware Exception",
