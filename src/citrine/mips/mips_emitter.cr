@@ -57,6 +57,10 @@ module Citrine
         emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x24_u32)
       end
 
+      def xor_(rd : Int32, rs : Int32, rt : Int32)
+        emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x26_u32)
+      end
+
       def nor(rd : Int32, rs : Int32, rt : Int32)
         emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x27_u32)
       end
@@ -159,6 +163,10 @@ module Citrine
 
       def syscall_inst
         emit(0x0000000C_u32)
+      end
+
+      def mfc0(rt : Int32, rd : Int32)
+        emit((0x10_u32 << 26) | (rt.to_u32 << 16) | (rd.to_u32 << 11))
       end
 
       def j(target_label : String)

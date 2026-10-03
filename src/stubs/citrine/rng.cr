@@ -1,7 +1,7 @@
-# Opal Random Number Generation Suite
+# Citrine Random Number Generation Suite
 # Deterministic PRNG (XorShift64* / PCG), Gaussian Distribution (Box-Muller & Irwin-Hall), and Coherent Perlin Gradient Noise
 
-module Opal
+module Citrine
   module RNG
     # Fast 64-bit XorShift* pseudo-random number generator
     class PRNG
@@ -152,7 +152,7 @@ module Opal
         abb = @@perm[@@perm[@@perm[xi] + yi + 1] + zi + 1]
         baa = @@perm[@@perm[@@perm[xi + 1] + yi] + zi]
         bba = @@perm[@@perm[@@perm[xi + 1] + yi + 1] + zi]
-        bab = @@perm[@@perm[@@perm[xi + 1] + yi] + zi + 1]
+        bab = @@perm[@@perm[@@perm[xi + 1] + yi + 1] + zi + 1]
         bbb = @@perm[@@perm[@@perm[xi + 1] + yi + 1] + zi + 1]
 
         x1 = lerp(grad(aaa, xf, yf, zf), grad(baa, xf - 1.0_f32, yf, zf), u)
@@ -212,5 +212,17 @@ module Opal
     def self.perlin(x : Float32, y : Float32 = 0.0_f32, z : Float32 = 0.0_f32) : Float32
       Perlin.noise(x, y, z)
     end
+  end
+
+  def self.rand : Float32
+    RNG.rand
+  end
+
+  def self.rand(max : Int32) : Int32
+    RNG.rand(max)
+  end
+
+  def self.rand(min : Int32, max : Int32) : Int32
+    RNG.rand(min, max)
   end
 end

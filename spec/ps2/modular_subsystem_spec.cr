@@ -34,16 +34,16 @@ describe "Citrine PS2 Modular Subsystems: Require Out Non-Base" do
     result.should_have_output("[CITRINE TEST] Pure Crystal Vector2D computation: PASS")
   end
 
-  it "verifies optional Opal RNG subsystem requires on demand without polluting base on PS2" do
+  it "verifies optional Citrine RNG subsystem requires on demand without polluting base on PS2" do
     tc = Citrine::Spec::Ps2TestCase.new("modular_optional_rng_test")
     tc.source(<<-CR
-      require "opal/rng"
+      require "citrine/rng"
 
-      rng = Opal::RNG::PRNG.new(123456789_u64)
+      rng = Citrine::RNG::PRNG.new(123456789_u64)
       val = rng.next_int_to(100)
 
       if val >= 0 && val <= 100
-        debug_puts "[CITRINE TEST] Optional opal/rng subsystem on demand: PASS"
+        debug_puts "[CITRINE TEST] Optional citrine/rng subsystem on demand: PASS"
       end
     CR
     )
@@ -52,6 +52,6 @@ describe "Citrine PS2 Modular Subsystems: Require Out Non-Base" do
 
     result = tc.boot_pcsx2(timeout: 7.seconds)
     result.should_boot_cleanly
-    result.should_have_output("[CITRINE TEST] Optional opal/rng subsystem on demand: PASS")
+    result.should_have_output("[CITRINE TEST] Optional citrine/rng subsystem on demand: PASS")
   end
 end

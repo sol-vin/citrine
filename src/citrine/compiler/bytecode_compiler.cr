@@ -615,6 +615,8 @@ module Citrine
           val_type = "Bool"
         elsif node.value.is_a?(Crystal::NumberLiteral)
           val_type = "Int"
+        elsif node.value.is_a?(Crystal::ArrayLiteral)
+          val_type = "Array"
         end
         if val_type
           @var_types[target_name] = val_type
@@ -1273,10 +1275,11 @@ module Citrine
     ) : UInt8
       dest = allocator.alloc_temp
       obj_str = node.obj ? node.obj.to_s : ""
-      # Binary and Unary Operators
       is_collection_push = obj_str.downcase.includes?("arr") || obj_str.downcase.includes?("list") ||
                            obj_str.downcase.includes?("io") || obj_str.downcase.includes?("buf") ||
-                           node.obj.is_a?(Crystal::ArrayLiteral) || node.args.first?.is_a?(Crystal::StringLiteral)
+                           (node.obj.is_a?(Crystal::Var) && @var_types[node.obj.as(Crystal::Var).name]?.try { |t| t.starts_with?("Array") || t.includes?("IO") }) ||
+                           node.obj.is_a?(Crystal::ArrayLiteral) || node.args.first?.is_a?(Crystal::StringLiteral) ||
+                           (node.name == "<<" && node.args.first?.try { |arg| !arg.is_a?(Crystal::NumberLiteral) && !(arg.is_a?(Crystal::Var) && @var_types[arg.as(Crystal::Var).name]? == "Int") })
 
       if ["+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "&", "|", "^", "<<", ">>", "&*", "&+", "&-"].includes?(node.name) && node.obj && node.args.size == 1 && !(node.name == "<<" && is_collection_push)
         is_string_add = (node.name == "+") && (

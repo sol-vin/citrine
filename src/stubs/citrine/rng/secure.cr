@@ -1,4 +1,4 @@
-# Opal Secure Hardware Multi-Entropy Harvester for PlayStation 2
+# Citrine Secure Hardware Multi-Entropy Harvester for PlayStation 2
 # Combines:
 # 1. EE 294.912 MHz CPU cycle count (Timer 0 / COP0 Count)
 # 2. Timer 1 H-Blank counter (~15.734 kHz horizontal retrace clock)
@@ -7,7 +7,7 @@
 # 5. CDVD drive seek / spin timing latency
 # Cryptographically diffuses entropy using SplitMix64 / SipHash mixing rounds.
 
-module Opal
+module Citrine
   module RNG
     module Secure
       @@entropy_pool : UInt64 = 0x517cc1b727220a95_u64

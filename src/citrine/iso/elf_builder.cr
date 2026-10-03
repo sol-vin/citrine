@@ -116,7 +116,7 @@ module Citrine
           DrawCommand.new(DrawCommand::Type::Rect, 0, 442, 640, 6, color: 0xFF808080_u32),
           DrawCommand.new(DrawCommand::Type::Rect, 0, 0, 6, 448, color: 0xFF808080_u32),
           DrawCommand.new(DrawCommand::Type::Rect, 634, 0, 6, 448, color: 0xFF808080_u32),
-          DrawCommand.new(DrawCommand::Type::Text, 120, 420, 14, 0, color: 0xFF00FFFF_u32, text: "CROSS (X): SPAWN LOGO | TRIANGLE: RESET (1)")
+          DrawCommand.new(DrawCommand::Type::Text, 60, 420, 14, 0, color: 0xFF00FFFF_u32, text: "CROSS: +1 | R1: +10 | TRIANGLE: RESET | STRESS TEST")
         ]
         static_dvd_packet = GifPacketBuilder.build_draw_packet(static_cmds)
         static_dvd_qwc = (static_dvd_packet.size // 16).to_u16
@@ -222,6 +222,10 @@ module Citrine
       square_msg_addr = curr_addr
       curr_addr += square_msg_str.bytesize.to_u32
 
+      r1_msg_str = "[CITRINE] Button R1 pressed!\n\0"
+      r1_msg_addr = curr_addr
+      curr_addr += r1_msg_str.bytesize.to_u32
+
       emitter = MipsEmitter.new(0x00100000_u32)
 
       phase0_delay = phases.empty? ? 0_u32 : phases[0].delay_frames
@@ -246,8 +250,20 @@ module Citrine
         emitter.ori(T1, ZERO, 1)
         emitter.sw(T1, 32, T0)      # logo_count = 1 at 0x70000020
         emitter.sw(ZERO, 36, T0)    # debounce = 0   at 0x70000024
-        emitter.ori(T1, ZERO, 42)
-        emitter.sw(T1, 40, T0)      # rng_seed = 42  at 0x70000028
+        # Harvest hardware entropy: EE COP0 Count ($9) XOR Timer 1 Count (0x10000800) XOR GS CSR (0x12001000)
+        emitter.mfc0(T1, 9)
+        emitter.lui(T2, 0x1000)
+        emitter.lw(T3, 0x0800, T2)  # Timer 1 count
+        emitter.xor_(T1, T1, T3)
+        emitter.lui(T2, 0x1200)
+        emitter.lw(T3, 0x1000, T2)  # GS CSR
+        emitter.xor_(T1, T1, T3)
+        # Ensure seed is non-zero
+        emitter.bnez(T1, "dvd_seed_ready")
+        emitter.nop
+        emitter.ori(T1, ZERO, 0x1337)
+        emitter.label("dvd_seed_ready")
+        emitter.sw(T1, 40, T0)      # rng_seed at 0x70000028
         emitter.sw(ZERO, 44, T0)    # manual_override = 0 at 0x7000002C
 
         # Logo 0 at 0x70000100:
@@ -544,6 +560,14 @@ module Citrine
       emitter.ori(T6, ZERO, 0x5a)
       emitter.beq(T7, T6, "sio_set_square")
       emitter.nop
+      # R1 (0x0800): 'r' (0x72), 'R' (0x52)
+      emitter.ori(T6, ZERO, 0x72)
+      emitter.beq(T7, T6, "sio_set_r1")
+      emitter.nop
+      emitter.ori(T6, ZERO, 0x52)
+      emitter.beq(T7, T6, "sio_set_r1")
+      emitter.nop
+
       emitter.j("sio_rx_done")
       emitter.nop
 
@@ -571,6 +595,13 @@ module Citrine
       emitter.label("sio_set_square")
       emitter.lw(T5, 16, T0)
       emitter.ori(T5, T5, 0x8000)
+      emitter.sw(T5, 16, T0)
+      emitter.j("sio_rx_done")
+      emitter.nop
+
+      emitter.label("sio_set_r1")
+      emitter.lw(T5, 16, T0)
+      emitter.ori(T5, T5, 0x0800)
       emitter.sw(T5, 16, T0)
 
       emitter.label("sio_rx_done")
@@ -622,10 +653,21 @@ module Citrine
 
       emitter.label("chk_btn_square")
       emitter.andi(T7, T8, 0x8000)
-      emitter.beqz(T7, "btn_chk_done")
+      emitter.beqz(T7, "chk_btn_r1")
       emitter.nop
       emitter.lui(A0, (square_msg_addr >> 16).to_i32)
       emitter.ori(A0, A0, (square_msg_addr & 0xFFFF).to_i32)
+      emitter.jal("debug_puts")
+      emitter.nop
+      emitter.lui(T0, 0x7000)
+      emitter.lw(T8, 24, T0)
+
+      emitter.label("chk_btn_r1")
+      emitter.andi(T7, T8, 0x0800)
+      emitter.beqz(T7, "btn_chk_done")
+      emitter.nop
+      emitter.lui(A0, (r1_msg_addr >> 16).to_i32)
+      emitter.ori(A0, A0, (r1_msg_addr & 0xFFFF).to_i32)
       emitter.jal("debug_puts")
       emitter.nop
       emitter.lui(T0, 0x7000)
@@ -653,12 +695,17 @@ module Citrine
         emitter.bnez(T7, "dvd_do_reset")
         emitter.nop
 
-        # 2. Cross (0x4000): spawn new logo if logo_count < 16
-        emitter.andi(T7, T5, 0x4000)
-        emitter.bnez(T7, "dvd_do_spawn")
+        # 2. R1 (0x0800): stress test spawn 10 logos
+        emitter.andi(T7, T5, 0x0800)
+        emitter.bnez(T7, "dvd_do_spawn_10")
         emitter.nop
 
-        # 3. Autonomous Demo Mode (if no manual interaction has occurred)
+        # 3. Cross (0x4000): spawn 1 logo
+        emitter.andi(T7, T5, 0x4000)
+        emitter.bnez(T7, "dvd_do_spawn_1")
+        emitter.nop
+
+        # 4. Autonomous Demo Mode (if no manual interaction has occurred)
         emitter.bnez(T8, "dvd_buttons_done")
         emitter.nop
         emitter.lw(T1, 4, T0) # T1 = frame_counter
@@ -666,13 +713,13 @@ module Citrine
         emitter.divu(T1, T6)
         emitter.mfhi(T2) # T2 = frame % 1200
         emitter.ori(T6, ZERO, 240)
-        emitter.beq(T2, T6, "dvd_do_spawn")
+        emitter.beq(T2, T6, "dvd_do_spawn_1")
         emitter.nop
         emitter.ori(T6, ZERO, 420)
-        emitter.beq(T2, T6, "dvd_do_spawn")
+        emitter.beq(T2, T6, "dvd_do_spawn_1")
         emitter.nop
         emitter.ori(T6, ZERO, 600)
-        emitter.beq(T2, T6, "dvd_do_spawn")
+        emitter.beq(T2, T6, "dvd_do_spawn_1")
         emitter.nop
         emitter.ori(T6, ZERO, 1199)
         emitter.beq(T2, T6, "dvd_do_reset")
@@ -685,18 +732,29 @@ module Citrine
         emitter.nop
         emitter.ori(T4, ZERO, 1)
         emitter.sw(T4, 32, T0)  # logo_count = 1
-        emitter.ori(T3, ZERO, 12)
-        emitter.sw(T3, 36, T0)  # debounce = 12
+        emitter.ori(T3, ZERO, 10)
+        emitter.sw(T3, 36, T0)  # debounce = 10
         emitter.j("dvd_buttons_done")
         emitter.nop
 
-        emitter.label("dvd_do_spawn")
+        emitter.label("dvd_do_spawn_10")
         emitter.bnez(T3, "dvd_buttons_done")
         emitter.nop
-        emitter.sltiu(T7, T4, 16)
-        emitter.beqz(T7, "dvd_buttons_done")
+        emitter.ori(S4, ZERO, 10)
+        emitter.j("dvd_spawn_loop")
         emitter.nop
 
+        emitter.label("dvd_do_spawn_1")
+        emitter.bnez(T3, "dvd_buttons_done")
+        emitter.nop
+        emitter.ori(S4, ZERO, 1)
+
+        emitter.label("dvd_spawn_loop")
+        emitter.sltiu(T7, T4, 500)
+        emitter.beqz(T7, "dvd_spawn_end")
+        emitter.nop
+
+        emitter.lui(T0, 0x7000)
         # Calculate slot address in SPRAM: 0x70000100 + (logo_count * 24)
         emitter.sll(S1, T4, 4)  # T4 * 16
         emitter.sll(S2, T4, 3)  # T4 * 8
@@ -766,7 +824,14 @@ module Citrine
         emitter.lw(T4, 32, T0)
         emitter.addiu(T4, T4, 1)
         emitter.sw(T4, 32, T0)
-        emitter.ori(T3, ZERO, 12)
+
+        emitter.addiu(S4, S4, -1)
+        emitter.bnez(S4, "dvd_spawn_loop")
+        emitter.nop
+
+        emitter.label("dvd_spawn_end")
+        emitter.lui(T0, 0x7000)
+        emitter.ori(T3, ZERO, 6)
         emitter.sw(T3, 36, T0)
 
         emitter.label("dvd_buttons_done")
@@ -1329,6 +1394,7 @@ module Citrine
       rodata_bytes.write(triangle_msg_str.to_slice)
       rodata_bytes.write(circle_msg_str.to_slice)
       rodata_bytes.write(square_msg_str.to_slice)
+      rodata_bytes.write(r1_msg_str.to_slice)
       rodata_bytes.write("Citrine PS2 Virtual Machine runtime v0.1.0\0".to_slice)
       rodata_bytes.write("Emotion Engine R5900 / Graphic Synthesizer\0".to_slice)
       rodata_data = rodata_bytes.to_slice

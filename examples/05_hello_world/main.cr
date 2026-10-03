@@ -1,22 +1,8 @@
 require "citrine"
+require "citrine/rng"
+require "citrine/rng/secure"
 
-class SimpleRng
-  property seed : Int32
-
-  def initialize(@seed : Int32)
-  end
-
-  def next_int(min_val : Int32, max_val : Int32) : Int32
-    @seed = ((@seed * 1103515245) + 12345) % 2147483647
-    if @seed < 0
-      @seed = -@seed
-    end
-    range = max_val - min_val + 1
-    min_val + (@seed % range)
-  end
-end
-
-class BouncingLogo
+struct BouncingLogo
   property pos_x : Int32
   property pos_y : Int32
   property vel_x : Int32
@@ -27,7 +13,7 @@ class BouncingLogo
   def initialize(@pos_x : Int32, @pos_y : Int32, @vel_x : Int32, @vel_y : Int32, @text_color_idx : Int32, @bg_color_idx : Int32)
   end
 
-  def update(rng : SimpleRng)
+  def update(rng : Citrine::RNG::PRNG)
     @pos_x = @pos_x + @vel_x
     @pos_y = @pos_y + @vel_y
 
@@ -58,11 +44,11 @@ class BouncingLogo
 
     if bounced == 1
       # Rotate text color: 1..5 step guarantees a different color (out of 6)
-      step = rng.next_int(1, 5)
+      step = rng.rand(1..5)
       @text_color_idx = (@text_color_idx + step) % 6
 
       # BG color: pick an offset in 1..5 from text color to guarantee bg != text
-      bg_step = rng.next_int(1, 5)
+      bg_step = rng.rand(1..5)
       @bg_color_idx = (@text_color_idx + bg_step) % 6
     end
   end
@@ -107,29 +93,40 @@ end
 Citrine.init_window(640, 448, "05 Hello World - DVD Bouncing Screensaver")
 Citrine.set_target_fps(60)
 
-rng = SimpleRng.new(42)
+# True hardware entropy seeding
+entropy = Citrine::RNG::Secure.harvest_entropy
+rng = Citrine::RNG::PRNG.new(entropy)
 logos = [] of BouncingLogo
 
 # Initial logo: starts at (240, 200), moving southeast, Blue BG with Yellow text
 logos << BouncingLogo.new(240, 200, 7, 6, 3, 2)
 
 Citrine.main_loop do
-  # Check Cross button: spawn a new bouncing logo at random position & direction (max 16)
+  # Cross button: spawn 1 new bouncing logo at random position & trajectory
   if Citrine.button_pressed?(Button::Cross)
-    if logos.size < 16
-      rx = rng.next_int(40, 400)
-      ry = rng.next_int(40, 320)
-      dir_choice_x = rng.next_int(0, 1)
-      dir_x = (dir_choice_x == 0) ? -3 : 3
-      dir_choice_y = rng.next_int(0, 1)
-      dir_y = (dir_choice_y == 0) ? -2 : 2
-      rt_col = rng.next_int(0, 5)
-      rbg_col = (rt_col + rng.next_int(1, 5)) % 6
+    rx = rng.rand(40..400)
+    ry = rng.rand(40..320)
+    dir_x = (rng.rand(0..1) == 0) ? -3 : 3
+    dir_y = (rng.rand(0..1) == 0) ? -2 : 2
+    rt_col = rng.rand(0..5)
+    rbg_col = (rt_col + rng.rand(1..5)) % 6
+    logos << BouncingLogo.new(rx, ry, dir_x, dir_y, rt_col, rbg_col)
+  end
+
+  # R1 button: stress test - spawn 10 logos at once!
+  if Citrine.button_pressed?(Button::R1)
+    10.times do
+      rx = rng.rand(40..400)
+      ry = rng.rand(40..320)
+      dir_x = (rng.rand(0..1) == 0) ? -3 : 3
+      dir_y = (rng.rand(0..1) == 0) ? -2 : 2
+      rt_col = rng.rand(0..5)
+      rbg_col = (rt_col + rng.rand(1..5)) % 6
       logos << BouncingLogo.new(rx, ry, dir_x, dir_y, rt_col, rbg_col)
     end
   end
 
-  # Check Triangle button: delete all logos except for the first one
+  # Triangle button: reset back to 1 logo
   if Citrine.button_pressed?(Button::Triangle)
     while logos.size > 1
       logos.pop
@@ -168,7 +165,7 @@ Citrine.main_loop do
   end
 
   # Status HUD
-  Citrine.draw_text("CROSS (X): SPAWN LOGO | TRIANGLE: RESET (1)", 120, 420, 14, Color::Yellow)
+  Citrine.draw_text("CROSS: +1 | R1: +10 | TRIANGLE: RESET | STRESS TEST", 60, 420, 14, Color::Yellow)
 
   Citrine.end_drawing
 end
