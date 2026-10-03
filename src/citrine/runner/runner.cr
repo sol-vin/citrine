@@ -140,7 +140,7 @@ module Citrine
           proc.wait
         else
           puts "[Citrine] PCSX2 process running. (Close PCSX2 or press Ctrl+C to exit)..."
-          proc = Process.new(pcsx2, args)
+          proc = Process.new(pcsx2, args, input: Process::Redirect::Inherit)
           proc.wait
         end
       else

@@ -355,6 +355,24 @@ module Citrine
       emitter.sw(T3, 36, T0)
       emitter.label("debounce_ok")
 
+      # VSync wait loop (GS_CSR bit 3):
+      # Wait for previous frame presentation to finish before clearing and rendering next frame
+      emitter.lui(V1, 0x1200)
+      emitter.ori(V1, V1, 0x1000)
+      emitter.ori(V0, ZERO, 8)
+      emitter.sd(V0, 0, V1)        # Clear VSINT with 64-bit store
+      emitter.lui(T1, 0x0020)       # Timeout counter (~2097152 iterations, ~80ms safety timeout)
+
+      emitter.label("vsync_spin")
+      emitter.ld(V0, 0, V1)        # 64-bit load from GS_CSR
+      emitter.andi(V0, V0, 8)
+      emitter.bnez(V0, "vsync_done")
+      emitter.addiu(T1, T1, -1)     # branch delay slot: decrement counter
+      emitter.bnez(T1, "vsync_spin")
+      emitter.nop                  # branch delay slot
+
+      emitter.label("vsync_done")
+
       if is_dvd_screensaver
         emitter.jal("dma02_wait")
         emitter.nop
@@ -413,23 +431,6 @@ module Citrine
         emitter.jal("dma02_wait")
         emitter.nop
       end
-
-      # VSync wait loop (GS_CSR bit 3):
-      emitter.lui(V1, 0x1200)
-      emitter.ori(V1, V1, 0x1000)
-      emitter.ori(V0, ZERO, 8)
-      emitter.sd(V0, 0, V1)        # Clear VSINT with 64-bit store
-      emitter.lui(T1, 0x0020)       # Timeout counter (~2097152 iterations, ~80ms safety timeout)
-
-      emitter.label("vsync_spin")
-      emitter.ld(V0, 0, V1)        # 64-bit load from GS_CSR
-      emitter.andi(V0, V0, 8)
-      emitter.bnez(V0, "vsync_done")
-      emitter.addiu(T1, T1, -1)     # branch delay slot: decrement counter
-      emitter.bnez(T1, "vsync_spin")
-      emitter.nop                  # branch delay slot
-
-      emitter.label("vsync_done")
 
       emitter.lui(T0, 0x7000)
 
