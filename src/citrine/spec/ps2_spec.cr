@@ -31,6 +31,10 @@ module Citrine
       )
       end
 
+      def pcsx2_available? : Bool
+        !(@lines.empty? || @lines.any? { |l| l.includes?("PCSX2 runner not available") })
+      end
+
       private def check_pcsx2_availability(file, line)
         if @lines.empty? || @lines.any? { |l| l.includes?("PCSX2 runner not available") }
           if ENV["REQUIRE_PCSX2"]? == "1"

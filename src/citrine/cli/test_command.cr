@@ -43,8 +43,13 @@ module Citrine
           output = IO::Memory.new
           error = IO::Memory.new
           status = Process.run("crystal", ["spec", spec_file], output: output, error: error)
-          if !status.success? && (error.to_s.includes?("LNK1104") || output.to_s.includes?("LNK1104"))
-            sleep 1.0.seconds
+          retries = 0
+          while !status.success? && (error.to_s.includes?("LNK1104") || output.to_s.includes?("LNK1104")) && retries < 3
+            retries += 1
+            {% if flag?(:windows) %}
+              Process.run("taskkill", ["/F", "/IM", "crystal-run-spec.tmp.exe"]) rescue nil
+            {% end %}
+            sleep 1.5.seconds
             output = IO::Memory.new
             error = IO::Memory.new
             status = Process.run("crystal", ["spec", spec_file], output: output, error: error)

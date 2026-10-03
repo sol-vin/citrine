@@ -86,7 +86,8 @@ describe "Citrine PS2 Virtual Controller & Button Testing Suite" do
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE] Button Circle pressed!")
-    
+    next unless result.pcsx2_available?
+
     # Assert that the edge trigger fired on only one distinct frame (not repeated across the 15 held frames)
     circle_press_lines = result.lines.select { |l| l.includes?("[CITRINE] Button Circle pressed!") }
     clean_lines = circle_press_lines.map { |l| l.sub(/^\[\s*\d+\.\d+\]\s*/, "") }
