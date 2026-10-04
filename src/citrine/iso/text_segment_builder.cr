@@ -124,25 +124,26 @@ module Citrine
         emitter.syscall_inst
         emitter.nop
 
-        # GS PMODE (0x12000000) = 0xFF62 (EN1, EN2, MMCL=1, ALP=255)
+        # GS PMODE (0x12000000) = 0xFF65 (Circuit 1 enable, CRTMD=1, MMOD=1, AMOD=1, ALP=0xFF)
         emitter.lui(T0, 0x1200)
         emitter.lui(T1, 0x0000)
-        emitter.ori(T1, T1, 0xFF62)
+        emitter.ori(T1, T1, 0xFF65)
         emitter.sd(T1, 0, T0)
 
-        # GS DISPFB1 (0x12000070): FBP=0, FBW=10 (640px), PSM=0 (PSMCT32), DBX=0, DBY=0
-        emitter.ori(T1, ZERO, 10)
-        emitter.sll(T1, T1, 9)
+        # GS DISPFB1 (0x12000070) & GS DISPFB2 (0x12000090): 0x1400 (FBP=0, FBW=10 [640px], PSM=0 [PSMCT32])
+        emitter.ori(T1, ZERO, 0x1400)
         emitter.sd(T1, 0x70, T0)
+        emitter.sd(T1, 0x90, T0)
 
-        # GS DISPLAY1 (0x12000080): DX=656, DY=36, MAGH=3, MAGV=0, DW=2559, DH=447
-        emitter.lui(T1, 0x01bf)
-        emitter.ori(T1, T1, 0xcfff)
+        # GS DISPLAY1 (0x12000080) & GS DISPLAY2 (0x120000A0): 0x001bf9ff01832290 (NTSC Field mode dy=50 centered)
+        emitter.lui(T1, 0x001b)
+        emitter.ori(T1, T1, 0xf9ff)
         emitter.dsll32(T1, T1, 0)
-        emitter.lui(T2, 0x0009)
-        emitter.ori(T2, T2, 0x0a90)
+        emitter.lui(T2, 0x0183)
+        emitter.ori(T2, T2, 0x2290)
         emitter.or_(T1, T1, T2)
         emitter.sd(T1, 0x80, T0)
+        emitter.sd(T1, 0xa0, T0)
 
         # GS BGCOLOR (0x120000e0): Black (R=0, G=0, B=0)
         emitter.sd(ZERO, 0xe0, T0)
