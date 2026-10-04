@@ -34,6 +34,17 @@ describe "Citrine PS2 Hardware Controller & Diagnostic Testing Suite" do
       Citrine.init_window(640, 448, "Pad Matrix Test")
       puts "[CITRINE] Full Controller Matrix Test Initialized"
       Citrine.main_loop do
+        pad = Citrine.player(0)
+        puts "[CITRINE] Button Up pressed!" if pad.button_pressed?(Button::Up)
+        puts "[CITRINE] Button Down pressed!" if pad.button_pressed?(Button::Down)
+        puts "[CITRINE] Button Left pressed!" if pad.button_pressed?(Button::Left)
+        puts "[CITRINE] Button Right pressed!" if pad.button_pressed?(Button::Right)
+        puts "[CITRINE] Button Start pressed!" if pad.button_pressed?(Button::Start)
+        puts "[CITRINE] Button L1 pressed!" if pad.button_pressed?(Button::L1)
+        puts "[CITRINE] Button R2 pressed!" if pad.button_pressed?(Button::R2)
+        puts "[CITRINE] Button Square pressed!" if pad.button_pressed?(Button::Square)
+        puts "[CITRINE] Button Triangle pressed!" if pad.button_pressed?(Button::Triangle)
+
         Citrine.begin_drawing
         Citrine.clear_background(Color::Black)
         Citrine.draw_text("PAD MATRIX TEST", 200, 200, 20, Color::White)

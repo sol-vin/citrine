@@ -22,6 +22,10 @@ module Citrine
           # TestThread (0x4dc): jr $ra, nop
           out_bytes[text_off + 0x4dc, 4].copy_from(Bytes[0x08, 0x00, 0xE0, 0x03])
           out_bytes[text_off + 0x4e0, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
+          # Disable thid1 creation: sw zero, 56(sp); nop; nop
+          out_bytes[text_off + 0x0d94, 4].copy_from(Bytes[0x38, 0x00, 0xA0, 0xAF])
+          out_bytes[text_off + 0x0d98, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
+          out_bytes[text_off + 0x0d9c, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
           out_bytes
         }
 
@@ -112,18 +116,23 @@ module Citrine
           end
         end
 
-        # Zero out old relocations in .rel.text that fall in our patched dispatcher range (0x4dc..0x650)
+        # Zero out old relocations in .rel.text that fall in our patched dispatcher range (0x4dc..0x0c50)
         if rel_text_sh_off > 0
           (rel_text_size // 8).times do |ri|
             r_off = rel_text_sh_off + ri * 8
             r_offset = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[r_off, 4])
-            if r_offset >= 0x4dc && r_offset <= 0x650
+            if r_offset >= 0x4dc && r_offset < 0x0c50
               IO::ByteFormat::LittleEndian.encode(0_u32, out_bytes[r_off + 4, 4]) # r_info = R_MIPS_NONE (0)
             end
           end
         end
 
         # 4. Patch instructions in .text (file offset 0x90):
+        # Disable thid1 creation in startup: sw zero, 56(sp); nop; nop
+        out_bytes[text_off + 0x0d94, 4].copy_from(Bytes[0x38, 0x00, 0xA0, 0xAF])
+        out_bytes[text_off + 0x0d98, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
+        out_bytes[text_off + 0x0d9c, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
+
         # Patch PlaySound: point wavBuffer to 0x1900
         out_bytes[text_off + 0x194, 4].copy_from(Bytes[0x00, 0x19, 0x42, 0x24]) # addiu v0, v0, 0x1900
 
@@ -149,6 +158,8 @@ module Citrine
         #   1 = Play (calls PlaySound, initializes cur_vol at 0x17d8)
         #   2 = Pause (sets voice 0 pitch to 0, silences volumes)
         #   3 = Resume (restores voice 0 pitch to 0x075A, restores volumes)
+        #   4 = Fast Forward (sets voice 0 pitch to 0x1600 [3x speed])
+        #   5 = Normal Speed (sets voice 0 pitch to 0x075A [1x speed])
         #   0x1000..0x10FF = Set Volume (cur_vol = (mode & 0xFF) << 6, sets master and voice volumes)
         disp = MipsEmitter.new(0x000004dc_u32)
 
@@ -156,15 +167,13 @@ module Citrine
         disp.addiu(SP, SP, -32)
         disp.sw(RA, 28, SP)
         disp.sw(S0, 24, SP)
+        disp.sw(S1, 20, SP)
 
         # Position-independent module base calculation:
         disp.bal("get_base")
         disp.nop
         disp.label("get_base")
-        disp.addiu(S0, RA, -0x4F0) # ra = module_base + 0x4f0
-
-        # Common t9 = sceSdSetParam stub (module_base + 0x0F0C)
-        disp.addiu(T9, S0, 0x0F0C)
+        disp.addiu(S0, RA, -0x4F4) # ra = module_base + 0x4f4
 
         # Case 1: Play (v0 == 1)
         disp.label("chk_play")
@@ -197,13 +206,13 @@ module Citrine
         disp.ori(T1, ZERO, 2)
         disp.bne(V0, T1, "chk_resume")
         disp.nop
+        disp.addiu(T9, S0, 0x0F0C)
         disp.ori(A0, ZERO, 0x0200) # SD_VP_PITCH Voice 0 = 0
         disp.move(A1, ZERO)
         disp.jalr(T9)
         disp.nop
-        disp.jal("set_4_vols")
-        disp.move(A1, ZERO)
-        disp.beq(ZERO, ZERO, "disp_exit")
+        disp.move(S1, ZERO)
+        disp.beq(ZERO, ZERO, "apply_vols")
         disp.nop
 
         # Case 3: Resume (v0 == 3)
@@ -211,18 +220,16 @@ module Citrine
         disp.ori(T1, ZERO, 3)
         disp.bne(V0, T1, "chk_ff")
         disp.nop
+        disp.addiu(T9, S0, 0x0F0C)
         disp.ori(A0, ZERO, 0x0200) # SD_VP_PITCH Voice 0 = 0x075A
         disp.ori(A1, ZERO, 0x075A)
         disp.jalr(T9)
         disp.nop
-        disp.lw(A1, 0x17D8, S0)
-        disp.bnez(A1, "res_vol_ok")
+        disp.lw(S1, 0x17D8, S0)
+        disp.bnez(S1, "apply_vols")
         disp.nop
-        disp.ori(A1, ZERO, 0x3C00)
-        disp.label("res_vol_ok")
-        disp.jal("set_4_vols")
-        disp.nop
-        disp.beq(ZERO, ZERO, "disp_exit")
+        disp.ori(S1, ZERO, 0x3C00)
+        disp.beq(ZERO, ZERO, "apply_vols")
         disp.nop
 
         # Case 4: Fast Forward (v0 == 4)
@@ -230,6 +237,7 @@ module Citrine
         disp.ori(T1, ZERO, 4)
         disp.bne(V0, T1, "chk_norm")
         disp.nop
+        disp.addiu(T9, S0, 0x0F0C)
         disp.ori(A0, ZERO, 0x0200) # SD_VP_PITCH Voice 0
         disp.ori(A1, ZERO, 0x1600) # 3x speed pitch
         disp.jalr(T9)
@@ -242,6 +250,7 @@ module Citrine
         disp.ori(T1, ZERO, 5)
         disp.bne(V0, T1, "chk_vol")
         disp.nop
+        disp.addiu(T9, S0, 0x0F0C)
         disp.ori(A0, ZERO, 0x0200) # SD_VP_PITCH Voice 0
         disp.ori(A1, ZERO, 0x075A) # 1.0x speed pitch
         disp.jalr(T9)
@@ -255,47 +264,55 @@ module Citrine
         disp.ori(T2, ZERO, 1)
         disp.bne(T1, T2, "disp_exit")
         disp.nop
-        disp.andi(A1, V0, 0xFF)
-        disp.sll(A1, A1, 6) # scale 0..255 -> 0..16320
-        disp.sw(A1, 0x17D8, S0)
-        disp.jal("set_4_vols")
-        disp.nop
-        disp.beq(ZERO, ZERO, "disp_exit")
-        disp.nop
+        disp.andi(S1, V0, 0xFF)
+        disp.sll(S1, S1, 6) # scale 0..255 -> 0..16320
+        disp.sw(S1, 0x17D8, S0)
 
-        # Subroutine: Set 4 volumes (Voice 0 L/R, Master L/R) to A1
-        disp.label("set_4_vols")
-        disp.move(T0, RA)
+        # Set 4 volumes to S1
+        disp.label("apply_vols")
+        disp.addiu(T9, S0, 0x0F0C)
         disp.ori(A0, ZERO, 0x0000) # Voice 0 Vol Left
+        disp.move(A1, S1)
         disp.jalr(T9); disp.nop
+
+        disp.addiu(T9, S0, 0x0F0C)
         disp.ori(A0, ZERO, 0x0100) # Voice 0 Vol Right
+        disp.move(A1, S1)
         disp.jalr(T9); disp.nop
+
+        disp.addiu(T9, S0, 0x0F0C)
         disp.ori(A0, ZERO, 0x0980) # Master Vol Left
+        disp.move(A1, S1)
         disp.jalr(T9); disp.nop
+
+        disp.addiu(T9, S0, 0x0F0C)
         disp.ori(A0, ZERO, 0x0A80) # Master Vol Right
+        disp.move(A1, S1)
         disp.jalr(T9); disp.nop
-        disp.jr(T0)
-        disp.nop
 
         # Exit and return to SoundThread
         disp.label("disp_exit")
+        disp.lw(S1, 20, SP)
         disp.lw(S0, 24, SP)
         disp.lw(RA, 28, SP)
         disp.addiu(SP, SP, 32)
-        disp.beq(ZERO, ZERO, "SoundThread_Loop")
+        disp.jr(RA)
         disp.nop
 
-        disp.labels["SoundThread_Loop"] = 0x00000cb4_u32
         disp.resolve!
 
         disp_bytes = disp.to_slice
         out_bytes[text_off + 0x4dc, disp_bytes.size].copy_from(disp_bytes)
 
-        # Hook SoundThread at 0xc90 via relative branch to 0x4dc:
-        # offset = (0x04dc - 0x0C94) // 4 = -494 (0xFE12) -> beq $zero, $zero, 0xFE12
-        out_bytes[text_off + 0xc90, 4].copy_from(Bytes[0x12, 0xFE, 0x00, 0x10])
-        out_bytes[text_off + 0xc94, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00]) # nop
-
+        # Hook SoundThread at 0xc90 via bal to 0x4dc:
+        # 0x0c90: bal 0x4dc (0x0411FE12)
+        # 0x0c94: nop
+        # 0x0c98: b 0xcb4 (0x10000006)
+        # 0x0c9c: nop
+        out_bytes[text_off + 0xc90, 4].copy_from(Bytes[0x12, 0xFE, 0x11, 0x04])
+        out_bytes[text_off + 0xc94, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
+        out_bytes[text_off + 0xc98, 4].copy_from(Bytes[0x06, 0x00, 0x00, 0x10])
+        out_bytes[text_off + 0xc9c, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
 
         out_bytes
       end
