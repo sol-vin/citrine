@@ -389,28 +389,49 @@ module Citrine
           emitter.call("Citrine_InlineAsm_Block")
         end
         if @profile.has_audio
-          # Toggle audio playback
+          # Toggle audio playback with true pause (cmd 2), resume (cmd 3), and play (cmd 1)
           emitter.lui(T0, 0x7000)
-          emitter.lw(T5, 60, T0) # playing flag
-          emitter.bnez(T5, "audio_pause")
+          emitter.lw(T5, 60, T0) # 0x7000003C: 1=playing, 2=paused, 0=stopped
+          emitter.ori(T6, ZERO, 1)
+          emitter.beq(T5, T6, "audio_pause")
           emitter.nop
-          # Resume / Play
+
+          # If paused (2): resume playback from current position
+          emitter.ori(T6, ZERO, 2)
+          emitter.beq(T5, T6, "audio_resume")
+          emitter.nop
+
+          # If stopped (0): start playback from start
           emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
-          emitter.ori(A0, ZERO, 1)
+          emitter.ori(A0, ZERO, 1) # cmd 1 = Play
           emitter.jalr(T9)
           emitter.nop
           emitter.lui(T0, 0x7000)
           emitter.ori(T5, ZERO, 1)
           emitter.sw(T5, 60, T0)
           emitter.jump("audio_done")
-          emitter.label("audio_pause")
-          emitter.li(T9, PadRuntimePayload::SOUND_STOP_ENTRY)
+
+          emitter.label("audio_resume")
+          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+          emitter.ori(A0, ZERO, 3) # cmd 3 = Resume (preserves position, un-mutes pitch/vol)
           emitter.jalr(T9)
           emitter.nop
           emitter.lui(T0, 0x7000)
-          emitter.sw(ZERO, 60, T0)
+          emitter.ori(T5, ZERO, 1)
+          emitter.sw(T5, 60, T0)
+          emitter.jump("audio_done")
+
+          emitter.label("audio_pause")
+          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+          emitter.ori(A0, ZERO, 2) # cmd 2 = Pause (preserves position, mutes pitch/vol)
+          emitter.jalr(T9)
+          emitter.nop
+          emitter.lui(T0, 0x7000)
+          emitter.ori(T5, ZERO, 2)
+          emitter.sw(T5, 60, T0)
           emitter.label("audio_done")
         end
+
         if addr = @rodata.button_msg_addrs["cross"]?
           emitter.li(A0, addr)
           emitter.call("debug_puts")

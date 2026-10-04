@@ -365,7 +365,7 @@ module Citrine
             emitter.addiu(SP, SP, -32)
             emitter.sw(RA, 28, SP)
             emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
-            emitter.jalr(RA, T9)
+            emitter.jalr(T9)
             emitter.nop
             emitter.lw(RA, 28, SP)
             emitter.addiu(SP, SP, 32)
@@ -376,7 +376,7 @@ module Citrine
             emitter.addiu(SP, SP, -32)
             emitter.sw(RA, 28, SP)
             emitter.li(T9, PadRuntimePayload::SOUND_STOP_ENTRY)
-            emitter.jalr(RA, T9)
+            emitter.jalr(T9)
             emitter.nop
             emitter.lw(RA, 28, SP)
             emitter.addiu(SP, SP, 32)
@@ -388,13 +388,24 @@ module Citrine
             emitter.jr(RA)
             emitter.nop
           when "Citrine_SetVolume"
+            emitter.addiu(SP, SP, -32)
+            emitter.sw(RA, 28, SP)
+            emitter.sw(A0, 24, SP)
+            emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+            emitter.ori(A0, A0, 0x1000)
+            emitter.jalr(T9)
+            emitter.nop
+            emitter.lw(A0, 24, SP)
             emitter.lui(T0, 0xBF90)
             emitter.sll(T1, A0, 7) # scale 0..255 to 0..32640 (0x7F80)
             emitter.sh(T1, 0x0748, T0)
             emitter.sh(T1, 0x074A, T0)
             emitter.move(V0, A0)
+            emitter.lw(RA, 28, SP)
+            emitter.addiu(SP, SP, 32)
             emitter.jr(RA)
             emitter.nop
+
           else
             emitter.addiu(SP, SP, -32)
             emitter.sw(RA, 28, SP)

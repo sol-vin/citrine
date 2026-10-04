@@ -92,13 +92,34 @@ module Citrine
         new_shoff = orig_shoff + shift
         IO::ByteFormat::LittleEndian.encode(new_shoff, out_bytes[0x20, 4])
 
-        # 3. Update Section Headers:
+        # 3. Update Section Headers and Clear Overwritten Relocations:
         e_shentsize = 40_u32
+        rel_text_sh_off = 0_u32
+        rel_text_size = 0_u32
+
         13.times do |i|
           hdr = new_shoff + i.to_u32 * e_shentsize
           sh_offset = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[hdr + 0x10, 4])
+          sh_size = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[hdr + 0x14, 4])
+          sh_type = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[hdr + 0x04, 4])
           if sh_offset >= orig_data_end
-            IO::ByteFormat::LittleEndian.encode(sh_offset + shift, out_bytes[hdr + 0x10, 4])
+            sh_offset += shift
+            IO::ByteFormat::LittleEndian.encode(sh_offset, out_bytes[hdr + 0x10, 4])
+          end
+          if sh_type == 9_u32 # SHT_REL
+            rel_text_sh_off = sh_offset
+            rel_text_size = sh_size
+          end
+        end
+
+        # Zero out old relocations in .rel.text that fall in our patched dispatcher range (0x4dc..0x650)
+        if rel_text_sh_off > 0
+          (rel_text_size // 8).times do |ri|
+            r_off = rel_text_sh_off + ri * 8
+            r_offset = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[r_off, 4])
+            if r_offset >= 0x4dc && r_offset <= 0x650
+              IO::ByteFormat::LittleEndian.encode(0_u32, out_bytes[r_off + 4, 4]) # r_info = R_MIPS_NONE (0)
+            end
           end
         end
 
@@ -122,126 +143,135 @@ module Citrine
         # Patch pitch at .text+0x434: li a1, 0x075A (exact 22,050 Hz on 48.0 kHz SPU2 core: 22050 * 4096 / 48000 = 1881.6 ~= 1882)
         out_bytes[text_off + 0x434, 4].copy_from(Bytes[0x5A, 0x07, 0x05, 0x24])
 
-        # Multi-mode sound dispatcher at .text+0x4dc (replaces dead TestThread space):
+        # Multi-mode position-independent sound dispatcher at .text+0x4dc:
         # Dispatches SoundMode (passed in v0 from SoundHandler):
         #   0 = Stop (calls StopSound)
         #   1 = Play (calls PlaySound, initializes cur_vol at 0x17d8)
-        #   2 = Pause (sets voice 0 pitch to 0, sets master volume to 0)
-        #   3 = Resume (restores voice 0 pitch to 0x075A, restores master volume)
-        #   0x1000..0x10FF = Set Volume (cur_vol = (mode & 0xFF) << 6, sets master volume)
+        #   2 = Pause (sets voice 0 pitch to 0, silences volumes)
+        #   3 = Resume (restores voice 0 pitch to 0x075A, restores volumes)
+        #   0x1000..0x10FF = Set Volume (cur_vol = (mode & 0xFF) << 6, sets master and voice volumes)
         disp = MipsEmitter.new(0x000004dc_u32)
 
-        # Case 1: Play
+        disp.label("disp_start")
+        disp.addiu(SP, SP, -32)
+        disp.sw(RA, 28, SP)
+        disp.sw(S0, 24, SP)
+
+        # Position-independent module base calculation:
+        disp.bal("get_base")
+        disp.nop
+        disp.label("get_base")
+        disp.addiu(S0, RA, -0x4F0) # ra = module_base + 0x4f0
+
+        # Common t9 = sceSdSetParam stub (module_base + 0x0F0C)
+        disp.addiu(T9, S0, 0x0F0C)
+
+        # Case 1: Play (v0 == 1)
         disp.label("chk_play")
         disp.ori(T1, ZERO, 1)
         disp.bne(V0, T1, "chk_stop")
         disp.nop
-        disp.jal("PlaySound")
+        disp.addiu(T8, S0, 0x0170) # PlaySound
+        disp.jalr(T8)
         disp.nop
-        disp.lui(A0, 0)
-        disp.lw(A1, 0x17d8, A0)
-        disp.bnez(A1, "play_ret")
+        disp.lw(A1, 0x17D8, S0)
+        disp.bnez(A1, "disp_exit")
         disp.nop
         disp.ori(A1, ZERO, 0x3C00)
-        disp.sw(A1, 0x17d8, A0)
-        disp.label("play_ret")
-        disp.j("SoundThread_Loop")
+        disp.sw(A1, 0x17D8, S0)
+        disp.beq(ZERO, ZERO, "disp_exit")
         disp.nop
 
-        # Case 0: Stop
+        # Case 0: Stop (v0 == 0)
         disp.label("chk_stop")
         disp.bnez(V0, "chk_pause")
         disp.nop
-        disp.jal("StopSound")
+        disp.addiu(T8, S0, 0x0484) # StopSound
+        disp.jalr(T8)
         disp.nop
-        disp.j("SoundThread_Loop")
+        disp.beq(ZERO, ZERO, "disp_exit")
         disp.nop
 
-        # Case 2: Pause
+        # Case 2: Pause (v0 == 2)
         disp.label("chk_pause")
         disp.ori(T1, ZERO, 2)
         disp.bne(V0, T1, "chk_resume")
         disp.nop
-        disp.ori(A0, ZERO, 0x200) # SD_VP_PITCH Voice 0 = 0
+        disp.ori(A0, ZERO, 0x0200) # SD_VP_PITCH Voice 0 = 0
         disp.move(A1, ZERO)
-        disp.jal("sceSdSetParam")
+        disp.jalr(T9)
         disp.nop
-        disp.ori(A0, ZERO, 0x980) # SD_C_MVOLL = 0
+        disp.jal("set_4_vols")
         disp.move(A1, ZERO)
-        disp.jal("sceSdSetParam")
-        disp.nop
-        disp.ori(A0, ZERO, 0xa80) # SD_C_MVOLR = 0
-        disp.move(A1, ZERO)
-        disp.jal("sceSdSetParam")
-        disp.nop
-        disp.j("SoundThread_Loop")
+        disp.beq(ZERO, ZERO, "disp_exit")
         disp.nop
 
-        # Case 3: Resume
+        # Case 3: Resume (v0 == 3)
         disp.label("chk_resume")
         disp.ori(T1, ZERO, 3)
         disp.bne(V0, T1, "chk_vol")
         disp.nop
-        disp.ori(A0, ZERO, 0x200) # SD_VP_PITCH Voice 0 = 0x075A
+        disp.ori(A0, ZERO, 0x0200) # SD_VP_PITCH Voice 0 = 0x075A
         disp.ori(A1, ZERO, 0x075A)
-        disp.jal("sceSdSetParam")
+        disp.jalr(T9)
         disp.nop
-        disp.lui(T0, 0)
-        disp.lw(A1, 0x17d8, T0)
-        disp.bnez(A1, "res_vol_l")
-        disp.nop
-        disp.ori(A1, ZERO, 0x3C00)
-        disp.label("res_vol_l")
-        disp.ori(A0, ZERO, 0x980) # SD_C_MVOLL
-        disp.jal("sceSdSetParam")
-        disp.nop
-        disp.lui(T0, 0)
-        disp.lw(A1, 0x17d8, T0)
-        disp.bnez(A1, "res_vol_r")
+        disp.lw(A1, 0x17D8, S0)
+        disp.bnez(A1, "res_vol_ok")
         disp.nop
         disp.ori(A1, ZERO, 0x3C00)
-        disp.label("res_vol_r")
-        disp.ori(A0, ZERO, 0xa80) # SD_C_MVOLR
-        disp.jal("sceSdSetParam")
+        disp.label("res_vol_ok")
+        disp.jal("set_4_vols")
         disp.nop
-        disp.j("SoundThread_Loop")
+        disp.beq(ZERO, ZERO, "disp_exit")
         disp.nop
 
-        # Case 4: Set Volume (0x1000..0x10FF)
+        # Case 4: Set Volume (v0 >= 0x1000)
         disp.label("chk_vol")
         disp.srl(T1, V0, 12)
         disp.ori(T2, ZERO, 1)
-        disp.bne(T1, T2, "disp_done")
+        disp.bne(T1, T2, "disp_exit")
         disp.nop
         disp.andi(A1, V0, 0xFF)
         disp.sll(A1, A1, 6) # scale 0..255 -> 0..16320
-        disp.lui(T0, 0)
-        disp.sw(A1, 0x17d8, T0)
-        disp.ori(A0, ZERO, 0x980) # SD_C_MVOLL
-        disp.jal("sceSdSetParam")
+        disp.sw(A1, 0x17D8, S0)
+        disp.jal("set_4_vols")
         disp.nop
-        disp.lui(T0, 0)
-        disp.lw(A1, 0x17d8, T0)
-        disp.ori(A0, ZERO, 0xa80) # SD_C_MVOLR
-        disp.jal("sceSdSetParam")
+        disp.beq(ZERO, ZERO, "disp_exit")
         disp.nop
 
-        disp.label("disp_done")
-        disp.j("SoundThread_Loop")
+        # Subroutine: Set 4 volumes (Voice 0 L/R, Master L/R) to A1
+        disp.label("set_4_vols")
+        disp.move(T0, RA)
+        disp.ori(A0, ZERO, 0x0000) # Voice 0 Vol Left
+        disp.jalr(T9); disp.nop
+        disp.ori(A0, ZERO, 0x0100) # Voice 0 Vol Right
+        disp.jalr(T9); disp.nop
+        disp.ori(A0, ZERO, 0x0980) # Master Vol Left
+        disp.jalr(T9); disp.nop
+        disp.ori(A0, ZERO, 0x0A80) # Master Vol Right
+        disp.jalr(T9); disp.nop
+        disp.jr(T0)
         disp.nop
 
-        disp.labels["PlaySound"] = 0x00000170_u32
-        disp.labels["StopSound"] = 0x00000484_u32
-        disp.labels["sceSdSetParam"] = 0x00000f0c_u32
+        # Exit and return to SoundThread
+        disp.label("disp_exit")
+        disp.lw(S0, 24, SP)
+        disp.lw(RA, 28, SP)
+        disp.addiu(SP, SP, 32)
+        disp.beq(ZERO, ZERO, "SoundThread_Loop")
+        disp.nop
+
         disp.labels["SoundThread_Loop"] = 0x00000cb4_u32
         disp.resolve!
 
         disp_bytes = disp.to_slice
         out_bytes[text_off + 0x4dc, disp_bytes.size].copy_from(disp_bytes)
 
-        # Hook SoundThread at 0xc90: j 0x4dc; nop
-        out_bytes[text_off + 0xc90, 4].copy_from(Bytes[0x37, 0x01, 0x00, 0x08]) # j 0x4dc
+        # Hook SoundThread at 0xc90 via relative branch to 0x4dc:
+        # offset = (0x04dc - 0x0C94) // 4 = -494 (0xFE12) -> beq $zero, $zero, 0xFE12
+        out_bytes[text_off + 0xc90, 4].copy_from(Bytes[0x12, 0xFE, 0x00, 0x10])
         out_bytes[text_off + 0xc94, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00]) # nop
+
 
         out_bytes
       end
