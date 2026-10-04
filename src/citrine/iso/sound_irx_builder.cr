@@ -209,7 +209,7 @@ module Citrine
         # Case 3: Resume (v0 == 3)
         disp.label("chk_resume")
         disp.ori(T1, ZERO, 3)
-        disp.bne(V0, T1, "chk_vol")
+        disp.bne(V0, T1, "chk_ff")
         disp.nop
         disp.ori(A0, ZERO, 0x0200) # SD_VP_PITCH Voice 0 = 0x075A
         disp.ori(A1, ZERO, 0x075A)
@@ -225,7 +225,31 @@ module Citrine
         disp.beq(ZERO, ZERO, "disp_exit")
         disp.nop
 
-        # Case 4: Set Volume (v0 >= 0x1000)
+        # Case 4: Fast Forward (v0 == 4)
+        disp.label("chk_ff")
+        disp.ori(T1, ZERO, 4)
+        disp.bne(V0, T1, "chk_norm")
+        disp.nop
+        disp.ori(A0, ZERO, 0x0200) # SD_VP_PITCH Voice 0
+        disp.ori(A1, ZERO, 0x1600) # 3x speed pitch
+        disp.jalr(T9)
+        disp.nop
+        disp.beq(ZERO, ZERO, "disp_exit")
+        disp.nop
+
+        # Case 5: Normal Speed (v0 == 5)
+        disp.label("chk_norm")
+        disp.ori(T1, ZERO, 5)
+        disp.bne(V0, T1, "chk_vol")
+        disp.nop
+        disp.ori(A0, ZERO, 0x0200) # SD_VP_PITCH Voice 0
+        disp.ori(A1, ZERO, 0x075A) # 1.0x speed pitch
+        disp.jalr(T9)
+        disp.nop
+        disp.beq(ZERO, ZERO, "disp_exit")
+        disp.nop
+
+        # Case 6: Set Volume (v0 >= 0x1000)
         disp.label("chk_vol")
         disp.srl(T1, V0, 12)
         disp.ori(T2, ZERO, 1)

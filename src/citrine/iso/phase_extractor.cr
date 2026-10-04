@@ -1,4 +1,5 @@
 require "../gs/gif_packet_builder"
+require "../ast/types"
 require "./regex_engine"
 
 module Citrine

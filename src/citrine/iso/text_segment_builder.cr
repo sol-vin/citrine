@@ -59,8 +59,14 @@ module Citrine
         if @profile.has_audio
           emitter.ori(T1, ZERO, 1)
           emitter.sw(T1, 60, T0)      # 0x7000003C: audio playing flag = 1
-          emitter.ori(T1, ZERO, 255)
-          emitter.sw(T1, 0x70, T0)    # 0x70000070: master_vol = 255
+          emitter.ori(T1, ZERO, 240)
+          emitter.sw(T1, 0x70, T0)    # 0x70000070: master_vol = 240
+          emitter.ori(T1, ZERO, 1)
+          emitter.sw(T1, 0x74, T0)    # 0x70000074: is_looping = 1 (ON)
+          emitter.sw(ZERO, 0x78, T0)  # 0x70000078: track_idx = 0
+          emitter.ori(T1, ZERO, 13)
+          emitter.sw(T1, 0x7C, T0)    # 0x7000007C: total_tracks = 13
+          emitter.sw(ZERO, 0x80, T0)  # 0x70000080: elapsed_sec = 0
 
           # Kick off audio playback via Sound IRX RPC
           emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
@@ -475,6 +481,12 @@ module Citrine
         emitter.andi(T7, T8, 0x8000)
         emitter.beqz(T7, "chk_btn_r1")
         emitter.nop
+        if @profile.has_audio
+          # Toggle loop mode (0x70000074)
+          emitter.lw(T5, 0x74, T0)
+          emitter.xori(T5, T5, 1)
+          emitter.sw(T5, 0x74, T0)
+        end
         if addr = @rodata.button_msg_addrs["square"]?
           emitter.li(A0, addr)
           emitter.call("debug_puts")
@@ -487,6 +499,12 @@ module Citrine
         emitter.andi(T7, T8, 0x0800)
         emitter.beqz(T7, "chk_btn_l1")
         emitter.nop
+        if @profile.has_audio
+          # Jump forward 10 seconds (+10s)
+          emitter.lw(T5, 0x80, T0)
+          emitter.addiu(T5, T5, 10)
+          emitter.sw(T5, 0x80, T0)
+        end
         if addr = @rodata.button_msg_addrs["r1"]?
           emitter.li(A0, addr)
           emitter.call("debug_puts")
@@ -499,6 +517,16 @@ module Citrine
         emitter.andi(T7, T8, 0x0400)
         emitter.beqz(T7, "chk_btn_r2")
         emitter.nop
+        if @profile.has_audio
+          # Jump backward 10 seconds (-10s)
+          emitter.lw(T5, 0x80, T0)
+          emitter.addiu(T5, T5, -10)
+          emitter.bgez(T5, "l1_sub_ok")
+          emitter.nop
+          emitter.move(T5, ZERO)
+          emitter.label("l1_sub_ok")
+          emitter.sw(T5, 0x80, T0)
+        end
         if addr = @rodata.button_msg_addrs["l1"]?
           emitter.li(A0, addr)
           emitter.call("debug_puts")
@@ -511,6 +539,14 @@ module Citrine
         emitter.andi(T7, T8, 0x0200)
         emitter.beqz(T7, "chk_btn_l2")
         emitter.nop
+        if @profile.has_audio
+          # Fast Forward: set pitch to 3x rate
+          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+          emitter.ori(A0, ZERO, 4) # cmd 4 = Fast Forward
+          emitter.jalr(T9)
+          emitter.nop
+          emitter.lui(T0, 0x7000)
+        end
         if addr = @rodata.button_msg_addrs["r2"]?
           emitter.li(A0, addr)
           emitter.call("debug_puts")
@@ -523,6 +559,14 @@ module Citrine
         emitter.andi(T7, T8, 0x0100)
         emitter.beqz(T7, "chk_btn_start")
         emitter.nop
+        if @profile.has_audio
+          # Rewind: mute audio while rewinding
+          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+          emitter.ori(A0, ZERO, 2) # cmd 2 = Pause/mute
+          emitter.jalr(T9)
+          emitter.nop
+          emitter.lui(T0, 0x7000)
+        end
         if addr = @rodata.button_msg_addrs["l2"]?
           emitter.li(A0, addr)
           emitter.call("debug_puts")
@@ -588,6 +632,28 @@ module Citrine
         emitter.andi(T7, T8, 0x0020)
         emitter.beqz(T7, "chk_btn_down")
         emitter.nop
+        if @profile.has_audio
+          # Next Track
+          emitter.lw(T5, 0x78, T0)    # track_idx
+          emitter.addiu(T5, T5, 1)
+          emitter.lw(T6, 0x7C, T0)    # total_tracks
+          emitter.sltu(T7, T5, T6)
+          emitter.bnez(T7, "next_trk_ok")
+          emitter.nop
+          emitter.move(T5, ZERO)
+          emitter.label("next_trk_ok")
+          emitter.sw(T5, 0x78, T0)
+          emitter.sw(ZERO, 0x80, T0)  # reset elapsed_sec
+
+          # Restart track playback from start
+          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+          emitter.ori(A0, ZERO, 1)
+          emitter.jalr(T9)
+          emitter.nop
+          emitter.lui(T0, 0x7000)
+          emitter.ori(T5, ZERO, 1)
+          emitter.sw(T5, 60, T0)
+        end
         if addr = @rodata.button_msg_addrs["right"]?
           emitter.li(A0, addr)
           emitter.call("debug_puts")
@@ -627,6 +693,27 @@ module Citrine
         emitter.andi(T7, T8, 0x0080)
         emitter.beqz(T7, "chk_btn_l3")
         emitter.nop
+        if @profile.has_audio
+          # Previous Track
+          emitter.lw(T5, 0x78, T0)    # track_idx
+          emitter.lw(T6, 0x7C, T0)    # total_tracks
+          emitter.bnez(T5, "prev_trk_dec")
+          emitter.nop
+          emitter.move(T5, T6)
+          emitter.label("prev_trk_dec")
+          emitter.addiu(T5, T5, -1)
+          emitter.sw(T5, 0x78, T0)
+          emitter.sw(ZERO, 0x80, T0)  # reset elapsed_sec
+
+          # Restart track playback from start
+          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+          emitter.ori(A0, ZERO, 1)
+          emitter.jalr(T9)
+          emitter.nop
+          emitter.lui(T0, 0x7000)
+          emitter.ori(T5, ZERO, 1)
+          emitter.sw(T5, 60, T0)
+        end
         if addr = @rodata.button_msg_addrs["left"]?
           emitter.li(A0, addr)
           emitter.call("debug_puts")
@@ -658,6 +745,36 @@ module Citrine
         end
 
         emitter.label("btn_chk_done")
+
+        if @profile.has_audio
+          # Check R2 released (0x0200 in released edges at 0x7000001C): restore normal speed
+          emitter.lw(T7, 28, T0)
+          emitter.andi(T6, T7, 0x0200)
+          emitter.beqz(T6, "chk_l2_rel")
+          emitter.nop
+          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+          emitter.ori(A0, ZERO, 5) # cmd 5 = Normal Speed (pitch = 0x075A)
+          emitter.jalr(T9)
+          emitter.nop
+          emitter.lui(T0, 0x7000)
+
+          # Check L2 released (0x0100 in released edges at 0x7000001C): resume playback
+          emitter.label("chk_l2_rel")
+          emitter.lw(T7, 28, T0)
+          emitter.andi(T6, T7, 0x0100)
+          emitter.beqz(T6, "chk_rel_done")
+          emitter.nop
+          emitter.lw(T5, 60, T0)
+          emitter.ori(T6, ZERO, 1)
+          emitter.bne(T5, T6, "chk_rel_done")
+          emitter.nop
+          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+          emitter.ori(A0, ZERO, 3) # cmd 3 = Resume
+          emitter.jalr(T9)
+          emitter.nop
+          emitter.lui(T0, 0x7000)
+          emitter.label("chk_rel_done")
+        end
 
         # -------------------------------------------------------------
         # 4. General Phase Sequencing
