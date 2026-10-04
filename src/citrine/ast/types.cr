@@ -85,6 +85,10 @@ module Citrine
     ButtonReleased  = 42
     GetAnalog       = 43
     SetRumble       = 44
+    ActionPressed   = 45
+    ActionDown      = 46
+    ActionReleased  = 47
+    ActionRegister  = 48
     LoadSound       = 35
     PlaySound       = 36
     StopSound       = 37
@@ -169,6 +173,12 @@ module Citrine
     StringSplit      = 194
     StringConcat     = 195
     ToString         = 196
+    VU0BatchTransform = 210
+    VU0BatchDot      = 211
+    AudioPlayCDDA    = 220
+    AudioStopCDDA    = 221
+    AudioGetCDDAStatus = 222
+    AudioSetVolume   = 223
   end
 
   # Type discriminator identifiers for runtime `is_a?` and `as` type introspection.

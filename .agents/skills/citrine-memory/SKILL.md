@@ -98,3 +98,20 @@ Useful radare2 commands:
 [0x00100000]> dm                     # Display EE virtual memory layout
 [0x00100000]> dr                     # View Emotion Engine MIPS GPRs
 ```
+
+---
+
+## Detailed References
+
+| Topic | Reference | Content |
+|:---|:---|:---|
+| PS2 Memory Alignment & Forensics | [heap-alignment-forensics.md](./references/heap-alignment-forensics.md) | 16-byte/64-byte/128-byte hardware alignment, uncached memory acceleration (`0x30000000`), allocator canary validation |
+
+---
+
+## Mandatory Constraints & Rules
+
+- **Use Uncached Accelerated Addresses for DMA Staging**: Always route GIF/VIF DMA buffer pointers through KUSEG Uncached Accelerated (`0x30000000 | addr`) to eliminate D-cache flush overhead and prevent stale DRAM reads.
+- **Enforce 16-byte Quadword Alignment**: All heap chunks that interact with MMI instructions (`lq`/`sq`) or DMAC channels must be aligned to 16 bytes.
+- **Audit SPRAM Canary Every V-Blank**: Never allow stack frames or local scratch buffers to spill past `0x70003FF0`. Canary at `0x70000000` must remain `0xDEADBEEF`.
+

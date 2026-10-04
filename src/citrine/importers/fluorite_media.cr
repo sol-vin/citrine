@@ -1,10 +1,23 @@
 require "fluorite"
+require "json"
 require "./sound_importer"
 require "./image_importer"
 
 module Citrine
   module Importers
     module FluoriteMedia
+      # Metadata descriptor for an optical CD-DA audio track
+      record AudioTrackMetadata,
+        track_number : Int32,
+        title : String,
+        artist : String,
+        album : String,
+        duration_seconds : Float64,
+        sector_count : UInt32,
+        source_file : String,
+        output_file : String do
+        include JSON::Serializable
+      end
       # Video presets optimized for PlayStation 2 Emotion Engine & IPU
       record VideoConfig,
         fps : Int32 = 15,
@@ -19,6 +32,13 @@ module Citrine
         sample_rate : Int32 = 22050,
         channels : Int32 = 1,
         loop_audio : Bool = false
+
+      # CD-DA presets compliant with Red Book Compact Disc Digital Audio (44.1 kHz, 16-bit signed stereo Linear PCM)
+      record CddaConfig,
+        sample_rate : Int32 = 44100,
+        channels : Int32 = 2,
+        sector_size : Int32 = 2352,
+        duration_seconds : Float64? = nil
 
       # Texture presets optimized for PlayStation 2 Graphics Synthesizer CLUT
       record TextureConfig,
@@ -165,6 +185,50 @@ module Citrine
         end
       end
 
+      # Converts any audio or video stream into a Red Book CD-DA raw PCM sector stream (2,352 bytes/sector)
+      def self.convert_cdda(
+        input_path : String,
+        output_path : String,
+        config : CddaConfig = CddaConfig.new
+      ) : Bool
+        raise "FFmpeg is not installed or not in PATH." unless ffmpeg_installed?
+
+        temp_raw = "#{output_path}.tmp_cdda.raw"
+
+        cmd = Fluorite.build do
+          overwrite!
+          input(input_path)
+
+          output(temp_raw) do |outp|
+            outp.no_video
+            outp.audio_codec("pcm_s16le")
+            outp.sample_rate(config.sample_rate)
+            outp.channels(config.channels)
+            outp.format("s16le")
+            if dur = config.duration_seconds
+              outp.option("-t", dur.to_s)
+            end
+          end
+        end
+
+        status = cmd.run
+        return false unless status.success? && File.exists?(temp_raw)
+
+        begin
+          raw_size = File.size(temp_raw)
+          pad_bytes = (config.sector_size - (raw_size % config.sector_size)) % config.sector_size
+          File.open(output_path, "wb") do |out_f|
+            File.open(temp_raw, "rb") do |in_f|
+              IO.copy(in_f, out_f)
+            end
+            pad_bytes.times { out_f.write_byte(0_u8) }
+          end
+          true
+        ensure
+          File.delete(temp_raw) if File.exists?(temp_raw)
+        end
+      end
+
       # Converts any image format (PNG, JPG, BMP, etc.) into PS2 GS Paletted Texture (.cbt)
       # CLUT8 (8-bit paletted, 256 colors) saves 75% GS VRAM.
       # CLUT4 (4-bit paletted, 16 colors) saves 87.5% GS VRAM.
@@ -176,20 +240,11 @@ module Citrine
         raise "FFmpeg is not installed or not in PATH." unless ffmpeg_installed?
 
         temp_bmp = "#{output_path}.tmp_conv.bmp"
+        w = config.width || 128
+        h = config.height || 128
 
-        cmd = Fluorite.build do
-          overwrite!
-          input(input_path)
-
-          output(temp_bmp) do |outp|
-            if (w = config.width) && (h = config.height)
-              outp.scale(w, h)
-            end
-            outp.format("bmp")
-          end
-        end
-
-        status = cmd.run
+        args = ["-y", "-i", input_path, "-vf", "scale=#{w}:#{h}", "-frames:v", "1", "-update", "1", temp_bmp]
+        status = Process.run("ffmpeg", args)
         return false unless status.success? && File.exists?(temp_bmp)
 
         begin
@@ -265,6 +320,186 @@ module Citrine
         end
 
         {converted_count, original_total_bytes, optimized_total_bytes}
+      end
+
+      # Checks if ffprobe executable is installed and available in PATH
+      def self.ffprobe_installed? : Bool
+        Process.find_executable("ffprobe") != nil
+      end
+
+      # Extracts audio track metadata (track number, title, artist, album, duration) using ffprobe
+      def self.extract_audio_metadata(input_path : String) : AudioTrackMetadata
+        filename = File.basename(input_path)
+        default_title = File.basename(input_path, File.extname(input_path))
+        default_track = 1
+        default_artist = "Unknown Artist"
+        default_album = "Unknown Album"
+        default_duration = 0.0_f64
+
+        # Clean title heuristic if filename has track prefix like "01 Overture" or "Artist - Album - 01 Title"
+        if md = filename.match(/(?:^|\b|[-_])0*(\d{1,2})\s*[-_.]?\s*(.*?)\.[^.]+$/i)
+          default_track = md[1].to_i
+          clean_title = md[2].strip
+          default_title = clean_title unless clean_title.empty?
+        end
+
+        if ffprobe_installed?
+          io = IO::Memory.new
+          err_io = IO::Memory.new
+          proc = Process.new(
+            "ffprobe",
+            ["-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", input_path],
+            output: io,
+            error: err_io
+          )
+          if proc.wait.success?
+            begin
+              parsed = JSON.parse(io.to_s)
+
+              # Duration
+              if dur_val = parsed.dig?("format", "duration")
+                default_duration = dur_val.as_s.to_f64 rescue 0.0_f64
+              elsif dur_val = parsed.dig?("streams", 0, "duration")
+                default_duration = dur_val.as_s.to_f64 rescue 0.0_f64
+              end
+
+              # Tags (case-insensitive search across format and audio streams)
+              tags_hash = Hash(String, String).new
+              if fmt_tags = parsed.dig?("format", "tags").try(&.as_h?)
+                fmt_tags.each { |k, v| tags_hash[k.to_s.downcase] = v.to_s }
+              end
+              if strm_tags = parsed.dig?("streams", 0, "tags").try(&.as_h?)
+                strm_tags.each { |k, v| tags_hash[k.to_s.downcase] = v.to_s }
+              end
+
+              # Track Number
+              if trk_str = tags_hash["track"]?
+                if md = trk_str.match(/^(\d+)/)
+                  default_track = md[1].to_i
+                end
+              end
+
+              # Title
+              if t = tags_hash["title"]?
+                default_title = t unless t.strip.empty?
+              end
+
+              # Artist
+              if a = tags_hash["artist"]? || tags_hash["album_artist"]?
+                default_artist = a unless a.strip.empty?
+              end
+
+              # Album
+              if alb = tags_hash["album"]?
+                default_album = alb unless alb.strip.empty?
+              end
+            rescue
+              # Ignore JSON parse errors and use filename defaults
+            end
+          end
+        end
+
+        sector_count = ((default_duration * 44100.0 * 4.0 + 2351.0) / 2352.0).to_u32
+
+        AudioTrackMetadata.new(
+          track_number: default_track,
+          title: default_title,
+          artist: default_artist,
+          album: default_album,
+          duration_seconds: default_duration,
+          sector_count: sector_count,
+          source_file: input_path,
+          output_file: ""
+        )
+      end
+
+      # Transcodes an entire album directory of MP3/OGG/FLAC files into Red Book CD-DA raw PCM sector tracks
+      # for mixed-mode PlayStation 2 CD-ROM images.
+      def self.import_album(
+        album_dir : String,
+        output_dir : String,
+        &block : String -> Nil
+      ) : Array(AudioTrackMetadata)
+        audio_exts = [".ogg", ".mp3", ".wav", ".flac", ".m4a"]
+
+        files = Dir.children(album_dir).map { |f| File.join(album_dir, f) }.select do |f|
+          File.file?(f) && audio_exts.includes?(File.extname(f).downcase)
+        end
+
+        if files.empty?
+          yield "Warning: No audio files found in #{album_dir}"
+          return [] of AudioTrackMetadata
+        end
+
+        yield "Found #{files.size} audio tracks in #{album_dir}. Extracting metadata..."
+
+        # Extract metadata
+        tracks = files.map { |f| extract_audio_metadata(f) }
+
+        # Sort strictly by track number
+        tracks.sort_by!(&.track_number)
+
+        Dir.mkdir_p(output_dir)
+        processed_tracks = [] of AudioTrackMetadata
+
+        # Note: CD Track 1 is always the ISO9660 Data track!
+        # Audio tracks start at optical Track 2 (track02.raw .. trackNN.raw)
+        tracks.each_with_index do |track, idx|
+          cdda_track_num = idx + 2
+          out_filename = sprintf("track%02d.raw", cdda_track_num)
+          out_path = File.join(output_dir, out_filename)
+
+          yield sprintf("  [%02d/%02d] Trk %02d: %s - %s (%.1fs) -> %s",
+                        idx + 1, tracks.size, track.track_number, track.artist, track.title,
+                        track.duration_seconds, out_filename)
+
+          convert_cdda(track.source_file, out_path, CddaConfig.new)
+
+          actual_sectors = File.exists?(out_path) ? (File.size(out_path) // 2352).to_u32 : track.sector_count
+          actual_duration = actual_sectors.to_f64 / 75.0
+
+          processed_tracks << AudioTrackMetadata.new(
+            track_number: track.track_number,
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            duration_seconds: actual_duration,
+            sector_count: actual_sectors,
+            source_file: track.source_file,
+            output_file: out_path
+          )
+        end
+
+        # Ingest cover art if present (cover.jpg, cover.png, folder.jpg)
+        ["cover.jpg", "cover.png", "folder.jpg", "cover.jpeg"].each do |img_name|
+          img_path = File.join(album_dir, img_name)
+          if File.exists?(img_path)
+            cbt_path = File.join(output_dir, "cover.cbt")
+            yield "  Ingesting album cover #{img_path} -> #{cbt_path} (GS CLUT8, 128x128)..."
+            begin
+              convert_texture(img_path, cbt_path, TextureConfig.new(width: 128, height: 128, clut_bits: 8))
+            rescue ex
+              yield "  Warning: Album cover conversion failed: #{ex.message}"
+            end
+            break
+          end
+        end
+
+        # Save album_metadata.json
+        json_path = File.join(output_dir, "album_metadata.json")
+        File.open(json_path, "w") do |f|
+          processed_tracks.to_json(f)
+        end
+        yield "Saved album descriptors to #{json_path}"
+
+        processed_tracks
+      end
+
+      def self.import_album(
+        album_dir : String,
+        output_dir : String
+      ) : Array(AudioTrackMetadata)
+        import_album(album_dir, output_dir) { |msg| puts msg }
       end
     end
   end

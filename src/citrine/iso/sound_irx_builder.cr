@@ -1,8 +1,12 @@
 require "./sound_irx_base"
+require "../mips/mips_emitter"
 
 module Citrine
   module ISO
     class SoundIrxBuilder
+      alias MipsEmitter = Citrine::MIPS::MipsEmitter
+      include Citrine::MIPS
+
       # Builds an S.IRX ELF module embedding the given VAG audio stream.
       # If vag_bytes is nil or smaller than a standard VAG header (48 bytes),
       # returns the base IRX unaltered.
@@ -118,9 +122,126 @@ module Citrine
         # Patch pitch at .text+0x434: li a1, 0x075A (exact 22,050 Hz on 48.0 kHz SPU2 core: 22050 * 4096 / 48000 = 1881.6 ~= 1882)
         out_bytes[text_off + 0x434, 4].copy_from(Bytes[0x5A, 0x07, 0x05, 0x24])
 
-        # Neutralize TestThread so only SoundThread (via EE RPC) controls playback:
-        out_bytes[text_off + 0x4dc, 4].copy_from(Bytes[0x08, 0x00, 0xE0, 0x03]) # jr $ra
-        out_bytes[text_off + 0x4e0, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00]) # nop
+        # Multi-mode sound dispatcher at .text+0x4dc (replaces dead TestThread space):
+        # Dispatches SoundMode (passed in v0 from SoundHandler):
+        #   0 = Stop (calls StopSound)
+        #   1 = Play (calls PlaySound, initializes cur_vol at 0x17d8)
+        #   2 = Pause (sets voice 0 pitch to 0, sets master volume to 0)
+        #   3 = Resume (restores voice 0 pitch to 0x075A, restores master volume)
+        #   0x1000..0x10FF = Set Volume (cur_vol = (mode & 0xFF) << 6, sets master volume)
+        disp = MipsEmitter.new(0x000004dc_u32)
+
+        # Case 1: Play
+        disp.label("chk_play")
+        disp.ori(T1, ZERO, 1)
+        disp.bne(V0, T1, "chk_stop")
+        disp.nop
+        disp.jal("PlaySound")
+        disp.nop
+        disp.lui(A0, 0)
+        disp.lw(A1, 0x17d8, A0)
+        disp.bnez(A1, "play_ret")
+        disp.nop
+        disp.ori(A1, ZERO, 0x3C00)
+        disp.sw(A1, 0x17d8, A0)
+        disp.label("play_ret")
+        disp.j("SoundThread_Loop")
+        disp.nop
+
+        # Case 0: Stop
+        disp.label("chk_stop")
+        disp.bnez(V0, "chk_pause")
+        disp.nop
+        disp.jal("StopSound")
+        disp.nop
+        disp.j("SoundThread_Loop")
+        disp.nop
+
+        # Case 2: Pause
+        disp.label("chk_pause")
+        disp.ori(T1, ZERO, 2)
+        disp.bne(V0, T1, "chk_resume")
+        disp.nop
+        disp.ori(A0, ZERO, 0x200) # SD_VP_PITCH Voice 0 = 0
+        disp.move(A1, ZERO)
+        disp.jal("sceSdSetParam")
+        disp.nop
+        disp.ori(A0, ZERO, 0x980) # SD_C_MVOLL = 0
+        disp.move(A1, ZERO)
+        disp.jal("sceSdSetParam")
+        disp.nop
+        disp.ori(A0, ZERO, 0xa80) # SD_C_MVOLR = 0
+        disp.move(A1, ZERO)
+        disp.jal("sceSdSetParam")
+        disp.nop
+        disp.j("SoundThread_Loop")
+        disp.nop
+
+        # Case 3: Resume
+        disp.label("chk_resume")
+        disp.ori(T1, ZERO, 3)
+        disp.bne(V0, T1, "chk_vol")
+        disp.nop
+        disp.ori(A0, ZERO, 0x200) # SD_VP_PITCH Voice 0 = 0x075A
+        disp.ori(A1, ZERO, 0x075A)
+        disp.jal("sceSdSetParam")
+        disp.nop
+        disp.lui(T0, 0)
+        disp.lw(A1, 0x17d8, T0)
+        disp.bnez(A1, "res_vol_l")
+        disp.nop
+        disp.ori(A1, ZERO, 0x3C00)
+        disp.label("res_vol_l")
+        disp.ori(A0, ZERO, 0x980) # SD_C_MVOLL
+        disp.jal("sceSdSetParam")
+        disp.nop
+        disp.lui(T0, 0)
+        disp.lw(A1, 0x17d8, T0)
+        disp.bnez(A1, "res_vol_r")
+        disp.nop
+        disp.ori(A1, ZERO, 0x3C00)
+        disp.label("res_vol_r")
+        disp.ori(A0, ZERO, 0xa80) # SD_C_MVOLR
+        disp.jal("sceSdSetParam")
+        disp.nop
+        disp.j("SoundThread_Loop")
+        disp.nop
+
+        # Case 4: Set Volume (0x1000..0x10FF)
+        disp.label("chk_vol")
+        disp.srl(T1, V0, 12)
+        disp.ori(T2, ZERO, 1)
+        disp.bne(T1, T2, "disp_done")
+        disp.nop
+        disp.andi(A1, V0, 0xFF)
+        disp.sll(A1, A1, 6) # scale 0..255 -> 0..16320
+        disp.lui(T0, 0)
+        disp.sw(A1, 0x17d8, T0)
+        disp.ori(A0, ZERO, 0x980) # SD_C_MVOLL
+        disp.jal("sceSdSetParam")
+        disp.nop
+        disp.lui(T0, 0)
+        disp.lw(A1, 0x17d8, T0)
+        disp.ori(A0, ZERO, 0xa80) # SD_C_MVOLR
+        disp.jal("sceSdSetParam")
+        disp.nop
+
+        disp.label("disp_done")
+        disp.j("SoundThread_Loop")
+        disp.nop
+
+        disp.labels["PlaySound"] = 0x00000170_u32
+        disp.labels["StopSound"] = 0x00000484_u32
+        disp.labels["sceSdSetParam"] = 0x00000f0c_u32
+        disp.labels["SoundThread_Loop"] = 0x00000cb4_u32
+        disp.resolve!
+
+        disp_bytes = disp.to_slice
+        out_bytes[text_off + 0x4dc, disp_bytes.size].copy_from(disp_bytes)
+
+        # Hook SoundThread at 0xc90: j 0x4dc; nop
+        out_bytes[text_off + 0xc90, 4].copy_from(Bytes[0x37, 0x01, 0x00, 0x08]) # j 0x4dc
+        out_bytes[text_off + 0xc94, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00]) # nop
 
         out_bytes
       end

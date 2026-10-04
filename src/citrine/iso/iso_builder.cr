@@ -1,21 +1,25 @@
 require "file_utils"
 require "./elf_builder"
+require "./sound_irx_builder"
 
 module Citrine
   # Constructs standard ISO9660 filesystem images (.iso) bootable on PlayStation 2 (PCSX2 or real hardware).
   # Complies with ECMA-119 specification and PS2 CD/DVD-ROM volume layouts.
   class IsoBuilder
+    alias SoundIrxBuilder = Citrine::ISO::SoundIrxBuilder
+
     SECTOR_SIZE = 2048
 
     record IsoFile, name : String, data : Bytes, sector : UInt32, size : UInt32
 
-    def self.build(output_path : String, cbc_bytes : Bytes, elf_bytes : Bytes? = nil, extra_files : Hash(String, Bytes) = {} of String => Bytes, input_schedule : Array(VirtualInput) = [] of VirtualInput)
+    def self.build(output_path : String, cbc_bytes : Bytes, elf_bytes : Bytes? = nil, extra_files : Hash(String, Bytes) = {} of String => Bytes, input_schedule : Array(VirtualInput) = [] of VirtualInput, audio_tracks : Array(String) = [] of String, vag_bytes : Bytes? = nil)
       builder = new
-      builder.build(output_path, cbc_bytes, elf_bytes, extra_files, input_schedule)
+      builder.build(output_path, cbc_bytes, elf_bytes, extra_files, input_schedule, audio_tracks, vag_bytes)
     end
 
-    def build(output_path : String, cbc_bytes : Bytes, elf_bytes : Bytes? = nil, extra_files : Hash(String, Bytes) = {} of String => Bytes, input_schedule : Array(VirtualInput) = [] of VirtualInput)
-      elf_data = elf_bytes || ElfBuilder.build_default_runner_elf(cbc_bytes, input_schedule)
+    def build(output_path : String, cbc_bytes : Bytes, elf_bytes : Bytes? = nil, extra_files : Hash(String, Bytes) = {} of String => Bytes, input_schedule : Array(VirtualInput) = [] of VirtualInput, audio_tracks : Array(String) = [] of String, vag_bytes : Bytes? = nil)
+      vag_extra = vag_bytes || ((match = extra_files.find { |k, _| k.downcase.ends_with?(".vag") }) ? match[1] : nil)
+      elf_data = elf_bytes || ElfBuilder.build_default_runner_elf(cbc_bytes, input_schedule, vag_bytes: vag_extra)
 
       # Standard PS2 boot configuration
       system_cnf = "BOOT2 = cdrom0:\\CITRINE.ELF;1\r\nVER = 1.00\r\nVMODE = NTSC\r\n".to_slice
@@ -45,7 +49,12 @@ module Citrine
       files << IsoFile.new("GAME.CBC;1", cbc_bytes, current_sector, cbc_bytes.size.to_u32)
       current_sector += ((cbc_bytes.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
 
-      # 4. Extra assets
+      # 4. S.IRX (Hardware SPU2 Audio Driver)
+      s_irx_bytes = SoundIrxBuilder.build(vag_extra)
+      files << IsoFile.new("S.IRX;1", s_irx_bytes, current_sector, s_irx_bytes.size.to_u32)
+      current_sector += ((s_irx_bytes.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
+
+      # 5. Extra assets
       extra_files.each do |fname, data|
         iso_name = fname.upcase.gsub(/[^A-Z0-9_\.]/, "_")
         iso_name = "#{iso_name};1" unless iso_name.includes?(";")
@@ -81,6 +90,33 @@ module Citrine
           # Pad each file to 2048-byte sector boundary
           pad = (SECTOR_SIZE - (f.data.size % SECTOR_SIZE)) % SECTOR_SIZE
           pad.times { io.write_byte(0_u8) }
+        end
+      end
+
+      # Write Mixed-Mode CUE sheet if CD-DA audio tracks are present
+      if !audio_tracks.empty?
+        cue_path = output_path.sub(/\.(iso|bin)$/i, ".cue")
+        cue_dir = File.dirname(output_path)
+        iso_base = File.basename(output_path)
+
+        File.open(cue_path, "w") do |cue|
+          cue.puts %(FILE "#{iso_base}" BINARY)
+          cue.puts %(  TRACK 01 MODE1/2048)
+          cue.puts %(    INDEX 01 00:00:00)
+
+          audio_tracks.each_with_index do |track_path, idx|
+            track_num = idx + 2
+            track_base = File.basename(track_path)
+            target_track_path = File.join(cue_dir, track_base)
+            if File.expand_path(track_path) != File.expand_path(target_track_path) && File.exists?(track_path)
+              FileUtils.cp(track_path, target_track_path)
+            end
+
+            cue.puts %(FILE "#{track_base}" BINARY)
+            cue.puts sprintf("  TRACK %02d AUDIO", track_num)
+            cue.puts %(    PREGAP 00:02:00)
+            cue.puts %(    INDEX 01 00:00:00)
+          end
         end
       end
     end

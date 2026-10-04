@@ -13,6 +13,10 @@ module Citrine
         case sub
         when "video"
           run_video(args[1..])
+        when "cdda", "cd-audio"
+          run_cdda(args[1..])
+        when "album"
+          run_album(args[1..])
         when "audio", "sound"
           run_audio(args[1..])
         when "texture", "image"
@@ -43,7 +47,8 @@ module Citrine
 
         Subcommands:
           video <file>    Transcode video to PS2 IPU MPEG-2 Program Stream (.pss)
-          audio <file>    Transcode audio to Sony SPU2 4-bit ADPCM (.vag)
+          cdda <file>     Transcode audio to Red Book CD-DA raw sector stream (.raw / 2352B)
+          audio <file>    Transcode audio to Sony SPU2 4-bit ADPCM (.vag) or CD-DA (--cdda)
           texture <file>  Convert image to GS CLUT paletted texture (.cbt)
           auto <dir>      Batch convert an entire folder of assets
           probe <file>    Display stream and codec details of a media file
@@ -56,9 +61,11 @@ module Citrine
           --dvd-track           Package into DVD sector stream ("DVD Video Track Trick")
 
         Audio Options:
-          -o <path>             Output path (default: <basename>.vag)
+          -o <path>             Output path (default: <basename>.vag or <basename>.raw)
           --rate <hz>           Sample rate in Hz: 22050 (default) or 44100
           --loop                Set SPU2 hardware loop repeat flags
+          --cdda                Transcode as Red Book CD-DA 16-bit stereo sectors (2,352 bytes)
+          --duration <sec>      Optional audio duration limit in seconds
 
         Texture Options:
           -o <path>             Output path (default: <basename>.cbt)
@@ -123,7 +130,54 @@ module Citrine
         end
       end
 
+      private def self.run_cdda(args : Array(String))
+        input = args.reject(&.starts_with?("-")).first?
+        unless input && File.exists?(input)
+          puts "Error: Input audio file not found."
+          return
+        end
+
+        out_path = extract_opt(args, "-o") || "#{File.basename(input, File.extname(input))}.raw"
+        rate = (extract_opt(args, "--rate") || "44100").to_i
+        duration = extract_opt(args, "--duration").try(&.to_f64)
+
+        puts "======================================================================"
+        puts "              CITRINE RED BOOK CD-DA AUDIO IMPORT                    "
+        puts "======================================================================"
+        puts "  Input:       #{input}"
+        puts "  Output:      #{out_path}"
+        puts "  Sample Rate: #{rate} Hz"
+        puts "  Channels:    2 (Stereo Linear PCM 16-bit LE)"
+        puts "  Sector Size: 2,352 bytes (Red Book CD-DA)"
+        if duration
+          puts "  Duration:    #{duration} seconds"
+        end
+        puts "----------------------------------------------------------------------"
+
+        config = Importers::FluoriteMedia::CddaConfig.new(
+          sample_rate: rate,
+          channels: 2,
+          sector_size: 2352,
+          duration_seconds: duration
+        )
+
+        if Importers::FluoriteMedia.convert_cdda(input, out_path, config)
+          orig_kb = File.size(input) // 1024
+          out_kb = File.size(out_path) // 1024
+          sectors = File.size(out_path) // 2352
+          puts "\n[SUCCESS] Audio encoded to Red Book CD-DA (.raw) successfully!"
+          puts sprintf("  Size: %d KB -> %d KB (%d CD audio sectors)", orig_kb, out_kb, sectors)
+        else
+          puts "\n[ERROR] CD-DA audio transcoding failed."
+        end
+      end
+
       private def self.run_audio(args : Array(String))
+        if args.includes?("--cdda")
+          run_cdda(args)
+          return
+        end
+
         input = args.reject(&.starts_with?("-")).first?
         unless input && File.exists?(input)
           puts "Error: Input audio file not found."
@@ -231,6 +285,34 @@ module Citrine
           savings = (1.0 - (opt_bytes.to_f / orig_bytes.to_f)) * 100.0
           puts sprintf("  Total storage: %.2f MB -> %.2f MB (%.1f%% memory saved!)", orig_mb, opt_mb, savings)
         end
+      end
+
+      private def self.run_album(args : Array(String))
+        input_dir = args.reject(&.starts_with?("-")).first?
+        unless input_dir && Dir.exists?(input_dir)
+          puts "Error: Input album directory not found."
+          return
+        end
+
+        out_dir = extract_opt(args, "-o") || File.dirname(input_dir)
+
+        puts "======================================================================"
+        puts "              CITRINE RED BOOK CD-DA ALBUM IMPORTER                  "
+        puts "======================================================================"
+        puts "  Album Source: #{input_dir}"
+        puts "  Disc Target:  #{out_dir}"
+        puts "  Format:       Red Book CD-DA (44.1 kHz, 16-bit Stereo, 2,352 B/sec)"
+        puts "----------------------------------------------------------------------"
+
+        tracks = Importers::FluoriteMedia.import_album(input_dir, out_dir) do |msg|
+          puts "  * #{msg}"
+        end
+
+        puts "----------------------------------------------------------------------"
+        puts sprintf("[COMPLETE] Ingested %d album tracks onto mixed-mode disc layout.", tracks.size)
+        total_sectors = tracks.sum(&.sector_count)
+        total_min = (total_sectors.to_f / 75.0 / 60.0)
+        puts sprintf("  Total Audio Duration: %.2f minutes (%d optical sectors)", total_min, total_sectors)
       end
 
       private def self.run_probe(args : Array(String))

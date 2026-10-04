@@ -148,6 +148,9 @@ module Citrine
 
     # Immediate halt: terminates VM execution, flushes telemetry, and parks CPU.
     Halt        = 70
+
+    # Inline MIPS R5900, COP0, or COP2 machine instruction execution directly on PS2 silicon.
+    InlineAsm   = 72
   end
 
   # Fixed-width 32-bit Little-Endian Citrine VM instruction word.

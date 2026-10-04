@@ -87,6 +87,7 @@ module Citrine
     getter inline_asm_words = [] of UInt32
     getter is_inline_assembly : Bool = false
     property has_audio : Bool = false
+    getter is_audio_player : Bool = false
 
     def self.build_default_runner_elf(cbc_bytes : Bytes? = nil, input_schedule : Array(VirtualInput) = [] of VirtualInput, vag_bytes : Bytes? = nil) : Bytes
       builder = new
@@ -123,6 +124,110 @@ module Citrine
       phase_table_addr = 0_u32
       rot_table_addr = 0_u32
       rot_table_slice = Bytes.empty
+
+      ap_status_table_addr = 0_u32
+      ap_status_table_slice = Bytes.empty
+      ap_status_pkt_slices = [] of Bytes
+      ap_track_table_addr = 0_u32
+      ap_track_table_slice = Bytes.empty
+      ap_track_pkt_slices = [] of Bytes
+      ap_dur_table_addr = 0_u32
+      ap_dur_table_slice = Bytes.empty
+      ap_loop_table_addr = 0_u32
+      ap_loop_table_slice = Bytes.empty
+      ap_loop_pkt_slices = [] of Bytes
+      ap_flat_eq_addr = 0_u32
+      ap_flat_eq_qwc = 0_u16
+      ap_flat_eq_slice = Bytes.empty
+
+      tracks = [
+        {"Overture (feat. Neon Bunny, Super Brass)", 132},
+        {"Come On! (feat. Super Brass, Tomggg)", 209},
+        {"Level Off (feat. Super Brass)", 216},
+        {"Yuu-Huu (feat. Jef)", 174},
+        {"Riverside Drive", 198},
+        {"Back To Back (feat. Super Brass, Yunovation)", 194},
+        {"Hot Talkin' (feat. Super Brass)", 175},
+        {"Starlight Girl (feat. Antenna Girl)", 192},
+        {"Love Game (feat. SHUUU)", 184},
+        {"Turn The Lights On", 153},
+        {"Better Days (feat. EXN, Super Brass)", 175},
+        {"Bay City Groove (feat. Super Brass)", 192},
+        {"Memory Lane (feat. Antenna Girl)", 115},
+      ]
+
+      if @is_audio_player
+        album_meta_path = "examples/10_video_and_audio/album_metadata.json"
+        album_meta_path = "album_metadata.json" if File.exists?("album_metadata.json")
+        if File.exists?(album_meta_path)
+          begin
+            parsed = JSON.parse(File.read(album_meta_path)).as_a
+            loaded_tracks = [] of Tuple(String, Int32)
+            parsed.each do |entry|
+              title = entry["title"]?.try(&.as_s) || "Track"
+              dur = (entry["duration_seconds"]?.try(&.as_f) || 180.0).to_i
+              loaded_tracks << {title, dur}
+            end
+            tracks = loaded_tracks unless loaded_tracks.empty?
+          rescue
+          end
+        end
+
+        fe_cmds = [
+          DrawCommand.new(DrawCommand::Type::Rect, 60, 280, 520, 68, color: 0xFF160E0C_u32)
+        ]
+        eq_x = 62
+        while eq_x < 578
+          fe_cmds << DrawCommand.new(DrawCommand::Type::Rect, eq_x, 339, 14, 6, color: 0xFF505050_u32)
+          eq_x += 18
+        end
+        ap_flat_eq_slice = GifPacketBuilder.build_draw_packet(fe_cmds)
+
+        statuses = [
+          {"PLAYING", 0xFF00FF00_u32},
+          {"PAUSED", 0xFF00FFFF_u32},
+          {"STOPPED", 0xFF0000FF_u32},
+          {"FAST FORWARD >>", 0xFFFFFF00_u32},
+          {"REWIND <<", 0xFF00A5FF_u32}
+        ]
+        statuses.each do |text, color|
+          s_cmds = [
+            DrawCommand.new(DrawCommand::Type::Rect, 216, 126, 200, 18, color: 0xFF241814_u32),
+            DrawCommand.new(DrawCommand::Type::Text, 220, 128, 13, 0, color: color, text: text)
+          ]
+          ap_status_pkt_slices << GifPacketBuilder.build_draw_packet(s_cmds)
+        end
+
+        ["OFF", "ON"].each do |l_str|
+          l_cmds = [
+            DrawCommand.new(DrawCommand::Type::Rect, 48, 368, 540, 16, color: 0xFF505050_u32),
+            DrawCommand.new(DrawCommand::Type::Text, 55, 370, 11, 0, color: 0xFF00FFFF_u32, text: "CROSS: Play/Pause - CIRCLE: Stop - SQUARE: Loop (#{l_str})")
+          ]
+          ap_loop_pkt_slices << GifPacketBuilder.build_draw_packet(l_cmds)
+        end
+
+        tracks.each_with_index do |(title, _), i|
+          opt_num = i + 2
+          opt_str = opt_num < 10 ? "Optical Track 0#{opt_num} (CD-DA AUDIO/2352)" : "Optical Track #{opt_num} (CD-DA AUDIO/2352)"
+          disp_title = "Track #{opt_num < 10 ? "0#{opt_num}" : "#{opt_num}"}: #{title}"
+          disp_title = disp_title[0, 42] if disp_title.size > 42
+
+          t_cmds = [
+            DrawCommand.new(DrawCommand::Type::Rect, 216, 80, 356, 44, color: 0xFF241814_u32),
+            DrawCommand.new(DrawCommand::Type::Text, 220, 84, 12, 0, color: 0xFFFFFFFF_u32, text: disp_title),
+            DrawCommand.new(DrawCommand::Type::Text, 220, 106, 11, 0, color: 0xFFA0A0A0_u32, text: opt_str)
+          ]
+          ap_track_pkt_slices << GifPacketBuilder.build_draw_packet(t_cmds)
+        end
+
+        dur_mem = IO::Memory.new
+        tracks.each do |_, dur|
+          dur_mem.write_bytes((dur * 60).to_u32, IO::ByteFormat::LittleEndian)
+        end
+        dur_pad = (16 - (dur_mem.size % 16)) % 16
+        dur_pad.times { dur_mem.write_byte(0_u8) }
+        ap_dur_table_slice = dur_mem.to_slice
+      end
 
       if @is_dvd_screensaver
         static_cmds = [
@@ -205,6 +310,72 @@ module Citrine
       sched_pad.times { sched_bytes.write_byte(0_u8) }
       sched_slice = sched_bytes.to_slice
       curr_addr += sched_slice.size.to_u32
+
+      if @is_audio_player
+        ap_flat_eq_addr = curr_addr
+        curr_addr += ap_flat_eq_slice.size.to_u32
+        ap_flat_eq_qwc = (ap_flat_eq_slice.size // 16).to_u16
+
+        ap_status_addrs = [] of UInt32
+        ap_status_qwcs = [] of UInt16
+        ap_status_pkt_slices.each do |pkt|
+          ap_status_addrs << curr_addr
+          ap_status_qwcs << (pkt.size // 16).to_u16
+          curr_addr += pkt.size.to_u32
+        end
+
+        st_mem = IO::Memory.new
+        ap_status_addrs.each_with_index do |addr, i|
+          st_mem.write_bytes(addr, IO::ByteFormat::LittleEndian)
+          st_mem.write_bytes(ap_status_qwcs[i].to_u32, IO::ByteFormat::LittleEndian)
+        end
+        st_pad = (16 - (st_mem.size % 16)) % 16
+        st_pad.times { st_mem.write_byte(0_u8) }
+        ap_status_table_slice = st_mem.to_slice
+        ap_status_table_addr = curr_addr
+        curr_addr += ap_status_table_slice.size.to_u32
+
+        ap_loop_addrs = [] of UInt32
+        ap_loop_qwcs = [] of UInt16
+        ap_loop_pkt_slices.each do |pkt|
+          ap_loop_addrs << curr_addr
+          ap_loop_qwcs << (pkt.size // 16).to_u16
+          curr_addr += pkt.size.to_u32
+        end
+
+        lt_mem = IO::Memory.new
+        ap_loop_addrs.each_with_index do |addr, i|
+          lt_mem.write_bytes(addr, IO::ByteFormat::LittleEndian)
+          lt_mem.write_bytes(ap_loop_qwcs[i].to_u32, IO::ByteFormat::LittleEndian)
+        end
+        lt_pad = (16 - (lt_mem.size % 16)) % 16
+        lt_pad.times { lt_mem.write_byte(0_u8) }
+        ap_loop_table_slice = lt_mem.to_slice
+        ap_loop_table_addr = curr_addr
+        curr_addr += ap_loop_table_slice.size.to_u32
+
+        ap_track_addrs = [] of UInt32
+        ap_track_qwcs = [] of UInt16
+        ap_track_pkt_slices.each do |pkt|
+          ap_track_addrs << curr_addr
+          ap_track_qwcs << (pkt.size // 16).to_u16
+          curr_addr += pkt.size.to_u32
+        end
+
+        tt_mem = IO::Memory.new
+        ap_track_addrs.each_with_index do |addr, i|
+          tt_mem.write_bytes(addr, IO::ByteFormat::LittleEndian)
+          tt_mem.write_bytes(ap_track_qwcs[i].to_u32, IO::ByteFormat::LittleEndian)
+        end
+        tt_pad = (16 - (tt_mem.size % 16)) % 16
+        tt_pad.times { tt_mem.write_byte(0_u8) }
+        ap_track_table_slice = tt_mem.to_slice
+        ap_track_table_addr = curr_addr
+        curr_addr += ap_track_table_slice.size.to_u32
+
+        ap_dur_table_addr = curr_addr
+        curr_addr += ap_dur_table_slice.size.to_u32
+      end
 
       if @is_inline_assembly
         rot_mem = IO::Memory.new(256)
@@ -367,6 +538,7 @@ module Citrine
       if @has_audio
         emitter.lui(T9, (PadRuntimePayload::SOUND_PLAY_ENTRY >> 16).to_i32)
         emitter.ori(T9, T9, (PadRuntimePayload::SOUND_PLAY_ENTRY & 0xFFFF).to_i32)
+        emitter.ori(A0, ZERO, 1)
         emitter.jalr(T9)
         emitter.nop
         emitter.lui(T0, 0x7000)
@@ -374,6 +546,24 @@ module Citrine
         emitter.sw(T1, 60, T0)    # audio playing flag = 1      (0x7000003C)
       else
         emitter.sw(ZERO, 60, T0)  # audio playing flag = 0      (0x7000003C)
+      end
+      if @is_audio_player
+        emitter.lui(T0, 0x7000)
+        emitter.ori(T1, ZERO, 240)
+        emitter.sw(T1, 0x70, T0)   # master_vol = 240 (0x70000070)
+        emitter.sw(ZERO, 0x74, T0) # track_idx = 0    (0x70000074)
+        emitter.sw(ZERO, 0x78, T0) # elapsed_frames=0 (0x70000078)
+        emitter.ori(T1, ZERO, 1)
+        emitter.sw(T1, 0x7C, T0)   # is_looping = 1   (0x7000007C)
+        emitter.sw(ZERO, 0x80, T0) # status_mode = 0  (0x70000080)
+        emitter.sw(ZERO, 0x84, T0) # audio_paused = 0 (0x70000084)
+
+        # Set SPU2 hardware volume to 240: cmd = 0x1000 | 240 = 0x10F0
+        emitter.lui(T9, (PadRuntimePayload::SOUND_PLAY_ENTRY >> 16).to_i32)
+        emitter.ori(T9, T9, (PadRuntimePayload::SOUND_PLAY_ENTRY & 0xFFFF).to_i32)
+        emitter.ori(A0, ZERO, 0x10F0)
+        emitter.jalr(T9)
+        emitter.nop
       end
       if @is_dvd_screensaver
         emitter.ori(T1, ZERO, 1)
@@ -902,7 +1092,48 @@ module Citrine
         emitter.jal("Citrine_InlineAsm_Block")
         emitter.nop
       end
-      if @has_audio
+      if @is_audio_player
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T5, 60, T0)       # 0x7000003C: audio playing flag
+        emitter.bnez(T5, "ap_cross_pause")
+        emitter.nop
+        # Currently paused or stopped -> Play / Resume
+        emitter.lw(T4, 0x84, T0)     # 0x70000084: audio_paused
+        emitter.bnez(T4, "ap_cross_resume")
+        emitter.nop
+        # Was stopped -> cmd 1 (Play from beginning)
+        emitter.ori(A0, ZERO, 1)
+        emitter.j("ap_cross_send")
+        emitter.nop
+        emitter.label("ap_cross_resume")
+        # Was paused -> cmd 3 (Resume playback)
+        emitter.ori(A0, ZERO, 3)
+        emitter.label("ap_cross_send")
+        emitter.lui(T9, (PadRuntimePayload::SOUND_PLAY_ENTRY >> 16).to_i32)
+        emitter.ori(T9, T9, (PadRuntimePayload::SOUND_PLAY_ENTRY & 0xFFFF).to_i32)
+        emitter.jalr(T9)
+        emitter.nop
+        emitter.lui(T0, 0x7000)
+        emitter.ori(T5, ZERO, 1)
+        emitter.sw(T5, 60, T0)       # is_playing = 1
+        emitter.sw(ZERO, 0x84, T0)   # audio_paused = 0
+        emitter.sw(ZERO, 0x80, T0)   # status_mode = 0 (PLAYING)
+        emitter.j("audio_done")
+        emitter.nop
+        emitter.label("ap_cross_pause")
+        # Currently playing -> cmd 2 (Pause)
+        emitter.lui(T9, (PadRuntimePayload::SOUND_PLAY_ENTRY >> 16).to_i32)
+        emitter.ori(T9, T9, (PadRuntimePayload::SOUND_PLAY_ENTRY & 0xFFFF).to_i32)
+        emitter.ori(A0, ZERO, 2)
+        emitter.jalr(T9)
+        emitter.nop
+        emitter.lui(T0, 0x7000)
+        emitter.sw(ZERO, 60, T0)     # is_playing = 0
+        emitter.ori(T5, ZERO, 1)
+        emitter.sw(T5, 0x84, T0)     # audio_paused = 1
+        emitter.sw(T5, 0x80, T0)     # status_mode = 1 (PAUSED)
+        emitter.label("audio_done")
+      elsif @has_audio
         emitter.lui(T0, 0x7000)
         emitter.lw(T5, 60, T0)       # 0x7000003C: audio playing flag
         emitter.bnez(T5, "audio_pause")
@@ -910,6 +1141,7 @@ module Citrine
         # Currently paused -> Play
         emitter.lui(T9, (PadRuntimePayload::SOUND_PLAY_ENTRY >> 16).to_i32)
         emitter.ori(T9, T9, (PadRuntimePayload::SOUND_PLAY_ENTRY & 0xFFFF).to_i32)
+        emitter.ori(A0, ZERO, 1)
         emitter.jalr(T9)
         emitter.nop
         emitter.lui(T0, 0x7000)
@@ -953,7 +1185,18 @@ module Citrine
       emitter.andi(T7, T8, 0x2000)
       emitter.beqz(T7, "chk_btn_square")
       emitter.nop
-      if @has_audio
+      if @is_audio_player
+        emitter.lui(T9, (PadRuntimePayload::SOUND_STOP_ENTRY >> 16).to_i32)
+        emitter.ori(T9, T9, (PadRuntimePayload::SOUND_STOP_ENTRY & 0xFFFF).to_i32)
+        emitter.jalr(T9)
+        emitter.nop
+        emitter.lui(T0, 0x7000)
+        emitter.sw(ZERO, 60, T0)     # is_playing = 0
+        emitter.sw(ZERO, 0x84, T0)   # audio_paused = 0
+        emitter.sw(ZERO, 0x78, T0)   # elapsed_frames = 0
+        emitter.ori(T5, ZERO, 2)
+        emitter.sw(T5, 0x80, T0)     # status_mode = 2 (STOPPED)
+      elsif @has_audio
         emitter.lui(T9, (PadRuntimePayload::SOUND_STOP_ENTRY >> 16).to_i32)
         emitter.ori(T9, T9, (PadRuntimePayload::SOUND_STOP_ENTRY & 0xFFFF).to_i32)
         emitter.jalr(T9)
@@ -977,6 +1220,12 @@ module Citrine
       emitter.andi(T7, T8, 0x8000)
       emitter.beqz(T7, "chk_btn_r1")
       emitter.nop
+      if @is_audio_player
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T5, 0x7C, T0)     # is_looping
+        emitter.xori(T5, T5, 1)
+        emitter.sw(T5, 0x7C, T0)
+      end
       emitter.lui(A0, (square_msg_addr >> 16).to_i32)
       emitter.ori(A0, A0, (square_msg_addr & 0xFFFF).to_i32)
       emitter.jal("debug_puts")
@@ -990,6 +1239,23 @@ module Citrine
       emitter.andi(T7, T8, 0x0800)
       emitter.beqz(T7, "chk_btn_l1")
       emitter.nop
+      if @is_audio_player
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T5, 0x78, T0)     # elapsed_frames
+        emitter.addiu(T5, T5, 600)   # +10s (600 frames)
+        emitter.lw(T4, 0x74, T0)     # track_idx
+        emitter.sll(T4, T4, 2)
+        emitter.lui(T6, (ap_dur_table_addr >> 16).to_i32)
+        emitter.ori(T6, T6, (ap_dur_table_addr & 0xFFFF).to_i32)
+        emitter.addu(T6, T6, T4)
+        emitter.lw(T7, 0, T6)        # dur_frames
+        emitter.sltu(T8, T7, T5)     # if dur_frames < elapsed_frames
+        emitter.beqz(T8, "ap_r1_store")
+        emitter.nop
+        emitter.move(T5, T7)
+        emitter.label("ap_r1_store")
+        emitter.sw(T5, 0x78, T0)
+      end
       emitter.lui(A0, (r1_msg_addr >> 16).to_i32)
       emitter.ori(A0, A0, (r1_msg_addr & 0xFFFF).to_i32)
       emitter.jal("debug_puts")
@@ -1003,6 +1269,16 @@ module Citrine
       emitter.andi(T7, T8, 0x0400)
       emitter.beqz(T7, "chk_btn_r2")
       emitter.nop
+      if @is_audio_player
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T5, 0x78, T0)     # elapsed_frames
+        emitter.addiu(T5, T5, -600)  # -10s (600 frames)
+        emitter.bgez(T5, "ap_l1_store")
+        emitter.nop
+        emitter.move(T5, ZERO)
+        emitter.label("ap_l1_store")
+        emitter.sw(T5, 0x78, T0)
+      end
       emitter.lui(A0, (l1_msg_addr >> 16).to_i32)
       emitter.ori(A0, A0, (l1_msg_addr & 0xFFFF).to_i32)
       emitter.jal("debug_puts")
@@ -1068,6 +1344,23 @@ module Citrine
       emitter.andi(T7, T8, 0x0010)
       emitter.beqz(T7, "chk_btn_right")
       emitter.nop
+      if @is_audio_player
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T5, 0x70, T0)     # master_vol
+        emitter.addiu(T5, T5, 16)
+        emitter.ori(T6, ZERO, 255)
+        emitter.sltu(T7, T6, T5)     # if 255 < master_vol
+        emitter.beqz(T7, "ap_vol_up_store")
+        emitter.nop
+        emitter.ori(T5, ZERO, 255)
+        emitter.label("ap_vol_up_store")
+        emitter.sw(T5, 0x70, T0)
+        emitter.lui(T9, (PadRuntimePayload::SOUND_PLAY_ENTRY >> 16).to_i32)
+        emitter.ori(T9, T9, (PadRuntimePayload::SOUND_PLAY_ENTRY & 0xFFFF).to_i32)
+        emitter.ori(A0, T5, 0x1000)  # cmd = 0x1000 | master_vol
+        emitter.jalr(T9)
+        emitter.nop
+      end
       emitter.lui(A0, (up_msg_addr >> 16).to_i32)
       emitter.ori(A0, A0, (up_msg_addr & 0xFFFF).to_i32)
       emitter.jal("debug_puts")
@@ -1081,6 +1374,30 @@ module Citrine
       emitter.andi(T7, T8, 0x0020)
       emitter.beqz(T7, "chk_btn_down")
       emitter.nop
+      if @is_audio_player
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T5, 0x74, T0)     # track_idx
+        emitter.addiu(T5, T5, 1)
+        emitter.ori(T6, ZERO, tracks.size)
+        emitter.bne(T5, T6, "ap_next_trk_store")
+        emitter.nop
+        emitter.move(T5, ZERO)       # wrap to 0
+        emitter.label("ap_next_trk_store")
+        emitter.sw(T5, 0x74, T0)
+        emitter.sw(ZERO, 0x78, T0)   # elapsed_frames = 0
+        emitter.lw(T4, 60, T0)       # is_playing
+        emitter.beqz(T4, "ap_next_trk_done")
+        emitter.nop
+        # If playing, restart audio (cmd 1)
+        emitter.lui(T9, (PadRuntimePayload::SOUND_PLAY_ENTRY >> 16).to_i32)
+        emitter.ori(T9, T9, (PadRuntimePayload::SOUND_PLAY_ENTRY & 0xFFFF).to_i32)
+        emitter.ori(A0, ZERO, 1)
+        emitter.jalr(T9)
+        emitter.nop
+        emitter.lui(T0, 0x7000)
+        emitter.sw(ZERO, 0x80, T0)   # status_mode = 0 (PLAYING)
+        emitter.label("ap_next_trk_done")
+      end
       emitter.lui(A0, (right_msg_addr >> 16).to_i32)
       emitter.ori(A0, A0, (right_msg_addr & 0xFFFF).to_i32)
       emitter.jal("debug_puts")
@@ -1094,6 +1411,21 @@ module Citrine
       emitter.andi(T7, T8, 0x0040)
       emitter.beqz(T7, "chk_btn_left")
       emitter.nop
+      if @is_audio_player
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T5, 0x70, T0)     # master_vol
+        emitter.addiu(T5, T5, -16)
+        emitter.bgez(T5, "ap_vol_down_store")
+        emitter.nop
+        emitter.move(T5, ZERO)
+        emitter.label("ap_vol_down_store")
+        emitter.sw(T5, 0x70, T0)
+        emitter.lui(T9, (PadRuntimePayload::SOUND_PLAY_ENTRY >> 16).to_i32)
+        emitter.ori(T9, T9, (PadRuntimePayload::SOUND_PLAY_ENTRY & 0xFFFF).to_i32)
+        emitter.ori(A0, T5, 0x1000)  # cmd = 0x1000 | master_vol
+        emitter.jalr(T9)
+        emitter.nop
+      end
       emitter.lui(A0, (down_msg_addr >> 16).to_i32)
       emitter.ori(A0, A0, (down_msg_addr & 0xFFFF).to_i32)
       emitter.jal("debug_puts")
@@ -1107,6 +1439,29 @@ module Citrine
       emitter.andi(T7, T8, 0x0080)
       emitter.beqz(T7, "chk_btn_l3")
       emitter.nop
+      if @is_audio_player
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T5, 0x74, T0)     # track_idx
+        emitter.addiu(T5, T5, -1)
+        emitter.bgez(T5, "ap_prev_trk_store")
+        emitter.nop
+        emitter.ori(T5, ZERO, tracks.size - 1) # wrap to last track
+        emitter.label("ap_prev_trk_store")
+        emitter.sw(T5, 0x74, T0)
+        emitter.sw(ZERO, 0x78, T0)   # elapsed_frames = 0
+        emitter.lw(T4, 60, T0)       # is_playing
+        emitter.beqz(T4, "ap_prev_trk_done")
+        emitter.nop
+        # If playing, restart audio (cmd 1)
+        emitter.lui(T9, (PadRuntimePayload::SOUND_PLAY_ENTRY >> 16).to_i32)
+        emitter.ori(T9, T9, (PadRuntimePayload::SOUND_PLAY_ENTRY & 0xFFFF).to_i32)
+        emitter.ori(A0, ZERO, 1)
+        emitter.jalr(T9)
+        emitter.nop
+        emitter.lui(T0, 0x7000)
+        emitter.sw(ZERO, 0x80, T0)   # status_mode = 0 (PLAYING)
+        emitter.label("ap_prev_trk_done")
+      end
       emitter.lui(A0, (left_msg_addr >> 16).to_i32)
       emitter.ori(A0, A0, (left_msg_addr & 0xFFFF).to_i32)
       emitter.jal("debug_puts")
@@ -2417,6 +2772,411 @@ module Citrine
         emitter.nop
       end
 
+      if @is_audio_player
+        # --- AUDIO PLAYER TRANSPORT & OVERLAYS ---
+        # 1. Read held buttons across Port 0 (0x70000010) and Port 1 (0x70000024)
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T5, 16, T0)
+        emitter.lw(T6, 36, T0)
+        emitter.or_(T5, T5, T6)      # T5 = held buttons
+
+        # Check R2 held (0x0200) -> Fast Forward (+4 frames)
+        emitter.andi(T7, T5, 0x0200)
+        emitter.beqz(T7, "ap_chk_l2")
+        emitter.nop
+        emitter.lw(T6, 0x78, T0)     # elapsed_frames
+        emitter.addiu(T6, T6, 4)
+        emitter.lw(T4, 0x74, T0)     # track_idx
+        emitter.sll(T4, T4, 2)
+        emitter.lui(T3, (ap_dur_table_addr >> 16).to_i32)
+        emitter.ori(T3, T3, (ap_dur_table_addr & 0xFFFF).to_i32)
+        emitter.addu(T3, T3, T4)
+        emitter.lw(T2, 0, T3)        # dur_frames
+        emitter.sltu(T1, T2, T6)     # if dur_frames < elapsed_frames
+        emitter.beqz(T1, "ap_r2_store")
+        emitter.nop
+        emitter.move(T6, T2)
+        emitter.label("ap_r2_store")
+        emitter.sw(T6, 0x78, T0)
+        emitter.ori(T1, ZERO, 3)     # status_mode = 3 (FAST FORWARD)
+        emitter.sw(T1, 0x80, T0)
+        emitter.j("ap_transport_done")
+        emitter.nop
+
+        # Check L2 held (0x0100) -> Rewind (-4 frames)
+        emitter.label("ap_chk_l2")
+        emitter.andi(T7, T5, 0x0100)
+        emitter.beqz(T7, "ap_chk_playing")
+        emitter.nop
+        emitter.lw(T6, 0x78, T0)     # elapsed_frames
+        emitter.addiu(T6, T6, -4)
+        emitter.bgez(T6, "ap_l2_store")
+        emitter.nop
+        emitter.move(T6, ZERO)
+        emitter.label("ap_l2_store")
+        emitter.sw(T6, 0x78, T0)
+        emitter.ori(T1, ZERO, 4)     # status_mode = 4 (REWIND)
+        emitter.sw(T1, 0x80, T0)
+        emitter.j("ap_transport_done")
+        emitter.nop
+
+        # Check normal playing progress (+1 frame)
+        emitter.label("ap_chk_playing")
+        emitter.lw(T4, 60, T0)       # is_playing
+        emitter.beqz(T4, "ap_not_playing")
+        emitter.nop
+        emitter.sw(ZERO, 0x80, T0)   # status_mode = 0 (PLAYING)
+        emitter.lw(T6, 0x78, T0)     # elapsed_frames
+        emitter.addiu(T6, T6, 1)
+        emitter.lw(T4, 0x74, T0)     # track_idx
+        emitter.sll(T4, T4, 2)
+        emitter.lui(T3, (ap_dur_table_addr >> 16).to_i32)
+        emitter.ori(T3, T3, (ap_dur_table_addr & 0xFFFF).to_i32)
+        emitter.addu(T3, T3, T4)
+        emitter.lw(T2, 0, T3)        # dur_frames
+        emitter.sltu(T1, T6, T2)     # if elapsed_frames < dur_frames
+        emitter.bnez(T1, "ap_play_store")
+        emitter.nop
+        # End of track reached!
+        emitter.lw(T7, 0x7C, T0)     # is_looping
+        emitter.beqz(T7, "ap_track_end_stop")
+        emitter.nop
+        # Loop ON: Advance track
+        emitter.lw(T4, 0x74, T0)
+        emitter.addiu(T4, T4, 1)
+        emitter.ori(T1, ZERO, tracks.size)
+        emitter.bne(T4, T1, "ap_loop_trk_store")
+        emitter.nop
+        emitter.move(T4, ZERO)
+        emitter.label("ap_loop_trk_store")
+        emitter.sw(T4, 0x74, T0)
+        emitter.sw(ZERO, 0x78, T0)   # elapsed_frames = 0
+        emitter.lui(T9, (PadRuntimePayload::SOUND_PLAY_ENTRY >> 16).to_i32)
+        emitter.ori(T9, T9, (PadRuntimePayload::SOUND_PLAY_ENTRY & 0xFFFF).to_i32)
+        emitter.ori(A0, ZERO, 1)
+        emitter.jalr(T9)
+        emitter.nop
+        emitter.j("ap_transport_done")
+        emitter.nop
+        emitter.label("ap_track_end_stop")
+        # Loop OFF: Stop
+        emitter.sw(ZERO, 60, T0)     # is_playing = 0
+        emitter.sw(ZERO, 0x84, T0)   # audio_paused = 0
+        emitter.sw(T2, 0x78, T0)     # elapsed_frames = dur_frames
+        emitter.ori(T1, ZERO, 2)     # status_mode = 2 (STOPPED)
+        emitter.sw(T1, 0x80, T0)
+        emitter.lui(T9, (PadRuntimePayload::SOUND_STOP_ENTRY >> 16).to_i32)
+        emitter.ori(T9, T9, (PadRuntimePayload::SOUND_STOP_ENTRY & 0xFFFF).to_i32)
+        emitter.jalr(T9)
+        emitter.nop
+        emitter.j("ap_transport_done")
+        emitter.nop
+        emitter.label("ap_play_store")
+        emitter.sw(T6, 0x78, T0)
+        emitter.j("ap_transport_done")
+        emitter.nop
+        emitter.label("ap_not_playing")
+        emitter.lw(T7, 0x84, T0)     # audio_paused
+        emitter.beqz(T7, "ap_set_stopped")
+        emitter.nop
+        emitter.ori(T1, ZERO, 1)     # status_mode = 1 (PAUSED)
+        emitter.sw(T1, 0x80, T0)
+        emitter.j("ap_transport_done")
+        emitter.nop
+        emitter.label("ap_set_stopped")
+        emitter.ori(T1, ZERO, 2)     # status_mode = 2 (STOPPED)
+        emitter.sw(T1, 0x80, T0)
+        emitter.label("ap_transport_done")
+
+        # --- SECONDARY OVERLAY RENDERING ---
+        # 1. Status Badge
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T5, 0x80, T0)     # status_mode (0..4)
+        emitter.sll(T5, T5, 3)       # * 8
+        emitter.lui(T8, (ap_status_table_addr >> 16).to_i32)
+        emitter.ori(T8, T8, (ap_status_table_addr & 0xFFFF).to_i32)
+        emitter.addu(T8, T8, T5)
+        emitter.lw(T7, 0, T8)        # MADR
+        emitter.lw(T6, 4, T8)        # QWC
+        emitter.jal("dma02_wait")
+        emitter.nop
+        emitter.lui(T8, 0x1000)
+        emitter.ori(T8, T8, 0xa000)
+        emitter.sw(T7, 0x10, T8)
+        emitter.sw(T6, 0x20, T8)
+        emitter.ori(T5, ZERO, 0x101)
+        emitter.sw(T5, 0x00, T8)
+        emitter.jal("dma02_wait")
+        emitter.nop
+
+        # 2. Track Card
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T5, 0x74, T0)     # track_idx (0..12)
+        emitter.sll(T5, T5, 3)       # * 8
+        emitter.lui(T8, (ap_track_table_addr >> 16).to_i32)
+        emitter.ori(T8, T8, (ap_track_table_addr & 0xFFFF).to_i32)
+        emitter.addu(T8, T8, T5)
+        emitter.lw(T7, 0, T8)        # MADR
+        emitter.lw(T6, 4, T8)        # QWC
+        emitter.lui(T8, 0x1000)
+        emitter.ori(T8, T8, 0xa000)
+        emitter.sw(T7, 0x10, T8)
+        emitter.sw(T6, 0x20, T8)
+        emitter.ori(T5, ZERO, 0x101)
+        emitter.sw(T5, 0x00, T8)
+        emitter.jal("dma02_wait")
+        emitter.nop
+
+        # 3. Loop Badge
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T5, 0x7C, T0)     # is_looping (0 or 1)
+        emitter.sll(T5, T5, 3)       # * 8
+        emitter.lui(T8, (ap_loop_table_addr >> 16).to_i32)
+        emitter.ori(T8, T8, (ap_loop_table_addr & 0xFFFF).to_i32)
+        emitter.addu(T8, T8, T5)
+        emitter.lw(T7, 0, T8)        # MADR
+        emitter.lw(T6, 4, T8)        # QWC
+        emitter.lui(T8, 0x1000)
+        emitter.ori(T8, T8, 0xa000)
+        emitter.sw(T7, 0x10, T8)
+        emitter.sw(T6, 0x20, T8)
+        emitter.ori(T5, ZERO, 0x101)
+        emitter.sw(T5, 0x00, T8)
+        emitter.jal("dma02_wait")
+        emitter.nop
+
+        # 4. Flatline EQ (if not playing and not scrubbing)
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T5, 60, T0)       # is_playing
+        emitter.bnez(T5, "ap_skip_flat_eq")
+        emitter.nop
+        emitter.lw(T6, 0x80, T0)     # status_mode
+        emitter.ori(T7, ZERO, 3)
+        emitter.beq(T6, T7, "ap_skip_flat_eq") # FF
+        emitter.nop
+        emitter.ori(T7, ZERO, 4)
+        emitter.beq(T6, T7, "ap_skip_flat_eq") # REW
+        emitter.nop
+        emitter.lui(T8, 0x1000)
+        emitter.ori(T8, T8, 0xa000)
+        emitter.lui(T7, (ap_flat_eq_addr >> 16).to_i32)
+        emitter.ori(T7, T7, (ap_flat_eq_addr & 0xFFFF).to_i32)
+        emitter.sw(T7, 0x10, T8)
+        emitter.ori(T6, ZERO, ap_flat_eq_qwc.to_i32)
+        emitter.sw(T6, 0x20, T8)
+        emitter.ori(T5, ZERO, 0x101)
+        emitter.sw(T5, 0x00, T8)
+        emitter.jal("dma02_wait")
+        emitter.nop
+        emitter.label("ap_skip_flat_eq")
+
+        # 5. Dynamic Scrubber Bar, Knob & Volume Bar at 0x20250000
+        # Pointer S0 = 0x20250000
+        emitter.lui(S0, 0x2025)
+
+        # GIFTag: NLOOP = 20 (5 sprites), EOP = 1, FLG = 0 (PACKED), REGS = 0x0E (A+D)
+        emitter.ori(T2, ZERO, 0x8014)
+        emitter.sw(T2, 0, S0)
+        emitter.lui(T2, 0x1000)
+        emitter.sw(T2, 4, S0)
+        emitter.ori(T2, ZERO, 0x0E)
+        emitter.sw(T2, 8, S0)
+        emitter.sw(ZERO, 12, S0)
+
+        # Constant registers:
+        # T2 = Float 1.0 (0x3F800000)
+        emitter.lui(T2, 0x3F80)
+        # T3 = RGBAQ reg (1)
+        emitter.ori(T3, ZERO, 1)
+        # T4 = PRIM Sprite (6)
+        emitter.ori(T4, ZERO, 6)
+        # T5 = XYZ2 reg (5)
+        emitter.ori(T5, ZERO, 5)
+        # T6 = XYZ3 reg (4)
+        emitter.ori(T6, ZERO, 4)
+
+        # Sprite 1: Scrubber Background (62, 204) to (578, 214) DarkGray 0x80505050
+        emitter.sw(T4, 16, S0)
+        emitter.sw(ZERO, 20, S0)
+        emitter.sw(ZERO, 24, S0)
+        emitter.sw(ZERO, 28, S0)
+        emitter.lui(T7, 0x8050)
+        emitter.ori(T7, T7, 0x5050)
+        emitter.sw(T7, 32, S0)
+        emitter.sw(T2, 36, S0)
+        emitter.sw(T3, 40, S0)
+        emitter.sw(ZERO, 44, S0)
+        emitter.lui(T7, 0x0CC0)
+        emitter.ori(T7, T7, 0x03E0)
+        emitter.sw(T7, 48, S0)
+        emitter.sw(ZERO, 52, S0)
+        emitter.sw(T6, 56, S0)
+        emitter.sw(ZERO, 60, S0)
+        emitter.lui(T7, 0x0D60)
+        emitter.ori(T7, T7, 0x2420)
+        emitter.sw(T7, 64, S0)
+        emitter.sw(ZERO, 68, S0)
+        emitter.sw(T5, 72, S0)
+        emitter.sw(ZERO, 76, S0)
+
+        # Calculate scrub_w: (elapsed_frames * 516) / dur_frames
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T7, 0x78, T0)     # elapsed_frames
+        emitter.ori(T8, ZERO, 516)
+        emitter.multu(T7, T8)
+        emitter.mflo(T7)
+        emitter.lw(T9, 0x74, T0)     # track_idx
+        emitter.sll(T9, T9, 2)
+        emitter.lui(T8, (ap_dur_table_addr >> 16).to_i32)
+        emitter.ori(T8, T8, (ap_dur_table_addr & 0xFFFF).to_i32)
+        emitter.addu(T8, T8, T9)
+        emitter.lw(T9, 0, T8)        # dur_frames
+        emitter.bnez(T9, "ap_div_dur_ok")
+        emitter.nop
+        emitter.ori(T9, ZERO, 1)     # prevent div by 0
+        emitter.label("ap_div_dur_ok")
+        emitter.divu(T7, T9)
+        emitter.mflo(T7)             # T7 = scrub_w (0..516)
+        emitter.ori(T8, ZERO, 516)
+        emitter.sltu(T9, T8, T7)     # if 516 < scrub_w
+        emitter.beqz(T9, "ap_scrub_w_clamped")
+        emitter.nop
+        emitter.move(T7, T8)
+        emitter.label("ap_scrub_w_clamped")
+
+        # Sprite 2: Scrubber Fill (62, 204) to (62 + scrub_w, 214) Cyan 0x80FFFF00
+        emitter.sw(T4, 80, S0)
+        emitter.sw(ZERO, 84, S0)
+        emitter.sw(ZERO, 88, S0)
+        emitter.sw(ZERO, 92, S0)
+        emitter.lui(T8, 0x80FF)
+        emitter.ori(T8, T8, 0xFF00)
+        emitter.sw(T8, 96, S0)
+        emitter.sw(T2, 100, S0)
+        emitter.sw(T3, 104, S0)
+        emitter.sw(ZERO, 108, S0)
+        emitter.lui(T8, 0x0CC0)
+        emitter.ori(T8, T8, 0x03E0)
+        emitter.sw(T8, 112, S0)
+        emitter.sw(ZERO, 116, S0)
+        emitter.sw(T6, 120, S0)
+        emitter.sw(ZERO, 124, S0)
+        emitter.addiu(T8, T7, 62)
+        emitter.sll(T8, T8, 4)
+        emitter.andi(T8, T8, 0xFFFF)
+        emitter.lui(T9, 0x0D60)
+        emitter.or_(T9, T9, T8)
+        emitter.sw(T9, 128, S0)
+        emitter.sw(ZERO, 132, S0)
+        emitter.sw(T5, 136, S0)
+        emitter.sw(ZERO, 140, S0)
+
+        # Sprite 3: Scrubber Knob (knob_x - 6, 203) to (knob_x + 6, 215) White 0x80FFFFFF
+        emitter.sw(T4, 144, S0)
+        emitter.sw(ZERO, 148, S0)
+        emitter.sw(ZERO, 152, S0)
+        emitter.sw(ZERO, 156, S0)
+        emitter.lui(T8, 0x80FF)
+        emitter.ori(T8, T8, 0xFFFF)
+        emitter.sw(T8, 160, S0)
+        emitter.sw(T2, 164, S0)
+        emitter.sw(T3, 168, S0)
+        emitter.sw(ZERO, 172, S0)
+        emitter.addiu(T8, T7, 62 - 6)
+        emitter.sll(T8, T8, 4)
+        emitter.andi(T8, T8, 0xFFFF)
+        emitter.lui(T9, 0x0CB0)
+        emitter.or_(T9, T9, T8)
+        emitter.sw(T9, 176, S0)
+        emitter.sw(ZERO, 180, S0)
+        emitter.sw(T6, 184, S0)
+        emitter.sw(ZERO, 188, S0)
+        emitter.addiu(T8, T7, 62 + 6)
+        emitter.sll(T8, T8, 4)
+        emitter.andi(T8, T8, 0xFFFF)
+        emitter.lui(T9, 0x0D70)
+        emitter.or_(T9, T9, T8)
+        emitter.sw(T9, 192, S0)
+        emitter.sw(ZERO, 196, S0)
+        emitter.sw(T5, 200, S0)
+        emitter.sw(ZERO, 204, S0)
+
+        # Sprite 4: Volume Background (100, 228) to (220, 236) DarkGray 0x80505050
+        emitter.sw(T4, 208, S0)
+        emitter.sw(ZERO, 212, S0)
+        emitter.sw(ZERO, 216, S0)
+        emitter.sw(ZERO, 220, S0)
+        emitter.lui(T8, 0x8050)
+        emitter.ori(T8, T8, 0x5050)
+        emitter.sw(T8, 224, S0)
+        emitter.sw(T2, 228, S0)
+        emitter.sw(T3, 232, S0)
+        emitter.sw(ZERO, 236, S0)
+        emitter.lui(T8, 0x0E40)
+        emitter.ori(T8, T8, 0x0640)
+        emitter.sw(T8, 240, S0)
+        emitter.sw(ZERO, 244, S0)
+        emitter.sw(T6, 248, S0)
+        emitter.sw(ZERO, 252, S0)
+        emitter.lui(T8, 0x0EC0)
+        emitter.ori(T8, T8, 0x0DC0)
+        emitter.sw(T8, 256, S0)
+        emitter.sw(ZERO, 260, S0)
+        emitter.sw(T5, 264, S0)
+        emitter.sw(ZERO, 268, S0)
+
+        # Calculate vol_w: (master_vol * 120) / 255
+        emitter.lui(T0, 0x7000)
+        emitter.lw(T7, 0x70, T0)     # master_vol (0..255)
+        emitter.ori(T8, ZERO, 120)
+        emitter.multu(T7, T8)
+        emitter.mflo(T7)
+        emitter.ori(T8, ZERO, 255)
+        emitter.divu(T7, T8)
+        emitter.mflo(T7)             # T7 = vol_w (0..120)
+
+        # Sprite 5: Volume Fill (100, 228) to (100 + vol_w, 236) Yellow 0x8000FFFF
+        emitter.sw(T4, 272, S0)
+        emitter.sw(ZERO, 276, S0)
+        emitter.sw(ZERO, 280, S0)
+        emitter.sw(ZERO, 284, S0)
+        emitter.lui(T8, 0x8000)
+        emitter.ori(T8, T8, 0xFFFF)
+        emitter.sw(T8, 288, S0)
+        emitter.sw(T2, 292, S0)
+        emitter.sw(T3, 296, S0)
+        emitter.sw(ZERO, 300, S0)
+        emitter.lui(T8, 0x0E40)
+        emitter.ori(T8, T8, 0x0640)
+        emitter.sw(T8, 304, S0)
+        emitter.sw(ZERO, 308, S0)
+        emitter.sw(T6, 312, S0)
+        emitter.sw(ZERO, 316, S0)
+        emitter.addiu(T8, T7, 100)
+        emitter.sll(T8, T8, 4)
+        emitter.andi(T8, T8, 0xFFFF)
+        emitter.lui(T9, 0x0EC0)
+        emitter.or_(T9, T9, T8)
+        emitter.sw(T9, 320, S0)
+        emitter.sw(ZERO, 324, S0)
+        emitter.sw(T5, 328, S0)
+        emitter.sw(ZERO, 332, S0)
+
+        # Kick DMA Channel 2 from 0x00250000 (QWC = 21)
+        emitter.jal("dma02_wait")
+        emitter.nop
+        emitter.lui(T8, 0x1000)
+        emitter.ori(T8, T8, 0xa000)
+        emitter.lui(T7, 0x0025)
+        emitter.sw(T7, 0x10, T8)     # D2_MADR = 0x00250000
+        emitter.ori(T6, ZERO, 21)    # D2_QWC = 21 QWs
+        emitter.sw(T6, 0x20, T8)
+        emitter.ori(T5, ZERO, 0x101) # D2_CHCR = 0x101
+        emitter.sw(T5, 0x00, T8)
+        emitter.jal("dma02_wait")
+        emitter.nop
+      end
+
       emitter.j("frame_loop")
       emitter.nop
 
@@ -2897,6 +3657,16 @@ module Citrine
         end
       end
       rodata_bytes.write(sched_slice)
+      if @is_audio_player
+        rodata_bytes.write(ap_flat_eq_slice)
+        ap_status_pkt_slices.each { |s| rodata_bytes.write(s) }
+        rodata_bytes.write(ap_status_table_slice)
+        ap_loop_pkt_slices.each { |s| rodata_bytes.write(s) }
+        rodata_bytes.write(ap_loop_table_slice)
+        ap_track_pkt_slices.each { |s| rodata_bytes.write(s) }
+        rodata_bytes.write(ap_track_table_slice)
+        rodata_bytes.write(ap_dur_table_slice)
+      end
       if @is_inline_assembly
         rodata_bytes.write(rot_table_slice)
       end
@@ -3077,7 +3847,8 @@ module Citrine
           @is_dvd_screensaver = strings.any? { |s| s.includes?("BouncingLogo") || s.includes?("DVD Bouncing Screensaver") }
           @is_controller_tester = strings.any? { |s| s.includes?("Controller Tester") || s.includes?("DUALSHOCK 2 HARDWARE CALIBRATION") }
           @is_inline_assembly = !@inline_asm_words.empty? || strings.any? { |s| s.includes?("INLINE ASSEMBLY") }
-          @has_audio = true if strings.any? { |s| s.ends_with?(".vag") || s.ends_with?(".wav") || s.includes?("theme.vag") || s.includes?("CDDA") || s.includes?("cdda") || s.includes?("SPU2") }
+          @is_audio_player = strings.any? { |s| s.includes?("CD-DA") || s.includes?("ALBUM PLAYER") || s.includes?("play_cdda_track") }
+          @has_audio = true if @is_audio_player || strings.any? { |s| s.ends_with?(".vag") || s.ends_with?(".wav") || s.includes?("theme.vag") || s.includes?("CDDA") || s.includes?("cdda") || s.includes?("CD-DA") || s.includes?("SPU2") }
 
           main_fn = fns.find { |f| strings[f.name_idx]? == "__main__" }
           if main_fn

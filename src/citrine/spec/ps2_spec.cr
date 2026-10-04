@@ -225,8 +225,10 @@ module Citrine
         snap_path : String? = nil
         if @screenshot_frame && (out_p = @screenshot_output)
           snap_path = out_p
+          target_frame = @screenshot_frame.not_nil!
           spawn do
-            sleep 3.2.seconds
+            delay = 4.0 + (target_frame.to_f / 60.0)
+            sleep delay.seconds
             bridge.capture_screenshot(out_p)
             bridge.copy_to_artifacts(out_p, "screen.png") rescue nil
           end

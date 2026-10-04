@@ -44,7 +44,7 @@ module Citrine
       Citrine.draw_text(text, x + 10, y + 6, 16, Color.new(255_u8, 255_u8, 255_u8, 255_u8))
 
       # DualShock Cross button press triggers button action if focused
-      is_focused && Citrine.button_pressed?(Button::Cross)
+      is_focused && Citrine.player(0).button_pressed?(Button::Cross)
     end
 
     def self.label(text : String, x : Int32, y : Int32, size : Int32 = 16)
@@ -73,9 +73,9 @@ module Citrine
       new_val = val
       if is_focused
         step = (max_val - min_val) * 0.05_f32
-        if Citrine.button_pressed?(Button::Left)
+        if Citrine.player(0).button_pressed?(Button::Left)
           new_val -= step
-        elsif Citrine.button_pressed?(Button::Right)
+        elsif Citrine.player(0).button_pressed?(Button::Right)
           new_val += step
         end
       end
@@ -105,7 +105,7 @@ module Citrine
 
       Citrine.draw_text(label, x + 26, y + 2, 16, Color.new(220_u8, 225_u8, 235_u8, 255_u8))
 
-      if is_focused && Citrine.button_pressed?(Button::Cross)
+      if is_focused && Citrine.player(0).button_pressed?(Button::Cross)
         !checked
       else
         checked

@@ -204,12 +204,29 @@ module Citrine
           end
         end
 
-        total_items = (body.pos // 16).to_u32
+        # Hardware safety: DMAC D2_QWC is 16-bit (max 65535 QWs).
+        # Clamp total_items to 65500 QWs to prevent DMAC / GIF FIFO desync.
+        total_items = {(body.pos // 16).to_i, 65500}.min
         packet = IO::Memory.new
-        gif_tag = (1_u64 << 60) | (1_u64 << 15) | (total_items.to_u64 & 0x7FFF)
-        packet.write_bytes(gif_tag, IO::ByteFormat::LittleEndian)
-        packet.write_bytes(0x0e_u64, IO::ByteFormat::LittleEndian)
-        packet.write(body.to_slice)
+        body_slice = body.to_slice
+
+        if total_items == 0
+          gif_tag = (1_u64 << 60) | (1_u64 << 15)
+          packet.write_bytes(gif_tag, IO::ByteFormat::LittleEndian)
+          packet.write_bytes(0x0e_u64, IO::ByteFormat::LittleEndian)
+        else
+          offset = 0
+          while offset < total_items
+            chunk_size = {total_items - offset, 32767}.min
+            is_eop = (offset + chunk_size >= total_items)
+            eop_bit = is_eop ? (1_u64 << 15) : 0_u64
+            gif_tag = (1_u64 << 60) | eop_bit | chunk_size.to_u64
+            packet.write_bytes(gif_tag, IO::ByteFormat::LittleEndian)
+            packet.write_bytes(0x0e_u64, IO::ByteFormat::LittleEndian)
+            packet.write(body_slice[offset * 16, chunk_size * 16])
+            offset += chunk_size
+          end
+        end
         packet.to_slice
       end
 

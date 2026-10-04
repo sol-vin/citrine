@@ -4,18 +4,30 @@
 require "../citrine"
 
 module Citrine
+  # OpenGL-compatible immediate mode rendering subsystem featuring matrix stacks,
+  # vertex assembly, UV mapping, and automatic polygon triangulation for the PS2 GS.
   module GL
+    # Primitive assembly rasterization modes.
     enum Mode : UInt8
+      # Individual points (1 pixel each).
       Points        = 0
+      # Independent line segments (2 vertices per line).
       Lines         = 1
+      # Connected line strip.
       LineStrip     = 2
+      # Closed line loop.
       LineLoop      = 3
+      # Independent triangles (3 vertices per triangle).
       Triangles     = 4
+      # Connected triangle strip.
       TriangleStrip = 5
+      # Connected triangle fan around the initial vertex.
       TriangleFan   = 6
+      # Quadrilaterals (4 vertices per quad, auto-decomposed into 2 triangles).
       Quads         = 7
     end
 
+    # Immediate-mode mode constants mirroring traditional OpenGL.
     POINTS         = Mode::Points
     LINES          = Mode::Lines
     LINE_STRIP     = Mode::LineStrip
@@ -31,24 +43,34 @@ module Citrine
     @@current_u : Float32 = 0.0_f32
     @@current_v : Float32 = 0.0_f32
 
+    # Represents a 3D vertex with position, texture coordinates, and color attributes.
     struct Vertex
+      # World/transformed X coordinate.
       property x : Float32
+      # World/transformed Y coordinate.
       property y : Float32
+      # World/transformed Z coordinate (depth).
       property z : Float32
+      # Normalized horizontal texture coordinate (U).
       property u : Float32
+      # Normalized vertical texture coordinate (V).
       property v : Float32
+      # RGBA vertex color.
       property color : Color
 
+      # Creates a new vertex with coordinates, UVs, and color.
       def initialize(@x, @y, @z, @u, @v, @color)
       end
     end
 
     @@vertices = Array(Vertex).new(128)
 
-    # 4x4 Transformation Matrix Stack
+    # 4x4 Transformation Matrix Stack for ModelView transforms.
     struct Matrix4
+      # Column-major 16-element float array representing the 4x4 matrix.
       property m : StaticArray(Float32, 16)
 
+      # Initializes an identity matrix.
       def initialize
         @m = StaticArray(Float32, 16).new(0.0_f32)
         @m[0] = 1.0_f32
@@ -57,13 +79,16 @@ module Citrine
         @m[15] = 1.0_f32
       end
 
+      # Initializes a matrix from raw 16-element float array.
       def initialize(@m : StaticArray(Float32, 16))
       end
 
+      # Returns the 4x4 identity matrix.
       def self.identity : Matrix4
         Matrix4.new
       end
 
+      # Multiplies 3D vector `(x, y, z, 1.0)` by this matrix and returns transformed coordinates.
       def transform(x : Float32, y : Float32, z : Float32) : Tuple(Float32, Float32, Float32)
         tx = @m[0]*x + @m[4]*y + @m[8]*z + @m[12]
         ty = @m[1]*x + @m[5]*y + @m[9]*z + @m[13]
@@ -71,6 +96,7 @@ module Citrine
         {tx, ty, tz}
       end
 
+      # Multiplies this matrix with `other` matrix (`self * other`).
       def *(other : Matrix4) : Matrix4
         res = StaticArray(Float32, 16).new(0.0_f32)
         4.times do |i|
@@ -89,24 +115,29 @@ module Citrine
     @@matrix_stack = Array(Matrix4).new(16)
     @@current_matrix : Matrix4 = Matrix4.identity
 
+    # Begins assembly of primitives for the specified `mode`.
     def self.begin(mode : Mode)
       @@current_mode = mode
       @@in_begin = true
       @@vertices.clear
     end
 
+    # Overload for integer primitive mode enum values.
     def self.begin(mode_int : Int)
       self.begin(Mode.new(mode_int.to_u8))
     end
 
+    # Sets current vertex color using `Color` struct.
     def self.color(color : Color)
       @@current_color = color
     end
 
+    # Sets current vertex color using RGBA components (0-255).
     def self.color(r : Number, g : Number, b : Number, a : Number = 255)
       @@current_color = Color.new(r.to_u8, g.to_u8, b.to_u8, a.to_u8)
     end
 
+    # Sets current vertex color from packed 32-bit integer (RGBA or 0xRRGGBBAA).
     def self.color(hex : UInt32)
       r = (hex & 0xFF).to_u8
       g = ((hex >> 8) & 0xFF).to_u8
@@ -115,16 +146,19 @@ module Citrine
       @@current_color = Color.new(r, g, b, a)
     end
 
+    # Sets active texture coordinates `(u, v)` for subsequent vertices.
     def self.tex_coord(u : Number, v : Number)
       @@current_u = u.to_f32
       @@current_v = v.to_f32
     end
 
+    # Submits a vertex with coordinates `(x, y, z)`. Applies current matrix transform.
     def self.vertex(x : Number, y : Number, z : Number = 0.0)
       tx, ty, tz = @@current_matrix.transform(x.to_f32, y.to_f32, z.to_f32)
       @@vertices << Vertex.new(tx, ty, tz, @@current_u, @@current_v, @@current_color)
     end
 
+    # Completes primitive definition and dispatches draw calls to the Citrine GS pipeline.
     def self.end
       return unless @@in_begin
       @@in_begin = false
@@ -203,20 +237,24 @@ module Citrine
       end
     end
 
+    # Pushes the active transformation matrix onto the matrix stack.
     def self.push_matrix
       @@matrix_stack.push(@@current_matrix)
     end
 
+    # Restores the top matrix from the matrix stack.
     def self.pop_matrix
       if @@matrix_stack.size > 0
         @@current_matrix = @@matrix_stack.pop
       end
     end
 
+    # Resets the active transformation matrix to identity.
     def self.load_identity
       @@current_matrix = Matrix4.identity
     end
 
+    # Multiplies the active matrix by a translation matrix `(x, y, z)`.
     def self.translate(x : Number, y : Number, z : Number = 0.0)
       trans = Matrix4.identity
       trans.m[12] = x.to_f32
@@ -225,6 +263,7 @@ module Citrine
       @@current_matrix = @@current_matrix * trans
     end
 
+    # Multiplies the active matrix by a non-uniform scale matrix `(x, y, z)`.
     def self.scale(x : Number, y : Number, z : Number = 1.0)
       s = Matrix4.identity
       s.m[0] = x.to_f32
@@ -233,6 +272,7 @@ module Citrine
       @@current_matrix = @@current_matrix * s
     end
 
+    # Multiplies the active matrix by an arbitrary axis-angle rotation matrix (in degrees).
     def self.rotate(angle_deg : Number, x : Number, y : Number, z : Number)
       rad = angle_deg.to_f32 * (Math::PI.to_f32 / 180.0_f32)
       c = Math.cos(rad)

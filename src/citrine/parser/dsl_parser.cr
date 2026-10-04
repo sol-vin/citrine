@@ -12,6 +12,7 @@ module Citrine
     property top_level_nodes : Array(Crystal::ASTNode)
     property main_loop_body : Crystal::ASTNode?
     property filename : String?
+    property constants : Hash(String, Crystal::ASTNode)
     property loaded_requires : Set(String)
     property vm_contexts : Hash(String, VmContextDef)
     property active_context_name : String?
@@ -21,6 +22,7 @@ module Citrine
       @structs = {} of String => Crystal::ClassDef
       @modules = {} of String => Crystal::ModuleDef
       @enums = {} of String => Crystal::EnumDef
+      @constants = {} of String => Crystal::ASTNode
       @top_level_nodes = [] of Crystal::ASTNode
       @main_loop_body = nil
       @loaded_requires = Set(String).new
@@ -56,7 +58,7 @@ module Citrine
         )
       end
 
-      expander = MacroExpander.new
+      expander = MacroExpander.new(@filename)
       ast = expander.expand(ast)
 
       process_node(ast, program)
@@ -74,18 +76,21 @@ module Citrine
           process_top_level(child, program, namespace)
         end
       when Crystal::Def
-        fn_names = [] of String
-        fn_names << node.name
-        unless namespace.empty?
-          ns_prefix = namespace.join("::")
-          fn_names << "#{ns_prefix}.#{node.name}"
-          fn_names << "#{ns_prefix}::#{node.name}"
-        end
-        fn_names.each do |fname|
-          if ctx = @current_context
-            ctx.defs[fname] = node
+        if namespace.empty?
+          fn_names = [] of String
+          if rec = node.receiver
+            rec_str = rec.to_s
+            fn_names << "#{rec_str}.#{node.name}"
+            fn_names << "#{rec_str}::#{node.name}"
+          else
+            fn_names << node.name
           end
-          program.defs[fname] = node
+          fn_names.each do |fname|
+            if ctx = @current_context
+              ctx.defs[fname] = node
+            end
+            program.defs[fname] = node
+          end
         end
       when Crystal::ClassDef
         cls_names = [] of String
@@ -95,10 +100,22 @@ module Citrine
           cls_names << "#{ns_prefix}::#{node.name}"
         end
         cls_names.each do |cname|
-          if ctx = @current_context
-            ctx.structs[cname] = node
+          if existing = program.structs[cname]?
+            existing_nodes = existing.body.is_a?(Crystal::Expressions) ? existing.body.as(Crystal::Expressions).expressions : [existing.body].compact
+            new_nodes = node.body.is_a?(Crystal::Expressions) ? node.body.as(Crystal::Expressions).expressions : [node.body].compact
+            merged_body = Crystal::Expressions.new(existing_nodes + new_nodes)
+            merged_sc = node.superclass || existing.superclass
+            merged_cls = Crystal::ClassDef.new(existing.name, merged_body, merged_sc, existing.type_vars, existing.abstract?, existing.struct?)
+            if ctx = @current_context
+              ctx.structs[cname] = merged_cls
+            end
+            program.structs[cname] = merged_cls
+          else
+            if ctx = @current_context
+              ctx.structs[cname] = node
+            end
+            program.structs[cname] = node
           end
-          program.structs[cname] = node
         end
         if node.body && !node.body.is_a?(Crystal::Nop)
           process_top_level(node.body, program, namespace + [node.name.to_s])
@@ -111,10 +128,21 @@ module Citrine
           mod_names << "#{ns_prefix}::#{node.name}"
         end
         mod_names.each do |mname|
-          if ctx = @current_context
-            ctx.modules[mname] = node
+          if existing = program.modules[mname]?
+            existing_nodes = existing.body.is_a?(Crystal::Expressions) ? existing.body.as(Crystal::Expressions).expressions : [existing.body].compact
+            new_nodes = node.body.is_a?(Crystal::Expressions) ? node.body.as(Crystal::Expressions).expressions : [node.body].compact
+            merged_body = Crystal::Expressions.new(existing_nodes + new_nodes)
+            merged_mod = Crystal::ModuleDef.new(existing.name, merged_body, existing.type_vars)
+            if ctx = @current_context
+              ctx.modules[mname] = merged_mod
+            end
+            program.modules[mname] = merged_mod
+          else
+            if ctx = @current_context
+              ctx.modules[mname] = node
+            end
+            program.modules[mname] = node
           end
-          program.modules[mname] = node
         end
         if node.body && !node.body.is_a?(Crystal::Nop)
           process_top_level(node.body, program, namespace + [node.name.to_s])
@@ -131,6 +159,16 @@ module Citrine
         end
       when Crystal::Require
         handle_require(node.string, program)
+      when Crystal::Assign
+        target_str = node.target.to_s
+        is_const_name = target_str[0]?.try(&.uppercase?) || false
+        if is_const_name
+          short_name = target_str.split("::").last
+          full_name = namespace.empty? ? target_str : "#{namespace.join("::")}::#{target_str}"
+          program.constants[full_name] = node.value
+          program.constants[short_name] = node.value
+        end
+        program.top_level_nodes << node if namespace.empty?
       when Crystal::Call
         if node.name == "main_loop" && (node.obj.nil? || node.obj.to_s == "Citrine")
           if block = node.block

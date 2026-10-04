@@ -3,6 +3,7 @@
 
 module Citrine
   module Input
+    # USB Keyboard input driver mapping standard HID scancodes on PlayStation 2 USB ports.
     module Keyboard
       KEY_SPACE     = 32
       KEY_APOSTROPHE= 39
@@ -57,15 +58,18 @@ module Citrine
 
       @@key_states = StaticArray(Bool, 512).new(false)
 
+      # Returns true if key with `key` code is currently held down.
       def self.key_down?(key : Int32) : Bool
         return false if key < 0 || key >= 512
         @@key_states[key]
       end
 
+      # Returns true if key with `key` code is pressed.
       def self.key_pressed?(key : Int32) : Bool
         key_down?(key)
       end
 
+      # Simulates keystroke press or release for synthetic testing.
       def self.simulate_key(key : Int32, down : Bool)
         if key >= 0 && key < 512
           @@key_states[key] = down
@@ -73,9 +77,13 @@ module Citrine
       end
     end
 
+    # USB Mouse pointing device driver.
     module Mouse
+      # Left mouse button index.
       MOUSE_BUTTON_LEFT   = 0
+      # Right mouse button index.
       MOUSE_BUTTON_RIGHT  = 1
+      # Middle mouse button / scroll wheel click index.
       MOUSE_BUTTON_MIDDLE = 2
 
       @@x : Int32 = 320
@@ -85,31 +93,38 @@ module Citrine
       @@wheel : Int32 = 0
       @@buttons = StaticArray(Bool, 8).new(false)
 
+      # Current horizontal cursor position on screen.
       def self.x : Int32
         @@x
       end
 
+      # Current vertical cursor position on screen.
       def self.y : Int32
         @@y
       end
 
+      # Horizontal delta movement since last frame.
       def self.delta_x : Int32
         @@delta_x
       end
 
+      # Vertical delta movement since last frame.
       def self.delta_y : Int32
         @@delta_y
       end
 
+      # Scroll wheel rotational accumulator value.
       def self.wheel : Int32
         @@wheel
       end
 
+      # Returns true if the specified mouse `button` is currently depressed.
       def self.button_down?(button : Int32) : Bool
         return false if button < 0 || button >= 8
         @@buttons[button]
       end
 
+      # Updates internal mouse coordinate and button state.
       def self.update_state(new_x : Int32, new_y : Int32, left : Bool, right : Bool)
         @@delta_x = new_x - @@x
         @@delta_y = new_y - @@y

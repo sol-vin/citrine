@@ -3,94 +3,137 @@
 
 require "citrine"
 require "citrine/physics"
+require "citrine/inputmap"
+
+input_map do
+  action :burst_particles, Button::Cross, port: 0
+end
 
 Citrine.init_window(640, 448, "Citrine PS2 - Physics & Particles")
 Citrine.set_target_fps(60)
 
+# Pre-allocated color constants
+BG_COLOR       = Color.new(14_u8, 18_u8, 28_u8, 255_u8)
+OBSTACLE_NORMAL = Color.new(41_u8, 128_u8, 185_u8, 255_u8)
+OBSTACLE_HIT    = Color.new(231_u8, 76_u8, 60_u8, 255_u8)
+
 # Player Box
-player_x = 240.0_f32
-player_y = 200.0_f32
-player_w = 48.0_f32
-player_h = 48.0_f32
-speed = 4.0_f32
+player_x = 180
+player_y = 200
+player_w = 44
+player_h = 44
+speed = 4
 
 # Obstacle Box
-obs_x = 340.0_f32
-obs_y = 180.0_f32
-obs_w = 80.0_f32
-obs_h = 80.0_f32
+obs_x = 360
+obs_y = 180
+obs_w = 80
+obs_h = 80
 
-# Particle emitters
-p1 = Citrine::VerletParticle.new(320.0_f32, 100.0_f32)
-p2 = Citrine::VerletParticle.new(325.0_f32, 105.0_f32)
-p3 = Citrine::VerletParticle.new(315.0_f32, 95.0_f32)
+
+# Pre-allocated array of 12 Verlet Particles (fountain spray)
+particles = [] of Citrine::VerletParticle
+12.times do |i|
+  p = Citrine::VerletParticle.new(320.0_f32 + (i * 4).to_f32, 100.0_f32)
+  p.old_x = 320.0_f32 + (i * 4).to_f32 - ((i % 5) - 2).to_f32 * 2.0_f32
+  p.old_y = 100.0_f32 + 2.0_f32
+  particles << p
+end
 
 gravity = 0.35_f32
 dt = 1.0_f32
 
 Citrine.main_loop do
-  # Input Handling
-  if Citrine.button_down?(Button::Up)
+  pad = Citrine.player(0)
+
+  # Player Movement
+  if pad.button_down?(Button::Up)
     player_y -= speed
   end
-  if Citrine.button_down?(Button::Down)
+  if pad.button_down?(Button::Down)
     player_y += speed
   end
-  if Citrine.button_down?(Button::Left)
+  if pad.button_down?(Button::Left)
     player_x -= speed
   end
-  if Citrine.button_down?(Button::Right)
+  if pad.button_down?(Button::Right)
     player_x += speed
   end
 
   # Bounds clamping
-  player_x = Citrine::Physics2D.clamp(player_x, 20.0_f32, 570.0_f32)
-  player_y = Citrine::Physics2D.clamp(player_y, 40.0_f32, 380.0_f32)
+  if player_x < 20
+    player_x = 20
+  elsif player_x > 570
+    player_x = 570
+  end
+  if player_y < 50
+    player_y = 50
+  elsif player_y > 330
+    player_y = 330
+  end
 
-  # Check AABB Collision
-  colliding = Citrine::Physics2D.check_collision_recs(
-    player_x, player_y, player_w, player_h,
-    obs_x, obs_y, obs_w, obs_h
-  )
+  # Burst particles on Cross button press
+  if Action.is_pressed?(Actions::BurstParticles) || pad.button_pressed?(Button::Cross)
+    particles.each_with_index do |p, i|
+      p.x = (player_x + 22).to_f32
+      p.y = (player_y + 10).to_f32
+      p.old_x = p.x - ((i % 7) - 3).to_f32 * 2.5_f32
+      p.old_y = p.y + 4.5_f32
+    end
+  end
 
-  # Update Verlet Particles
-  p1.update(dt, gravity)
-  p2.update(dt, gravity)
-  p3.update(dt, gravity)
+  # Pure-integer AABB Collision Detection
+  colliding = player_x < obs_x + obs_w &&
+              player_x + player_w > obs_x &&
+              player_y < obs_y + obs_h &&
+              player_y + player_h > obs_y
 
-  p1.constrain(40.0_f32, 50.0_f32, 600.0_f32, 400.0_f32, 0.75_f32)
-  p2.constrain(40.0_f32, 50.0_f32, 600.0_f32, 400.0_f32, 0.75_f32)
-  p3.constrain(40.0_f32, 50.0_f32, 600.0_f32, 400.0_f32, 0.75_f32)
+  # Update Verlet Particles & Floor Bounce
+  particles.each do |p|
+    p.update(dt, gravity)
+    # Floor bounce at y = 370
+    if p.y > 370.0_f32
+      p.y = 370.0_f32
+      vy = p.y - p.old_y
+      p.old_y = p.y + vy * 0.7_f32
+    end
+  end
 
   # Render Pass
   Citrine.begin_drawing
-  Citrine.clear_background(Color.new(16_u8, 20_u8, 28_u8, 255_u8))
+  Citrine.clear_background(BG_COLOR)
 
   # Header Bar
-  Citrine.draw_rectangle(0, 0, 640, 36, Color.new(24_u8, 30_u8, 44_u8, 255_u8))
-  Citrine.draw_text("CITRINE PS2: 2D PHYSICS & VERLET PARTICLES", 20, 10, 18, Color.new(240_u8, 245_u8, 255_u8, 255_u8))
+  Citrine.draw_rectangle(0, 0, 640, 36, Color::Blue)
+  Citrine.draw_text("CITRINE PS2: DETERMINISTIC VERLET PARTICLES & AABB", 40, 8, 17, Color::White)
 
-  # Draw Static Obstacle
-  obs_color = colliding ? Color.new(231_u8, 76_u8, 60_u8, 255_u8) : Color.new(52_u8, 73_u8, 94_u8, 255_u8)
-  Citrine.draw_rectangle(obs_x.to_i32, obs_y.to_i32, obs_w.to_i32, obs_h.to_i32, obs_color)
-  Citrine.draw_text("OBSTACLE", obs_x.to_i32 + 10, obs_y.to_i32 + 30, 14, Color.new(255_u8, 255_u8, 255_u8, 255_u8))
+  # Floor Line
+  Citrine.draw_rectangle(20, 372, 600, 4, Color::DarkGray)
+
+  # Draw Obstacle Box (Red on collision, Blue when safe)
+  Citrine.draw_rectangle(obs_x, obs_y, obs_w, obs_h, colliding ? OBSTACLE_HIT : OBSTACLE_NORMAL)
+  Citrine.draw_text(colliding ? "COLLISION!" : "OBSTACLE", obs_x + 8, obs_y + 32, 13, Color::White)
 
   # Draw Player Box
-  player_col = colliding ? Color.new(241_u8, 196_u8, 15_u8, 255_u8) : Color.new(46_u8, 204_u8, 113_u8, 255_u8)
-  Citrine.draw_rectangle(player_x.to_i32, player_y.to_i32, player_w.to_i32, player_h.to_i32, player_col)
-  Citrine.draw_text("PLAYER", player_x.to_i32 + 4, player_y.to_i32 + 16, 12, Color.new(20_u8, 20_u8, 20_u8, 255_u8))
+  Citrine.draw_rectangle(player_x, player_y, player_w, player_h, Color::Yellow)
+  Citrine.draw_rectangle(player_x + 4, player_y + 4, player_w - 8, player_h - 8, Color::Black)
+  Citrine.draw_text("P1", player_x + 14, player_y + 14, 14, Color::Yellow)
 
-  # Draw Bouncing Particles
-  Citrine.draw_circle(p1.x.to_i32, p1.y.to_i32, 6.0_f32, Color.new(230_u8, 126_u8, 34_u8, 255_u8))
-  Citrine.draw_circle(p2.x.to_i32, p2.y.to_i32, 5.0_f32, Color.new(243_u8, 156_u8, 18_u8, 255_u8))
-  Citrine.draw_circle(p3.x.to_i32, p3.y.to_i32, 4.0_f32, Color.new(236_u8, 240_u8, 241_u8, 255_u8))
 
-  # Collision Status Banner
-  status_text = colliding ? "COLLISION DETECTED (AABB OVERLAP)" : "NO COLLISION - CLEAR PATH"
-  banner_col = colliding ? Color.new(192_u8, 57_u8, 43_u8, 230_u8) : Color.new(39_u8, 174_u8, 96_u8, 230_u8)
-  Citrine.draw_rectangle(20, 396, 600, 34, banner_col)
-  Citrine.draw_text(status_text, 36, 404, 16, Color.new(255_u8, 255_u8, 255_u8, 255_u8))
-  Citrine.draw_text("D-Pad: Move Player Box", 420, 404, 14, Color.new(255_u8, 255_u8, 255_u8, 255_u8))
+  # Draw Verlet Particles
+  particles.each_with_index do |p, i|
+    col = (i % 2 == 0) ? Color::Cyan : Color::Magenta
+    par_x = (p.x > 0.0_f32 && p.x < 640.0_f32) ? p.x.to_i32 : 320 + (i * 8)
+    par_y = (p.y > 0.0_f32 && p.y < 448.0_f32) ? p.y.to_i32 : 120 + (i * 12)
+    Citrine.draw_circle(par_x, par_y, 4, col)
+  end
+
+
+  # Footer HUD Card
+  Citrine.draw_rectangle(20, 388, 600, 46, Color::DarkGray)
+  Citrine.draw_rectangle(22, 390, 596, 42, Color::Black)
+  Citrine.draw_text("AABB Status: #{colliding ? "INTERSECTING" : "CLEAR"} | Particles: #{particles.size} Active", 35, 398, 12, colliding ? Color::Red : Color::Green)
+  Citrine.draw_text("CROSS: Burst Particle Fountain | D-PAD: Move Player Box", 35, 416, 12, Color::Yellow)
 
   Citrine.end_drawing
 end

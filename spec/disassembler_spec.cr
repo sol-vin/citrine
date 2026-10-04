@@ -22,4 +22,25 @@ describe Citrine::Disassembler do
     output.should contain(".function __main__")
     output.should contain("DrawRectangle")
   end
+
+  it "disassembles inline assembly instructions" do
+    source = <<-CRYSTAL
+    asm("sync.l")
+    Citrine.asm "sync.p"
+    cycles = asm("mfc0 $v0, $9")
+    CRYSTAL
+
+    parser = Citrine::DslParser.new("asm_disasm.cr")
+    program = parser.parse(source)
+
+    compiler = Citrine::BytecodeCompiler.new("asm_disasm.cr")
+    bytes = compiler.compile(program)
+
+    io = IO::Memory.new
+    disasm = Citrine::Disassembler.new(io)
+    disasm.disassemble(bytes)
+
+    output = io.to_s
+    output.should contain("InlineAsm")
+  end
 end

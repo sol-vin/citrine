@@ -1,4 +1,6 @@
 require "compiler/crystal/syntax"
+require "json"
+require "../importers/fluorite_media"
 
 module Citrine
   class VarInfo
@@ -30,10 +32,13 @@ module Citrine
 
   class MacroExpander
     getter macros : Hash(String, Crystal::Macro)
+    getter constant_arrays : Hash(String, Crystal::ArrayLiteral)
     property current_type : TypeInfo? = nil
+    property filename : String? = nil
 
-    def initialize
+    def initialize(@filename : String? = nil)
       @macros = {} of String => Crystal::Macro
+      @constant_arrays = {} of String => Crystal::ArrayLiteral
     end
 
     def expand(node : Crystal::ASTNode) : Crystal::ASTNode
@@ -92,6 +97,12 @@ module Citrine
       when Crystal::Assign
         node.target = expand(node.target)
         node.value = expand(node.value)
+        if node.value.is_a?(Crystal::ArrayLiteral)
+          t_str = node.target.to_s
+          if t_str =~ /^[A-Z]/
+            @constant_arrays[t_str] = node.value.as(Crystal::ArrayLiteral)
+          end
+        end
         node
 
       when Crystal::BinaryOp
@@ -117,13 +128,31 @@ module Citrine
           expanded = expand_call(node)
           expand(expanded)
         else
-          # Expand block and arguments
+          # Expand block, receiver, and arguments
           if block = node.block
             if body = block.body
               block.body = expand(body)
             end
           end
+          if obj = node.obj
+            node.obj = expand(obj)
+          end
           node.args = node.args.map { |a| expand(a) }
+
+          # Constant folding for .size / .length on ArrayLiteral
+          if (node.name == "size" || node.name == "length") && node.args.empty?
+            if (obj = node.obj)
+              if obj.is_a?(Crystal::ArrayLiteral)
+                return Crystal::NumberLiteral.new(obj.as(Crystal::ArrayLiteral).elements.size)
+              elsif obj.is_a?(Crystal::Path)
+                target_name = obj.names.last
+                if target_name =~ /^[A-Z]/ && (arr_lit = @constant_arrays[target_name]?)
+                  return Crystal::NumberLiteral.new(arr_lit.elements.size)
+                end
+              end
+            end
+          end
+
           node
         end
 
@@ -175,7 +204,18 @@ module Citrine
     end
 
     private def is_macro_call?(call : Crystal::Call) : Bool
-      call.name.ends_with?("!") ||
+      is_citrine_media_macro = (call.obj.nil? || call.obj.to_s == "Citrine") && [
+        "load_track_titles",
+        "load_track_durations",
+        "album_track_titles",
+        "album_track_durations",
+        "album_title",
+        "album_name",
+        "album_artist"
+      ].includes?(call.name)
+
+      is_citrine_media_macro ||
+        call.name.ends_with?("!") ||
         call.name == "fsm" ||
         call.name == "citrine_ecs" ||
         @macros.has_key?(call.name)
@@ -187,6 +227,14 @@ module Citrine
         expand_ecs(call)
       when "fsm!", "fsm"
         expand_fsm(call)
+      when "load_track_titles", "album_track_titles"
+        expand_track_titles(call)
+      when "load_track_durations", "album_track_durations"
+        expand_track_durations(call)
+      when "album_title", "album_name"
+        expand_album_title(call)
+      when "album_artist"
+        expand_album_artist(call)
       else
         if mac = @macros[call.name]?
           expand_user_macro(mac, call)
@@ -399,6 +447,104 @@ module Citrine
       )
 
       Crystal::Expressions.new(exprs)
+    end
+
+    private def load_album_metadata(call : Crystal::Call) : Array(JSON::Any)?
+      meta_path = if call.args.size > 0 && call.args.first.is_a?(Crystal::StringLiteral)
+                    call.args.first.as(Crystal::StringLiteral).value
+                  else
+                    "album_metadata.json"
+                  end
+
+      base_dir = @filename ? File.dirname(@filename.not_nil!) : "."
+      full_path = File.expand_path(meta_path, base_dir)
+
+      # If metadata JSON does not exist or is stale, check if an album directory exists to auto-generate it
+      album_dir = File.join(base_dir, "album")
+      if Dir.exists?(album_dir)
+        needs_regen = false
+        if !File.exists?(full_path)
+          needs_regen = true
+        else
+          meta_mtime = File.info(full_path).modification_time
+          audio_exts = [".ogg", ".mp3", ".wav", ".flac", ".m4a"]
+          album_files = Dir.children(album_dir).select do |f|
+            audio_exts.includes?(File.extname(f).downcase)
+          end
+          if album_files.any? { |f| File.info(File.join(album_dir, f)).modification_time > meta_mtime }
+            needs_regen = true
+          else
+            begin
+              parsed_check = JSON.parse(File.read(full_path)).as_a
+              needs_regen = (parsed_check.size != album_files.size)
+            rescue
+              needs_regen = true
+            end
+          end
+        end
+
+        if needs_regen
+          Importers::FluoriteMedia.import_album(album_dir, base_dir) rescue nil
+        end
+      end
+
+      if File.exists?(full_path)
+        begin
+          JSON.parse(File.read(full_path)).as_a
+        rescue
+          nil
+        end
+      else
+        nil
+      end
+    end
+
+    private def expand_track_titles(call : Crystal::Call) : Crystal::ASTNode
+      meta = load_album_metadata(call)
+      elements = [] of Crystal::ASTNode
+      if meta
+        meta.each do |item|
+          t_num = item["track_number"]?.try(&.as_i?) || 1
+          t_title = item["title"]?.try(&.as_s?) || "Track"
+          if md = t_title.match(/^\d+\s*[\.\-]?\s*(.+)$/)
+            t_title = md[1].strip
+          end
+          prefix = t_num < 10 ? "0#{t_num}" : "#{t_num}"
+          elements << Crystal::StringLiteral.new("#{prefix} #{t_title}")
+        end
+      end
+      Crystal::ArrayLiteral.new(elements)
+    end
+
+    private def expand_track_durations(call : Crystal::Call) : Crystal::ASTNode
+      meta = load_album_metadata(call)
+      elements = [] of Crystal::ASTNode
+      if meta
+        meta.each do |item|
+          dur_any = item["duration_seconds"]?
+          dur = if dur_any
+                  dur_any.as_f? || dur_any.as_i?.try(&.to_f) || 0.0
+                else
+                  0.0
+                end
+          elements << Crystal::NumberLiteral.new(sprintf("%.1f", dur), :f32)
+        end
+      end
+      Crystal::ArrayLiteral.new(elements)
+    end
+
+    private def expand_album_title(call : Crystal::Call) : Crystal::ASTNode
+      meta = load_album_metadata(call)
+      first = meta ? meta.first? : nil
+      album_name = first ? (first["album"]?.try(&.as_s?) || "Unknown Album") : "Unknown Album"
+      Crystal::StringLiteral.new(album_name)
+    end
+
+    private def expand_album_artist(call : Crystal::Call) : Crystal::ASTNode
+      meta = load_album_metadata(call)
+      first = meta ? meta.first? : nil
+      artist_name = first ? (first["artist"]?.try(&.as_s?) || "Unknown Artist") : "Unknown Artist"
+      Crystal::StringLiteral.new(artist_name)
     end
   end
 end

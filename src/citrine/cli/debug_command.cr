@@ -11,8 +11,6 @@ module Citrine
   module CLI
     class DebugCommand
       def self.run(args : Array(String))
-        target = args.reject(&.starts_with?("-")).first?
-
         if args.includes?("--mem-check")
           MemCheckCommand.run(args.reject { |a| a == "--mem-check" })
           return
@@ -29,6 +27,22 @@ module Citrine
         timeout_sec = 10.0
         if idx = args.index("--timeout")
           timeout_sec = args[idx + 1]?.try(&.to_f?) || 10.0
+        end
+
+        skip_next = false
+        target : String? = nil
+        args.each do |arg|
+          if skip_next
+            skip_next = false
+            next
+          end
+          if arg == "--port" || arg == "--timeout"
+            skip_next = true
+            next
+          end
+          if !arg.starts_with?("-") && target.nil?
+            target = arg
+          end
         end
 
         iso_path, source_map = prepare_target(target)
@@ -56,24 +70,45 @@ module Citrine
           puts "[Citrine Debugger] Running in headless CI verification mode (timeout: #{timeout_sec}s)..."
         end
 
+        ai_log_path = ".citrine_debug.log"
+        ai_log = File.open(ai_log_path, "w")
+        event_count = 0
+
+        puts "[Citrine Debugger] AI Debug Bridge active -> #{File.expand_path(ai_log_path)}"
+        puts "[Citrine Debugger] Interactive PCSX2 display running with live telemetry."
+        puts "[Citrine Debugger] Press buttons on your controller in PCSX2 to inspect input."
+        puts "[Citrine Debugger] (Close PCSX2 window or press Ctrl+C to exit)..."
+
         crash_detected = false
         timeout = is_ci ? timeout_sec.seconds : nil
 
-        bridge.spawn_pcsx2(
-          iso_path: iso_path,
-          batch: is_ci,
-          debugger_gui: !no_break && !is_ci,
-          timeout: timeout
-        ) do |line|
-          if line.includes?("[Citrine") || line.includes?("PANIC") || line.includes?("Watchdog") || line.includes?("Exception")
-            puts " [PS2 EE] #{line}"
-          end
+        begin
+          bridge.spawn_pcsx2(
+            iso_path: iso_path,
+            batch: is_ci,
+            nogui: is_ci,
+            debugger_gui: !no_break && !is_ci,
+            timeout: timeout
+          ) do |line|
+            if line.includes?("[Citrine") || line.includes?("[CITRINE") || line.includes?("[DEBUG") || line.includes?("PANIC") || line.includes?("Watchdog") || line.includes?("Exception") || line.includes?("Button") || line.includes?("PAD") || line.includes?("Pad:") || line.includes?("padman") || line.includes?("sio2man")
+              puts " [PS2 EE] #{line}"
+              ai_log.puts(line)
+              ai_log.flush
+              event_count += 1
+            end
 
-          if report = Debugger::CrashAnalyzer.analyze(line, source_map)
-            crash_detected = true
-            STDERR.puts report.render
+            if report = Debugger::CrashAnalyzer.analyze(line, source_map)
+              crash_detected = true
+              STDERR.puts report.render
+              ai_log.puts("[CRASH REPORT] #{report.render}")
+              ai_log.flush
+            end
           end
+        ensure
+          ai_log.close rescue nil
         end
+
+        puts "\n[Citrine Debugger] Debug session ended. Captured #{event_count} events to #{ai_log_path}."
 
         if crash_detected
           STDERR.puts "\n[Citrine Debugger] FAILED: Hardware crash or panic detected during execution."

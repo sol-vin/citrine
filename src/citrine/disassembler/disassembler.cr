@@ -124,6 +124,8 @@ module Citrine
             @io.puts sprintf("  %04d: %-14s R%d, %d%s", i, op.to_s, dst, signed_imm, loc_str)
           when Opcode::LoadConst
             @io.puts sprintf("  %04d: %-14s R%d, const[%d]%s", i, op.to_s, dst, imm16, loc_str)
+          when Opcode::InlineAsm
+            @io.puts sprintf("  %04d: %-14s R%d, const[%d]%s", i, op.to_s, dst, imm16, loc_str)
           when Opcode::Jump
             @io.puts sprintf("  %04d: %-14s offset:%+d (target: %04d)%s", i, op.to_s, instr.branch_offset, i + 1 + instr.branch_offset, loc_str)
           when Opcode::JumpIfFalse, Opcode::JumpIfTrue

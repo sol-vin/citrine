@@ -181,10 +181,23 @@ Citrine seamlessly bridges with [`cradare2`](https://github.com/sol-vin/cradare2
 ## Examples
 
 Check the `examples/` directory:
-- [`01_hello_pad`](examples/01_hello_pad/main.cr): Minimal Hello World print function for console and PlayStation 2 screen.
+- [`01_hello_pad`](examples/01_hello_pad/main.cr): DualShock 2 gamepad input handling, color cycling, and GS 2D rendering.
 - [`02_shapes_and_text`](examples/02_shapes_and_text/main.cr): 2D primitives, colors, text, and interactive profiler HUD overlay.
 - [`03_entity_fibers`](examples/03_entity_fibers/main.cr): Entity AI patrol logic with cooperative coroutines/fibers.
 - [`04_safety_and_panic`](examples/04_safety_and_panic/main.cr): Demonstrates hardware safety guards and the on-screen crash screen.
+- [`05_hello_world`](examples/05_hello_world/main.cr): Classic DVD-style bouncing logo benchmark.
+- [`06_dvd_bounce`](examples/06_dvd_bounce/main.cr): High-performance multi-logo DVD bounce stress test.
+- [`07_primitives_2d_3d`](examples/07_primitives_2d_3d/main.cr): Combined 2D rasterization and 3D wireframe rendering.
+- [`08_controller_tester`](examples/08_controller_tester/main.cr): Full DualShock 2 hardware pad diagnostic suite (pressure buttons, analog sticks, vibration motors).
+- [`09_concurrency_showcase`](examples/09_concurrency_showcase/main.cr): CSP channels, wait groups, and fiber scheduling.
+- [`10_video_and_audio`](examples/10_video_and_audio/main.cr): Fluorite video playback and SPU2 audio effects.
+- [`11_macro_ecs_showcase`](examples/11_macro_ecs_showcase/main.cr): High-performance macro-driven Entity Component System.
+- [`12_immediate_ui`](examples/12_immediate_ui/main.cr): Immediate-mode GUI controls, sliders, and button widgets.
+- [`13_physics_and_particles`](examples/13_physics_and_particles/main.cr): Particle systems and 2D physics integration.
+- [`14_creative_coding`](examples/14_creative_coding/main.cr): Procedural generative art and mathematical visualizations.
+- [`15_rigid_body_physics`](examples/15_rigid_body_physics/main.cr): 3D rigid body dynamics and collision detection.
+- [`16_shaders_and_postfx`](examples/16_shaders_and_postfx/main.cr): GS rasterization effects and post-processing filters.
+- [`17_inline_assembly`](examples/17_inline_assembly/main.cr): First-class MIPS R5900 inline assembly (`asm`), COP0 cycle counter profiling, VU0 Macro Mode SIMD, and CD-DA optical audio streaming.
 
 ---
 

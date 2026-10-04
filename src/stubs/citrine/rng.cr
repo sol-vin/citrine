@@ -2,20 +2,26 @@
 # Deterministic PRNG (XorShift64* / PCG), Gaussian Distribution (Box-Muller & Irwin-Hall), and Coherent Perlin Gradient Noise
 
 module Citrine
+  # Pseudo-random number generators, continuous probability distributions,
+  # and coherent multidimensional Perlin gradient noise for procedural generation.
   module RNG
-    # Fast 64-bit XorShift* pseudo-random number generator
+    # Fast 64-bit XorShift* pseudo-random number generator offering excellent statistical distribution
+    # and minimal register footprint on the MIPS R5900.
     class PRNG
+      # Internal 64-bit seed / state register.
       property state : UInt64
 
+      # Creates a new PRNG with optional initial 64-bit `seed`.
       def initialize(seed : UInt64 = 0x853c49e6748fea9b_u64)
         @state = seed == 0_u64 ? 0x853c49e6748fea9b_u64 : seed
       end
 
+      # Reseeds the generator.
       def seed(s : UInt64)
         @state = s == 0_u64 ? 0x853c49e6748fea9b_u64 : s
       end
 
-      # Generates next 64-bit unsigned integer via XorShift64*
+      # Generates next 64-bit unsigned integer via XorShift64*.
       def next_u64 : UInt64
         x = @state
         x = x ^ (x >> 12)
@@ -25,43 +31,51 @@ module Citrine
         x &* 0x2545F4914F6CDD1D_u64
       end
 
-      # Generates next 32-bit unsigned integer
+      # Generates next 32-bit unsigned integer from upper state bits.
       def next_u32 : UInt32
         (next_u64 >> 32).to_u32
       end
 
-      # Generates next integer in range [min, max]
+      # Generates next integer in range `[min, max]`.
       def next_int(min : Int32, max : Int32) : Int32
         return min if min >= max
-        range = (max - min + 1).to_u64
-        (min.to_i64 + (next_u64 % range).to_i64).to_i32
+        range = (max - min + 1).to_i64
+        val = (next_u64 & 0x7FFFFFFF_u64).to_i64 % range
+        (min.to_i64 + val).to_i32
       end
 
-      # Generates next integer in range [0, max]
+      # Generates next integer in range `[0, max]`.
       def next_int_to(max : Int32) : Int32
         next_int(0, max)
       end
 
-      # Generates next float in range [0.0, 1.0)
+      # Generates next single-precision float in range `[0.0, 1.0)`.
       def next_float : Float32
         (next_u32 & 0x00FFFFFF_u32).to_f32 / 16777216.0_f32
       end
 
-      # Generates next boolean (50% probability)
+      # Generates next boolean with 50% probability.
       def next_bool : Bool
         (next_u32 & 1_u32) == 1_u32
       end
+
+      # Generates next integer in range `[min, max]`.
+      def rand(min : Int32, max : Int32) : Int32
+        next_int(min, max)
+      end
     end
 
-    # Gaussian / Normal Distribution
+    # Gaussian / normal distribution generator using the 12-sample Irwin-Hall
+    # Central Limit Theorem approximation for efficient, smooth bell curves on PS2 hardware.
     class Gaussian
+      # Underlying uniform PRNG stream.
       property rng : PRNG
 
+      # Creates a Gaussian distribution generator with backing PRNG.
       def initialize(@rng : PRNG = PRNG.new)
       end
 
-      # Generate normal distribution random variable with given mean and standard deviation
-      # Uses 12-sample Irwin-Hall central limit theorem for fast, smooth bell curves on PS2
+      # Generates normally distributed random value with given `mean` and `std_dev`.
       def next(mean : Float32 = 0.0_f32, std_dev : Float32 = 1.0_f32) : Float32
         sum = 0.0_f32
         12.times do
@@ -72,19 +86,23 @@ module Citrine
         mean + z * std_dev
       end
 
+      # Global convenience method using shared default Gaussian generator.
       def self.next(mean : Float32 = 0.0_f32, std_dev : Float32 = 1.0_f32) : Float32
         DEFAULT.next(mean, std_dev)
       end
 
+      # Shared default Gaussian generator instance.
       DEFAULT = Gaussian.new
     end
 
-    # Coherent Perlin Gradient Noise in 1D, 2D, and 3D
+    # Classic coherent Perlin gradient noise generator in 1D, 2D, and 3D,
+    # including multi-octave Fractal Brownian Motion (fBm).
     class Perlin
-      # Permutation table (0..255 duplicated to 512)
+      # Permutation table (0..255 duplicated to 512).
       @@perm = StaticArray(Int32, 512).new(0)
       @@initialized : Bool = false
 
+      # Initializes permutation lookup table.
       def self.init_table
         return if @@initialized
         # Standard Perlin reference permutation
@@ -114,15 +132,17 @@ module Citrine
         @@initialized = true
       end
 
-      # Quintic fade curve (6t^5 - 15t^4 + 10t^3)
+      # Quintic polynomial S-curve fade function: \(6t^5 - 15t^4 + 10t^3\).
       def self.fade(t : Float32) : Float32
         t * t * t * (t * (t * 6.0_f32 - 15.0_f32) + 10.0_f32)
       end
 
+      # Linear interpolation helper.
       def self.lerp(a : Float32, b : Float32, t : Float32) : Float32
         a + t * (b - a)
       end
 
+      # Gradient dot product hash calculation.
       def self.grad(hash : Int32, x : Float32, y : Float32, z : Float32) : Float32
         h = hash & 15
         u = h < 8 ? x : y
@@ -130,7 +150,7 @@ module Citrine
         ((h & 1) == 0 ? u : -u) + ((h & 2) == 0 ? v : -v)
       end
 
-      # 3D / 2D / 1D Perlin noise
+      # Computes continuous 1D/2D/3D Perlin noise at coordinate `(x, y, z)`.
       def self.noise(x : Float32, y : Float32 = 0.0_f32, z : Float32 = 0.0_f32) : Float32
         init_table
 
@@ -166,7 +186,13 @@ module Citrine
         lerp(y1, y2, w)
       end
 
-      # Fractal Brownian Motion (fBm) multi-octave noise
+      # Computes multi-octave Fractal Brownian Motion (fBm) noise at `(x, y)`.
+      #
+      # Parameters:
+      # - `x`, `y`: Sampling coordinates.
+      # - `octaves`: Detail passes (default: 4).
+      # - `persistence`: Amplitude decay per octave (default: 0.5).
+      # - `lacunarity`: Frequency multiplier per octave (default: 2.0).
       def self.fractal(
         x : Float32,
         y : Float32,
@@ -190,39 +216,37 @@ module Citrine
       end
     end
 
-    # Module-level convenience shortcuts
+    # Shared default PRNG stream for module-level convenience calls.
     GLOBAL_PRNG = PRNG.new
 
-    def self.rand : Float32
+    # Returns pseudo-random float in `[0.0, 1.0)`.
+    def self.rand_float : Float32
       GLOBAL_PRNG.next_float
     end
 
-    def self.rand(max : Int32) : Int32
-      GLOBAL_PRNG.next_int(max)
+    # Returns pseudo-random integer in `[0, max]`.
+    def self.rand_int(max : Int32) : Int32
+      GLOBAL_PRNG.next_int(0, max)
     end
 
+    # Returns pseudo-random integer in range `[min, max]`.
     def self.rand(min : Int32, max : Int32) : Int32
       GLOBAL_PRNG.next_int(min, max)
     end
 
+    # Returns normally distributed float with given `mean` and `std_dev`.
     def self.gaussian(mean : Float32 = 0.0_f32, std_dev : Float32 = 1.0_f32) : Float32
       Gaussian.next(mean, std_dev)
     end
 
+    # Samples 1D/2D/3D Perlin gradient noise at `(x, y, z)`.
     def self.perlin(x : Float32, y : Float32 = 0.0_f32, z : Float32 = 0.0_f32) : Float32
       Perlin.noise(x, y, z)
     end
   end
 
-  def self.rand : Float32
-    RNG.rand
-  end
-
-  def self.rand(max : Int32) : Int32
-    RNG.rand(max)
-  end
-
+  # Module-level convenience method returning random integer `[min, max]`.
   def self.rand(min : Int32, max : Int32) : Int32
-    RNG.rand(min, max)
+    RNG::GLOBAL_PRNG.next_int(min, max)
   end
 end

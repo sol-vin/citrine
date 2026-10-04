@@ -4,24 +4,35 @@
 require "../../citrine"
 
 module Citrine
+  # Raycasting, swept shape continuous collision detection (CCD), and bitmask collision filtering.
   module Collision
+    # 16-bit layer and mask bitfield for filtering collision pairs.
     struct Filter
+      # Layer bitmask this object belongs to.
       property layer : UInt16
+      # Bitmask of layers this object can collide with.
       property mask : UInt16
 
+      # Creates a collision filter with `layer` and `mask`.
       def initialize(@layer : UInt16 = 1_u16, @mask : UInt16 = 0xFFFF_u16)
       end
 
+      # Returns true if this filter allows collision with `other` filter.
       def can_collide?(other : Filter) : Bool
         ((@layer & other.mask) != 0) && ((other.layer & @mask) != 0)
       end
     end
 
+    # 2D Ray defined by origin point, normalized direction vector, and maximum reach distance.
     struct Ray2D
+      # Origin starting point in world space.
       property origin : Vector2
+      # Normalized direction vector.
       property direction : Vector2
+      # Maximum raycast distance.
       property max_distance : Float32
 
+      # Creates a 2D ray with normalized direction and `max_distance`.
       def initialize(@origin : Vector2, @direction : Vector2, @max_distance : Float32 = 1000.0_f32)
         # Normalize direction
         len = Math.sqrt(@direction.x * @direction.x + @direction.y * @direction.y)
@@ -31,12 +42,18 @@ module Citrine
       end
     end
 
+    # Result data returned from a raycast or shapecast test.
     struct RaycastHit2D
+      # True if intersection occurred within `max_distance`.
       property hit : Bool
+      # Exact point of intersection in world coordinates.
       property point : Vector2
+      # Unit surface normal at contact point.
       property normal : Vector2
+      # Distance from ray origin to contact point.
       property distance : Float32
 
+      # Creates a raycast hit record.
       def initialize(
         @hit : Bool = false,
         @point : Vector2 = Vector2.new(0.0_f32, 0.0_f32),
@@ -46,7 +63,12 @@ module Citrine
       end
     end
 
-    # Fast 2D Ray-AABB slab intersection
+    # Fast 2D Ray-AABB slab intersection test.
+    #
+    # Parameters:
+    # - `ray`: Origin, direction, and max distance.
+    # - `rx`, `ry`: Upper-left corner of rectangle.
+    # - `rw`, `rh`: Dimensions of rectangle.
     def self.raycast_aabb(ray : Ray2D, rx : Float32, ry : Float32, rw : Float32, rh : Float32) : RaycastHit2D
       inv_dir_x = ray.direction.x.abs > 0.0001_f32 ? (1.0_f32 / ray.direction.x) : 100000.0_f32
       inv_dir_y = ray.direction.y.abs > 0.0001_f32 ? (1.0_f32 / ray.direction.y) : 100000.0_f32
@@ -83,7 +105,13 @@ module Citrine
       RaycastHit2D.new(hit: true, point: hit_pt, normal: normal, distance: hit_dist)
     end
 
-    # Swept Circle ShapeCast against AABB (Continuous Collision Detection)
+    # Swept Circle ShapeCast against AABB for continuous collision detection (CCD) via Minkowski sum.
+    #
+    # Parameters:
+    # - `start_pos`: Starting circle center.
+    # - `radius`: Circle radius.
+    # - `velocity`: Motion vector during the time step.
+    # - `rx`, `ry`, `rw`, `rh`: Target rectangle bounds.
     def self.shapecast_circle(
       start_pos : Vector2,
       radius : Float32,

@@ -45,6 +45,10 @@ module Citrine
         emit((0x0C_u32 << 26) | (rs.to_u32 << 21) | (rt.to_u32 << 16) | ((imm & 0xFFFF).to_u32))
       end
 
+      def xori(rt : Int32, rs : Int32, imm : Int32)
+        emit((0x0E_u32 << 26) | (rs.to_u32 << 21) | (rt.to_u32 << 16) | ((imm & 0xFFFF).to_u32))
+      end
+
       def addiu(rt : Int32, rs : Int32, imm : Int32)
         emit((0x09_u32 << 26) | (rs.to_u32 << 21) | (rt.to_u32 << 16) | ((imm & 0xFFFF).to_u32))
       end
@@ -71,6 +75,10 @@ module Citrine
 
       def srl(rd : Int32, rt : Int32, sa : Int32)
         emit((rt.to_u32 << 16) | (rd.to_u32 << 11) | ((sa & 0x1F).to_u32 << 6) | 0x02_u32)
+      end
+
+      def sra(rd : Int32, rt : Int32, sa : Int32)
+        emit((rt.to_u32 << 16) | (rd.to_u32 << 11) | ((sa & 0x1F).to_u32 << 6) | 0x03_u32)
       end
 
       def sll(rd : Int32, rt : Int32, sa : Int32)
@@ -161,12 +169,24 @@ module Citrine
         emit((rs.to_u32 << 21) | 0x08_u32)
       end
 
+      def jalr(rs : Int32, rd : Int32 = RA)
+        emit((rs.to_u32 << 21) | (rd.to_u32 << 11) | 0x09_u32)
+      end
+
       def syscall_inst
         emit(0x0000000C_u32)
       end
 
       def mfc0(rt : Int32, rd : Int32)
         emit((0x10_u32 << 26) | (rt.to_u32 << 16) | (rd.to_u32 << 11))
+      end
+
+      def mtc0(rt : Int32, rd : Int32)
+        emit((0x10_u32 << 26) | (0x04_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11))
+      end
+
+      def sync_p
+        emit(0x0000040F_u32)
       end
 
       def j(target_label : String)
@@ -199,6 +219,16 @@ module Citrine
         emit((0x04_u32 << 26) | (rs.to_u32 << 21) | (rt.to_u32 << 16))
       end
 
+      def bgez(rs : Int32, target_label : String)
+        @fixups << {@words.size, target_label, :bgez}
+        emit((0x01_u32 << 26) | (rs.to_u32 << 21) | (0x01_u32 << 16))
+      end
+
+      def bltz(rs : Int32, target_label : String)
+        @fixups << {@words.size, target_label, :bltz}
+        emit((0x01_u32 << 26) | (rs.to_u32 << 21) | (0x00_u32 << 16))
+      end
+
       def resolve!
         @fixups.each do |idx, label_name, type|
           target_vaddr = @labels[label_name]? || raise "Unknown label: #{label_name}"
@@ -209,7 +239,7 @@ module Citrine
             @words[idx] = 0x08000000_u32 | ((target_vaddr >> 2) & 0x03FFFFFF_u32)
           when :jal
             @words[idx] = 0x0C000000_u32 | ((target_vaddr >> 2) & 0x03FFFFFF_u32)
-          when :bnez, :beqz, :bne, :beq
+          when :bnez, :beqz, :bne, :beq, :bgez, :bltz
             offset_bytes = target_vaddr.to_i32 - (inst_vaddr.to_i32 + 4)
             offset_insts = offset_bytes // 4
             @words[idx] = (@words[idx] & 0xFFFF0000_u32) | ((offset_insts & 0xFFFF).to_u32)

@@ -83,17 +83,17 @@ Instructions use three encodings, always 4-byte aligned:
 | `Vec2GetY`| 0x16 | ABC | `R[dst] = R[a].y` | Float load from slot |
 | `Vec2SetX`| 0x17 | ABC | `R[dst].x = R[a]` | Float store to slot |
 | `Vec2SetY`| 0x18 | ABC | `R[dst].y = R[a]` | Float store to slot |
-| `Vec2Add` | 0x19 | ABC | `R[dst] = R[a] + R[b]` | Vec2 component-wise add |
-| `ColorNew`| 0x1A | ABC | `R[dst] = RGBA(R[a..a+3])`| Packs RGBA into 32-bit word |
+| `Vec2Add` | 0x19 | ABC | `R[dst] = R[a] + R[b]` | `PADDW $dst, $a, $b` (128-bit MMI SIMD) |
+| `ColorNew`| 0x1A | ABC | `R[dst] = RGBA(R[a..a+3])`| `PPAC5 $dst, $a` (128-bit RGBA 5:5:5:1 pack) |
 | `Eq` | 0x1E | ABC | `R[dst] = (R[a] == R[b])`| Content comparison |
 | `Ne` | 0x1F | ABC | `R[dst] = (R[a] != R[b])`| Content comparison |
 | `Lt` | 0x20 | ABC | `R[dst] = (R[a] < R[b])` | `slt $dst, $a, $b` |
 | `Le` | 0x21 | ABC | `R[dst] = (R[a] <= R[b])`| `slt $dst, $b, $a; xori $dst, 1` |
 | `Gt` | 0x22 | ABC | `R[dst] = (R[a] > R[b])` | `slt $dst, $b, $a` |
 | `Ge` | 0x23 | ABC | `R[dst] = (R[a] >= R[b])`| `slt $dst, $a, $b; xori $dst, 1` |
-| `Jump` | 0x28 | BRANCH | `PC += 1 + offset` | `j / b label` |
-| `JumpIfTrue`| 0x29 | BRANCH | If `R[cond]`, jump | `bne $cond, $zero, label` |
-| `JumpIfFalse`| 0x2A | BRANCH | If `!R[cond]`, jump | `beq $cond, $zero, label` |
+| `Jump` | 0x28 | BRANCH | `PC += 1 + offset` | `j / b label; nop` |
+| `JumpIfTrue`| 0x29 | BRANCH | If `R[cond]`, jump | `bne $cond, $zero, label; nop` |
+| `JumpIfFalse`| 0x2A | BRANCH | If `!R[cond]`, jump | `beq $cond, $zero, label; nop` |
 | `Call` | 0x32 | AB_IMM | Call function `imm` | `jal target; nop` |
 | `Return` | 0x33 | ABC | Return `R[src]` to caller| `move $v0, $src; jr $ra; nop` |
 | `CallNative`| 0x34 | AB_IMM | Call native service `imm`| Invoke host / hardware driver |
@@ -101,6 +101,16 @@ Instructions use three encodings, always 4-byte aligned:
 | `Yield` | 0x3D | ABC | Suspend current fiber | Switch to scheduler |
 | `ResumeFiber`| 0x3E | ABC | Resume fiber `R[a]` | Switch execution to fiber |
 | `Halt` | 0x46 | ABC | Park EE CPU / stop VM | Terminate execution |
+
+---
+
+## Detailed References
+
+| Topic | Reference | Content |
+|:---|:---|:---|
+| R5900 JIT Machine Code Emission | [r5900-jit-emission.md](./references/r5900-jit-emission.md) | Translating Citrine bytecodes to native R5900, 128-bit MMI instructions, branch delay slot invariants, SPRAM fast frames |
+
+---
 
 ## Calling Conventions
 
@@ -118,3 +128,24 @@ citrine compile src/main.cr -o build/game.cbc
 # Inspect instructions and symbols
 citrine disasm build/game.cbc
 ```
+
+## Mandatory Constraints & Rules
+
+- **Branch Delay Slot Preservation**: Every branch emitted by `Citrine::Compiler::MipsEmitter` (`bne`, `beq`, `j`, `jal`) must be followed by a valid instruction or `nop` (`0x00000000`). Never emit a branch inside a delay slot.
+- **128-bit Quadword Alignment**: When emitting vector load/store instructions (`lq`/`sq`), verify that the target memory pointer is 16-byte aligned.
+
+## Rapid Feature Verification Workflow
+
+When testing new language syntax, standard library features, or compiler intrinsics:
+1. **Create Scratch Test**: Write an isolated test script in `examples/scratch/test_<feature>.cr` (e.g. testing `arr[idx]`, string interpolation `"#{var}"`, or math).
+2. **Compile Verification**:
+   ```powershell
+   .\bin\citrine.exe compile examples\scratch\test_<feature>.cr
+   ```
+   Inspect bytecode size, SPRAM register frame, and compiler diagnostics.
+3. **Execution Verification**:
+   ```powershell
+   .\bin\citrine.exe run examples\scratch\test_<feature>.cr
+   ```
+4. **Clean Teardown**: Remove temporary scratch artifacts after verification.
+

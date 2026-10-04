@@ -1,8 +1,16 @@
 require "citrine"
+require "citrine/inputmap"
 require "citrine/rng"
 require "citrine/rng/secure"
 
-struct BouncingLogo
+# Godot-style InputMap Action configuration
+input_map do
+  action :spawn_one, Button::Cross, port: 0
+  action :spawn_ten, Button::R1, port: 0
+  action :reset, Button::Triangle, port: 0
+end
+
+class BouncingLogo
   property pos_x : Int32
   property pos_y : Int32
   property vel_x : Int32
@@ -43,12 +51,12 @@ struct BouncingLogo
     end
 
     if bounced == 1
-      # Rotate text color: 1..5 step guarantees a different color (out of 6)
-      step = rng.rand(1..5)
+      # Rotate text color using RNG: 1..5 step guarantees a different color (out of 6)
+      step = rng.rand(1, 5)
       @text_color_idx = (@text_color_idx + step) % 6
 
       # BG color: pick an offset in 1..5 from text color to guarantee bg != text
-      bg_step = rng.rand(1..5)
+      bg_step = rng.rand(1, 5)
       @bg_color_idx = (@text_color_idx + bg_step) % 6
     end
   end
@@ -102,32 +110,36 @@ logos = [] of BouncingLogo
 logos << BouncingLogo.new(240, 200, 7, 6, 3, 2)
 
 Citrine.main_loop do
+  pad = Citrine.player(0)
+
   # Cross button: spawn 1 new bouncing logo at random position & trajectory
-  if Citrine.button_pressed?(Button::Cross)
-    rx = rng.rand(40..400)
-    ry = rng.rand(40..320)
-    dir_x = (rng.rand(0..1) == 0) ? -3 : 3
-    dir_y = (rng.rand(0..1) == 0) ? -2 : 2
-    rt_col = rng.rand(0..5)
-    rbg_col = (rt_col + rng.rand(1..5)) % 6
+  if (Action.is_pressed?(Actions::SpawnOne) || pad.button_pressed?(Button::Cross)) && logos.size < 128
+    rx = rng.rand(40, 400)
+    ry = rng.rand(40, 320)
+    dir_x = (rng.rand(0, 1) == 0) ? -rng.rand(4, 7) : rng.rand(4, 7)
+    dir_y = (rng.rand(0, 1) == 0) ? -rng.rand(3, 6) : rng.rand(3, 6)
+    rt_col = rng.rand(0, 5)
+    rbg_col = (rt_col + rng.rand(1, 5)) % 6
     logos << BouncingLogo.new(rx, ry, dir_x, dir_y, rt_col, rbg_col)
   end
 
   # R1 button: stress test - spawn 10 logos at once!
-  if Citrine.button_pressed?(Button::R1)
+  if (Action.is_pressed?(Actions::SpawnTen) || pad.button_pressed?(Button::R1)) && logos.size < 128
     10.times do
-      rx = rng.rand(40..400)
-      ry = rng.rand(40..320)
-      dir_x = (rng.rand(0..1) == 0) ? -3 : 3
-      dir_y = (rng.rand(0..1) == 0) ? -2 : 2
-      rt_col = rng.rand(0..5)
-      rbg_col = (rt_col + rng.rand(1..5)) % 6
-      logos << BouncingLogo.new(rx, ry, dir_x, dir_y, rt_col, rbg_col)
+      if logos.size < 128
+        rx = rng.rand(40, 400)
+        ry = rng.rand(40, 320)
+        dir_x = (rng.rand(0, 1) == 0) ? -rng.rand(4, 7) : rng.rand(4, 7)
+        dir_y = (rng.rand(0, 1) == 0) ? -rng.rand(3, 6) : rng.rand(3, 6)
+        rt_col = rng.rand(0, 5)
+        rbg_col = (rt_col + rng.rand(1, 5)) % 6
+        logos << BouncingLogo.new(rx, ry, dir_x, dir_y, rt_col, rbg_col)
+      end
     end
   end
 
   # Triangle button: reset back to 1 logo
-  if Citrine.button_pressed?(Button::Triangle)
+  if Action.is_pressed?(Actions::Reset) || pad.button_pressed?(Button::Triangle)
     while logos.size > 1
       logos.pop
     end
