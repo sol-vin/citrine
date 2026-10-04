@@ -247,6 +247,96 @@ module Citrine
         end
       end
 
+      # --- MIPS Macro DSL & Assembly Idiom Helpers ---
+
+      # Loads a 32-bit or 16-bit immediate value into register rt
+      def li(rt : Int32, val : UInt32 | Int32)
+        u = val.to_u32
+        if u <= 0xFFFF_u32
+          ori(rt, ZERO, u.to_i32)
+        elsif (u & 0xFFFF_u32) == 0_u32
+          lui(rt, (u >> 16).to_i32)
+        elsif (u & 0x8000_u32) == 0 && (u <= 0x7FFF_u32)
+          addiu(rt, ZERO, u.to_i32)
+        else
+          lui(rt, (u >> 16).to_i32)
+          ori(rt, rt, (u & 0xFFFF_u32).to_i32)
+        end
+      end
+
+      # Safe subroutine call (jal + branch delay slot nop)
+      def call(label_name : String)
+        jal(label_name)
+        nop
+      end
+
+      # Safe unconditional jump (j + branch delay slot nop)
+      def jump(label_name : String)
+        j(label_name)
+        nop
+      end
+
+      # Safe subroutine return (jr $ra + branch delay slot nop)
+      def ret
+        jr(RA)
+        nop
+      end
+
+      # Load word from SPRAM (Base register T0 = 0x70000000)
+      def spram_read(rt : Int32, offset : Int32, base : Int32 = T0)
+        lw(rt, offset, base)
+      end
+
+      # Store word to SPRAM (Base register T0 = 0x70000000)
+      def spram_write(rt : Int32, offset : Int32, base : Int32 = T0)
+        sw(rt, offset, base)
+      end
+
+      # Kicks DMA Channel 2 from fixed address with fixed QWC
+      def dma02_kick(madr_addr : UInt32, qwc : UInt16 | Int32)
+        call("dma02_wait")
+        lui(T8, 0x1000)
+        ori(T8, T8, 0xa000)
+        li(T7, madr_addr)
+        sw(T7, 0x10, T8)
+        ori(T6, ZERO, qwc.to_i32)
+        sw(T6, 0x20, T8)
+        ori(T5, ZERO, 0x101)
+        sw(T5, 0x00, T8)
+        call("dma02_wait")
+      end
+
+      # Kicks DMA Channel 2 using registers for MADR and QWC
+      def dma02_kick_reg(madr_reg : Int32, qwc_reg : Int32)
+        call("dma02_wait")
+        lui(T8, 0x1000)
+        ori(T8, T8, 0xa000)
+        sw(madr_reg, 0x10, T8)
+        sw(qwc_reg, 0x20, T8)
+        ori(T5, ZERO, 0x101)
+        sw(T5, 0x00, T8)
+        call("dma02_wait")
+      end
+
+      # Standard VSync spin-wait on GS_CSR (0x12001000) bit 3
+      def vsync_wait(label_prefix : String = "vsync")
+        lui(V1, 0x1200)
+        ori(V1, V1, 0x1000)
+        ori(V0, ZERO, 8)
+        sd(V0, 0, V1)
+        lui(T1, 0x0020)
+        lbl_spin = "#{label_prefix}_spin"
+        lbl_done = "#{label_prefix}_done"
+        label(lbl_spin)
+        ld(V0, 0, V1)
+        andi(V0, V0, 8)
+        bnez(V0, lbl_done)
+        addiu(T1, T1, -1)
+        bnez(T1, lbl_spin)
+        nop
+        label(lbl_done)
+      end
+
       def pad_to(byte_size : Int32)
         while @words.size * 4 < byte_size
           nop
@@ -263,3 +353,4 @@ module Citrine
     end
   end
 end
+

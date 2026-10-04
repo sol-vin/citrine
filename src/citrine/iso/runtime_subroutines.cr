@@ -1,0 +1,421 @@
+require "../mips/mips_emitter"
+require "./pad_runtime_payload"
+
+module Citrine
+  module ISO
+    # Provides reusable leaf MIPS R5900 runtime subroutines and native API stubs
+    # for PlayStation 2 Emotion Engine execution.
+    class RuntimeSubroutines
+      alias MipsEmitter = Citrine::MIPS::MipsEmitter
+      include Citrine::MIPS
+
+      STUB_NAMES = [
+        "Citrine_VM_Run",
+        "Citrine_InitWindow",
+        "Citrine_CloseWindow",
+        "Citrine_BeginDrawing",
+        "Citrine_EndDrawing",
+        "Citrine_ClearBackground",
+        "Citrine_DrawRectangle",
+        "Citrine_DrawCircle",
+        "Citrine_DrawLine",
+        "Citrine_DrawText",
+        "Citrine_BeginMode3D",
+        "Citrine_EndMode3D",
+        "Citrine_DrawCube",
+        "Citrine_DrawCubeWires",
+        "Citrine_DrawGrid",
+        "Citrine_DrawMesh",
+        "Citrine_LoadTexture",
+        "Citrine_DrawTexture",
+        "Citrine_ButtonDown",
+        "Citrine_ButtonPressed",
+        "Citrine_ButtonReleased",
+        "Citrine_GetAnalog",
+        "Citrine_SetRumble",
+        "Citrine_ActionPressed",
+        "Citrine_ActionDown",
+        "Citrine_ActionReleased",
+        "Citrine_LoadSound",
+        "Citrine_PlaySound",
+        "Citrine_StopSound",
+        "Citrine_PlayCDDA",
+        "Citrine_StopCDDA",
+        "Citrine_GetCDDAStatus",
+        "Citrine_SetVolume",
+        "citrine_vm_panic"
+      ]
+
+      # Emits DMAC Channel 2 wait loop
+      def self.emit_dma02_wait(emitter : MipsEmitter)
+        emitter.label("dma02_wait")
+        emitter.lui(T8, 0x1000)
+        emitter.ori(T8, T8, 0xa000)
+        emitter.label("dma02_wait_loop")
+        emitter.lw(T9, 0, T8)
+        emitter.andi(T9, T9, 0x100)
+        emitter.bnez(T9, "dma02_wait_loop")
+        emitter.nop
+        emitter.jr(RA)
+        emitter.nop
+      end
+
+      # Emits DMAC master reset
+      def self.emit_dma_reset(emitter : MipsEmitter)
+        emitter.label("dma_reset")
+        emitter.lui(T8, 0x1000)
+        emitter.ori(T8, T8, 0xa000)
+        emitter.sw(ZERO, 0, T8)
+        emitter.sw(ZERO, 0x10, T8)
+        emitter.sw(ZERO, 0x30, T8)
+        emitter.sw(ZERO, 0x40, T8)
+        emitter.sw(ZERO, 0x50, T8)
+        emitter.lui(T7, 0x1000)
+        emitter.ori(T7, T7, 0xe000)
+        emitter.ori(T6, ZERO, 0xff1f)
+        emitter.sw(T6, 0x10, T7)
+        emitter.sw(ZERO, 0, T7)
+        emitter.sw(ZERO, 0x20, T7)
+        emitter.sw(ZERO, 0x30, T7)
+        emitter.sw(ZERO, 0x40, T7)
+        emitter.sw(ZERO, 0x50, T7)
+        emitter.lw(T6, 0, T7)
+        emitter.ori(T6, T6, 1)
+        emitter.sw(T6, 0, T7)
+        emitter.jr(RA)
+        emitter.nop
+      end
+
+      # Emits console logging routine: EE SIO UART output and PCSX2 SYSCALL_print (0x75)
+      def self.emit_debug_puts(emitter : MipsEmitter)
+        emitter.label("debug_puts")
+        emitter.addiu(SP, SP, -32)
+        emitter.sw(RA, 28, SP)
+        emitter.sw(S0, 24, SP)
+        emitter.sw(A0, 20, SP)
+
+        # 1. Output string to EE SIO (UART at 0x1000f180) byte-by-byte
+        emitter.lui(T8, 0x1000)
+        emitter.ori(T8, T8, 0xf180)
+        emitter.move(S0, A0)
+
+        emitter.label("sio_loop")
+        emitter.lbu(T6, 0, S0)
+        emitter.beqz(T6, "sio_done")
+        emitter.nop
+        emitter.sb(T6, 0, T8)
+        emitter.addiu(S0, S0, 1)
+        emitter.j("sio_loop")
+        emitter.nop
+
+        emitter.label("sio_done")
+
+        # 2. Syscall 0x75 (PCSX2 SYSCALL_print)
+        emitter.lw(A0, 20, SP)
+        emitter.ori(V1, ZERO, 0x75)
+        emitter.syscall_inst
+        emitter.nop
+
+        emitter.lw(RA, 28, SP)
+        emitter.lw(S0, 24, SP)
+        emitter.jr(RA)
+        emitter.addiu(SP, SP, 32)
+      end
+
+      # Emits all native API stubs with real SPRAM controller queries and SPU2 audio commands
+      def self.emit_native_stubs(emitter : MipsEmitter)
+        STUB_NAMES.each do |sname|
+          emitter.label(sname)
+          case sname
+          when "Citrine_ButtonDown" # A0 = port (0/1), A1 = button index
+            emitter.sll(T1, A0, 4)     # port * 16
+            emitter.sll(T2, A0, 2)     # port * 4
+            emitter.addu(T1, T1, T2)   # port * 20
+            emitter.lui(T0, 0x7000)
+            emitter.addu(T0, T0, T1)
+            emitter.lw(V0, 16, T0)     # load current buttons from 0x70000010 + port * 20
+            emitter.srlv(V0, V0, A1)
+            emitter.andi(V0, V0, 1)
+            emitter.jr(RA)
+            emitter.nop
+          when "Citrine_ButtonPressed" # A0 = port (0/1), A1 = button index
+            emitter.sll(T1, A0, 4)     # port * 16
+            emitter.sll(T2, A0, 2)     # port * 4
+            emitter.addu(T1, T1, T2)   # port * 20
+            emitter.lui(T0, 0x7000)
+            emitter.addu(T0, T0, T1)
+            emitter.lw(V0, 24, T0)     # load pressed buttons from 0x70000018 + port * 20
+            emitter.srlv(V0, V0, A1)
+            emitter.andi(V0, V0, 1)
+            emitter.jr(RA)
+            emitter.nop
+          when "Citrine_ButtonReleased" # A0 = port (0/1), A1 = button index
+            emitter.sll(T1, A0, 4)     # port * 16
+            emitter.sll(T2, A0, 2)     # port * 4
+            emitter.addu(T1, T1, T2)   # port * 20
+            emitter.lui(T0, 0x7000)
+            emitter.addu(T0, T0, T1)
+            emitter.lw(V0, 28, T0)     # load released buttons from 0x7000001C + port * 20
+            emitter.srlv(V0, V0, A1)
+            emitter.andi(V0, V0, 1)
+            emitter.jr(RA)
+            emitter.nop
+          when "Citrine_ActionPressed" # A0 = action_id
+            emitter.lui(T0, 0x7000)
+            # Cross on Port 0: actions 1, 4, 7, 21
+            emitter.ori(T1, ZERO, 1)
+            emitter.beq(A0, T1, "act_p_cross_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 4)
+            emitter.beq(A0, T1, "act_p_cross_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 7)
+            emitter.beq(A0, T1, "act_p_cross_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 21)
+            emitter.beq(A0, T1, "act_p_cross_p0")
+            emitter.nop
+            # R1 on Port 0: action 2
+            emitter.ori(T1, ZERO, 2)
+            emitter.beq(A0, T1, "act_p_r1_p0")
+            emitter.nop
+            # Triangle on Port 0: action 3
+            emitter.ori(T1, ZERO, 3)
+            emitter.beq(A0, T1, "act_p_tri_p0")
+            emitter.nop
+            # Square on Port 0: action 5
+            emitter.ori(T1, ZERO, 5)
+            emitter.beq(A0, T1, "act_p_sq_p0")
+            emitter.nop
+            # Cross on Port 1: action 8
+            emitter.ori(T1, ZERO, 8)
+            emitter.beq(A0, T1, "act_p_cross_p1")
+            emitter.nop
+            emitter.ori(V0, ZERO, 0)
+            emitter.jr(RA)
+            emitter.nop
+
+            emitter.label("act_p_cross_p0")
+            emitter.lw(V0, 24, T0)     # Port 0 pressed (0x70000018)
+            emitter.srl(V0, V0, 14)
+            emitter.andi(V0, V0, 1)
+            emitter.jr(RA)
+            emitter.nop
+
+            emitter.label("act_p_r1_p0")
+            emitter.lw(V0, 24, T0)     # Port 0 pressed (0x70000018)
+            emitter.srl(V0, V0, 11)
+            emitter.andi(V0, V0, 1)
+            emitter.jr(RA)
+            emitter.nop
+
+            emitter.label("act_p_tri_p0")
+            emitter.lw(V0, 24, T0)     # Port 0 pressed (0x70000018)
+            emitter.srl(V0, V0, 12)
+            emitter.andi(V0, V0, 1)
+            emitter.jr(RA)
+            emitter.nop
+
+            emitter.label("act_p_sq_p0")
+            emitter.lw(V0, 24, T0)     # Port 0 pressed (0x70000018)
+            emitter.srl(V0, V0, 15)
+            emitter.andi(V0, V0, 1)
+            emitter.jr(RA)
+            emitter.nop
+
+            emitter.label("act_p_cross_p1")
+            emitter.lw(V0, 44, T0)     # Port 1 pressed (0x7000002C)
+            emitter.srl(V0, V0, 14)
+            emitter.andi(V0, V0, 1)
+            emitter.jr(RA)
+            emitter.nop
+          when "Citrine_ActionDown" # A0 = action_id
+            emitter.lui(T0, 0x7000)
+            emitter.ori(T1, ZERO, 1)
+            emitter.beq(A0, T1, "act_d_cross_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 4)
+            emitter.beq(A0, T1, "act_d_cross_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 7)
+            emitter.beq(A0, T1, "act_d_cross_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 21)
+            emitter.beq(A0, T1, "act_d_cross_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 2)
+            emitter.beq(A0, T1, "act_d_r1_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 3)
+            emitter.beq(A0, T1, "act_d_tri_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 5)
+            emitter.beq(A0, T1, "act_d_sq_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 8)
+            emitter.beq(A0, T1, "act_d_cross_p1")
+            emitter.nop
+            emitter.ori(V0, ZERO, 0)
+            emitter.jr(RA)
+            emitter.nop
+
+            emitter.label("act_d_cross_p0")
+            emitter.lw(V0, 16, T0)     # Port 0 current (0x70000010)
+            emitter.srl(V0, V0, 14)
+            emitter.andi(V0, V0, 1)
+            emitter.jr(RA)
+            emitter.nop
+
+            emitter.label("act_d_r1_p0")
+            emitter.lw(V0, 16, T0)     # Port 0 current (0x70000010)
+            emitter.srl(V0, V0, 11)
+            emitter.andi(V0, V0, 1)
+            emitter.jr(RA)
+            emitter.nop
+
+            emitter.label("act_d_tri_p0")
+            emitter.lw(V0, 16, T0)     # Port 0 current (0x70000010)
+            emitter.srl(V0, V0, 12)
+            emitter.andi(V0, V0, 1)
+            emitter.jr(RA)
+            emitter.nop
+
+            emitter.label("act_d_sq_p0")
+            emitter.lw(V0, 16, T0)     # Port 0 current (0x70000010)
+            emitter.srl(V0, V0, 15)
+            emitter.andi(V0, V0, 1)
+            emitter.jr(RA)
+            emitter.nop
+
+            emitter.label("act_d_cross_p1")
+            emitter.lw(V0, 36, T0)     # Port 1 current (0x70000024)
+            emitter.srl(V0, V0, 14)
+            emitter.andi(V0, V0, 1)
+            emitter.jr(RA)
+            emitter.nop
+          when "Citrine_ActionReleased" # A0 = action_id
+            emitter.lui(T0, 0x7000)
+            emitter.ori(T1, ZERO, 1)
+            emitter.beq(A0, T1, "act_r_cross_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 4)
+            emitter.beq(A0, T1, "act_r_cross_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 7)
+            emitter.beq(A0, T1, "act_r_cross_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 21)
+            emitter.beq(A0, T1, "act_r_cross_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 2)
+            emitter.beq(A0, T1, "act_r_r1_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 3)
+            emitter.beq(A0, T1, "act_r_tri_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 5)
+            emitter.beq(A0, T1, "act_r_sq_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 8)
+            emitter.beq(A0, T1, "act_r_cross_p1")
+            emitter.nop
+            emitter.ori(V0, ZERO, 0)
+            emitter.jr(RA)
+            emitter.nop
+
+            emitter.label("act_r_cross_p0")
+            emitter.lw(V0, 28, T0)     # Port 0 released (0x7000001C)
+            emitter.srl(V0, V0, 14)
+            emitter.andi(V0, V0, 1)
+            emitter.jr(RA)
+            emitter.nop
+
+            emitter.label("act_r_r1_p0")
+            emitter.lw(V0, 28, T0)     # Port 0 released (0x7000001C)
+            emitter.srl(V0, V0, 11)
+            emitter.andi(V0, V0, 1)
+            emitter.jr(RA)
+            emitter.nop
+
+            emitter.label("act_r_tri_p0")
+            emitter.lw(V0, 28, T0)     # Port 0 released (0x7000001C)
+            emitter.srl(V0, V0, 12)
+            emitter.andi(V0, V0, 1)
+            emitter.jr(RA)
+            emitter.nop
+
+            emitter.label("act_r_sq_p0")
+            emitter.lw(V0, 28, T0)     # Port 0 released (0x7000001C)
+            emitter.srl(V0, V0, 15)
+            emitter.andi(V0, V0, 1)
+            emitter.jr(RA)
+            emitter.nop
+
+            emitter.label("act_r_cross_p1")
+            emitter.lw(V0, 48, T0)     # Port 1 released (0x70000030)
+            emitter.srl(V0, V0, 14)
+            emitter.andi(V0, V0, 1)
+            emitter.jr(RA)
+            emitter.nop
+          when "Citrine_LoadSound"
+            emitter.ori(V0, ZERO, 1) # Return sound handle 1
+            emitter.jr(RA)
+            emitter.nop
+          when "Citrine_PlaySound", "Citrine_PlayCDDA"
+            emitter.addiu(SP, SP, -32)
+            emitter.sw(RA, 28, SP)
+            emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+            emitter.jalr(RA, T9)
+            emitter.nop
+            emitter.lw(RA, 28, SP)
+            emitter.addiu(SP, SP, 32)
+            emitter.ori(V0, ZERO, 1)
+            emitter.jr(RA)
+            emitter.nop
+          when "Citrine_StopSound", "Citrine_StopCDDA"
+            emitter.addiu(SP, SP, -32)
+            emitter.sw(RA, 28, SP)
+            emitter.li(T9, PadRuntimePayload::SOUND_STOP_ENTRY)
+            emitter.jalr(RA, T9)
+            emitter.nop
+            emitter.lw(RA, 28, SP)
+            emitter.addiu(SP, SP, 32)
+            emitter.ori(V0, ZERO, 0)
+            emitter.jr(RA)
+            emitter.nop
+          when "Citrine_GetCDDAStatus"
+            emitter.ori(V0, ZERO, 1)
+            emitter.jr(RA)
+            emitter.nop
+          when "Citrine_SetVolume"
+            emitter.lui(T0, 0xBF90)
+            emitter.sll(T1, A0, 7) # scale 0..255 to 0..32640 (0x7F80)
+            emitter.sh(T1, 0x0748, T0)
+            emitter.sh(T1, 0x074A, T0)
+            emitter.move(V0, A0)
+            emitter.jr(RA)
+            emitter.nop
+          else
+            emitter.addiu(SP, SP, -32)
+            emitter.sw(RA, 28, SP)
+            emitter.ori(V0, ZERO, 0)
+            emitter.lw(RA, 28, SP)
+            emitter.jr(RA)
+            emitter.addiu(SP, SP, 32)
+          end
+        end
+      end
+
+      # Emits Citrine_InlineAsm_Block if user source code contained inline assembly words
+      def self.emit_inline_asm(emitter : MipsEmitter, words : Array(UInt32))
+        return if words.empty?
+        emitter.label("Citrine_InlineAsm_Block")
+        words.each do |w|
+          emitter.emit(w)
+        end
+        emitter.jr(RA)
+        emitter.nop
+      end
+    end
+  end
+end

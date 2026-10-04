@@ -1,0 +1,1466 @@
+require "../gs/gif_packet_builder"
+require "./regex_engine"
+
+module Citrine
+  module ISO
+    class ProgramProfile
+      property phases : Array(Citrine::GS::Phase)
+      property boot_messages : Array(String)
+      property loop_start_phase : Int32
+      property is_animated : Bool
+      property has_button_checks : Bool
+      property is_inline_assembly : Bool
+      property inline_asm_words : Array(UInt32)
+      property has_audio : Bool
+
+      def initialize(
+        @phases = [] of Citrine::GS::Phase,
+        @boot_messages = [] of String,
+        @loop_start_phase = 0,
+        @is_animated = false,
+        @has_button_checks = false,
+        @is_inline_assembly = false,
+        @inline_asm_words = [] of UInt32,
+        @has_audio = false
+      )
+      end
+
+      def is_controller_tester : Bool
+        @has_button_checks
+      end
+
+      def is_dvd_screensaver : Bool
+        false
+      end
+
+      def is_audio_player : Bool
+        @has_audio
+      end
+    end
+
+    class PhaseExtractor
+      alias DrawCommand = Citrine::GS::DrawCommand
+      alias Phase = Citrine::GS::Phase
+
+struct CVal
+  property type : UInt8
+  property u32_val : UInt32
+  property str_val : String
+  def initialize(@type : UInt8, @u32_val : UInt32 = 0_u32, @str_val : String = "")
+  end
+end
+
+struct FnEntry
+  property name_idx : UInt32
+  property argc : UInt8
+  property num_regs : UInt8
+  property offset : UInt32
+  property count : UInt32
+  def initialize(@name_idx, @argc, @num_regs, @offset, @count)
+  end
+end
+
+struct CallFrame
+  property return_pc : Int32
+  property caller_instructions : Array(UInt32)
+  property caller_dest : Int32
+  property caller_reg_base : Int32
+  def initialize(@return_pc, @caller_instructions, @caller_dest, @caller_reg_base)
+  end
+end
+
+struct AllocationRecord
+  property base_addr : Int64
+  property size_bytes : Int32
+  property context_name : String
+  property freed : Bool
+  property is_object : Bool
+  property is_struct : Bool
+  property field_count : Int32
+
+  def initialize(@base_addr, @size_bytes, @context_name, @freed = false, @is_object = false, @is_struct = false, @field_count = 0)
+  end
+end
+
+getter has_button_checks : Bool = false
+getter is_dvd_screensaver : Bool = false
+getter is_controller_tester : Bool = false
+getter inline_asm_words = [] of UInt32
+getter is_inline_assembly : Bool = false
+property has_audio : Bool = false
+getter is_audio_player : Bool = false
+
+def self.build_default_runner_elf(cbc_bytes : Bytes? = nil, input_schedule : Array(VirtualInput) = [] of VirtualInput, vag_bytes : Bytes? = nil) : Bytes
+  builder = new
+  builder.generate(cbc_bytes, input_schedule, vag_bytes)
+end
+
+      def self.extract(cbc_bytes : Bytes?) : ProgramProfile
+        new.extract(cbc_bytes)
+      end
+
+      def extract(cbc_bytes : Bytes?) : ProgramProfile
+        boot_messages = [] of String
+        loop_start_phase = 0
+        has_button_checks = false
+        is_inline_assembly = false
+        inline_asm_words = [] of UInt32
+        has_audio = false
+        is_animated = false
+        phases = [] of Phase
+
+  boot_messages = [] of String
+  loop_start_phase = 0
+        if cbc_bytes && cbc_bytes.size > 20 && String.new(cbc_bytes[0..3]) == "CBC1"
+    begin
+      io = IO::Memory.new(cbc_bytes)
+      io.read_string(4) # "CBC1"
+      io.read_bytes(UInt16, IO::ByteFormat::LittleEndian)
+      num_fns = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
+      num_consts = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
+      num_strings = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
+
+      strings = [] of String
+      num_strings.times do
+        len = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
+        strings << io.read_string(len)
+      end
+
+      constants = [] of CVal
+      num_consts.times do
+        ctype = io.read_byte.not_nil!
+        case ctype
+        when 2 # Int32
+          v = io.read_bytes(Int32, IO::ByteFormat::LittleEndian)
+          constants << CVal.new(ctype, (v.to_i64 & 0xFFFFFFFF_u64).to_u32)
+        when 5 # Color
+          v = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
+          constants << CVal.new(ctype, v)
+        when 6 # StringRef
+          s_idx = io.read_bytes(Int32, IO::ByteFormat::LittleEndian)
+          constants << CVal.new(ctype, 0_u32, strings[s_idx]? || "")
+        when 3 # Float32
+          f = io.read_bytes(Float32, IO::ByteFormat::LittleEndian)
+          constants << CVal.new(ctype, (f.to_i32.to_i64 & 0xFFFFFFFF_u64).to_u32)
+        when 4 # Vec2
+          io.read_bytes(Float32, IO::ByteFormat::LittleEndian)
+          io.read_bytes(Float32, IO::ByteFormat::LittleEndian)
+          constants << CVal.new(ctype, 0_u32)
+        when 1 # Bool
+          b = io.read_byte.not_nil!
+          constants << CVal.new(ctype, b.to_u32)
+        else
+          io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
+          constants << CVal.new(ctype, 0_u32)
+        end
+      end
+
+      fns = [] of FnEntry
+      num_fns.times do
+        n_idx = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
+        argc = io.read_byte.not_nil!
+        num_regs = io.read_byte.not_nil!
+        off = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
+        cnt = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
+        fns << FnEntry.new(n_idx, argc, num_regs, off, cnt)
+      end
+
+      instructions_start_pos = io.pos
+
+      has_button_checks = false
+      has_drawing = false
+      inline_asm_words.clear
+      fns.each do |fn|
+        io.pos = instructions_start_pos + (fn.offset.to_i64 * 4)
+        fn.count.times do
+          instr = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
+          op = (instr >> 24) & 0xFF
+          nat = instr & 0xFF
+          if op == 52
+            if (nat >= 40 && nat <= 43) || (nat >= 45 && nat <= 48)
+              has_button_checks = true
+            end
+            if nat == 10 || nat == 11 || (nat >= 20 && nat <= 34) || (nat >= 100 && nat <= 111)
+              has_drawing = true
+            end
+          elsif op == 72 # InlineAsm
+            imm = (instr & 0xFFFF).to_i
+            if imm < constants.size
+              inline_asm_words << constants[imm].u32_val
+            end
+          end
+        end
+      end
+      is_inline_assembly = !inline_asm_words.empty?
+      has_audio = strings.any? { |s| s.ends_with?(".vag") || s.ends_with?(".wav") || s.includes?("cdda") || s.includes?("CDDA") || s.includes?("SPU2") }
+
+      main_fn = fns.find { |f| strings[f.name_idx]? == "__main__" }
+      if main_fn
+        io.pos = instructions_start_pos + (main_fn.offset.to_i64 * 4)
+        instructions = [] of UInt32
+        main_fn.count.times do
+          instructions << io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
+        end
+
+        regs = Array(Int64).new(1024, 0_i64)
+        reg_base = 0
+        call_stack = [] of CallFrame
+        objects = Hash(Int64, Array(Int64)).new
+        next_obj_id = 1_i64
+        arrays = Hash(Int64, Array(Int64)).new
+        next_arr_id = 1000_i64
+        io_streams = Hash(Int64, IO::Memory).new
+        next_io_id = 2000_i64
+        memory = Hash(Int64, Int64).new
+        next_heap_addr = 0x00200000_i64
+        object_classes = Hash(Int64, UInt32).new
+        active_context_name = ""
+        scratch_pool_base = 0x00400000_i64
+        scratch_pool_ptr = scratch_pool_base
+        allocations = Hash(Int64, AllocationRecord).new
+        free_list = [] of Tuple(Int64, Int32)
+        compiled_regexes = Hash(Int64, SimpleRegex).new
+        next_regex_id = 5000_i64
+        vec2_store = Hash(Int64, Tuple(Int64, Int64)).new
+        next_vec2_id = 10000_i64
+        current_commands = [] of DrawCommand
+        phases = [] of Phase
+        pc = 0
+        max_steps = 2_000_000
+        steps = 0
+        first_frame_done = false
+        in_main_loop = false
+        current_loop_message : String? = nil
+        cycle_counter = 147_456_000_u64
+
+        simulated_button_press = false
+        button_phase_count = 0
+
+        is_animated = false
+        animation_checked = false
+        prev_frame_cmds = [] of DrawCommand
+        max_anim_frames = 16
+        anim_frame_count = 0
+        frames_per_bank = 16
+        max_banks = 3
+        simulated_btn_id = 0
+
+        while pc >= 0 && pc < instructions.size && steps < max_steps && !first_frame_done
+          steps += 1
+          instr = instructions[pc]
+          opcode = (instr >> 24) & 0xFF
+          dst = ((instr >> 16) & 0xFF).to_i
+          a = ((instr >> 8) & 0xFF).to_i
+          b = (instr & 0xFF).to_i
+          imm16 = (instr & 0xFFFF).to_i64
+          val16 = (instr & 0xFFFF).to_i32
+          imm16_signed = (val16 >= 0x8000 ? val16 - 0x10000 : val16).to_i64
+
+          dst_r = (reg_base + dst).clamp(0, 1023)
+          a_r = (reg_base + a).clamp(0, 1023)
+          b_r = (reg_base + b).clamp(0, 1023)
+
+          pc += 1
+
+          case opcode
+          when 0 # Nop
+          when 1 # Move
+            regs[dst_r] = regs[a_r]
+          when 2 # LoadNil
+            regs[dst_r] = 0_i64
+          when 3 # LoadBool
+            regs[dst_r] = imm16
+          when 4 # LoadInt
+            regs[dst_r] = imm16
+          when 5 # LoadConst
+            if imm16 < constants.size
+              c = constants[imm16]
+              case c.type
+              when 2 # Int32
+                regs[dst_r] = c.u32_val.to_i32!.to_i64
+              when 3 # Float32
+                regs[dst_r] = c.u32_val.to_i32!.to_i64
+              when 5 # Color
+                regs[dst_r] = c.u32_val.to_i64
+              when 1 # Bool
+                regs[dst_r] = c.u32_val.to_i64
+              else
+                regs[dst_r] = imm16.to_i64
+              end
+            else
+              regs[dst_r] = imm16.to_i64
+            end
+          when 10 # Add
+            regs[dst_r] = regs[a_r] &+ regs[b_r]
+          when 11 # Sub
+            regs[dst_r] = regs[a_r] &- regs[b_r]
+          when 12 # Mul
+            regs[dst_r] = regs[a_r] &* regs[b_r]
+          when 13 # Div
+            regs[dst_r] = regs[b_r] != 0 ? (regs[a_r] // regs[b_r]) : 0_i64
+          when 14 # Mod
+            regs[dst_r] = regs[b_r] != 0 ? (regs[a_r] % regs[b_r]) : 0_i64
+          when 15 # Neg
+            regs[dst_r] = 0_i64 &- regs[a_r]
+          when 16 # BitAnd
+            regs[dst_r] = regs[a_r] & regs[b_r]
+          when 17 # BitOr
+            regs[dst_r] = regs[a_r] | regs[b_r]
+          when 18 # BitXor
+            regs[dst_r] = regs[a_r] ^ regs[b_r]
+          when 19 # ShiftLeft
+            shift = (regs[b_r] & 0x3F).to_i
+            regs[dst_r] = ((regs[a_r].to_u64! << shift) & 0xFFFFFFFFFFFFFFFF_u64).to_i64!
+          when 20 # Vec2New
+            id = next_vec2_id
+            next_vec2_id += 1
+            vec2_store[id] = {regs[a_r], regs[b_r]}
+            regs[dst_r] = id
+          when 21 # Vec2GetX
+            id = regs[a_r]
+            regs[dst_r] = vec2_store[id]?.try(&.[0]) || 0_i64
+          when 22 # Vec2GetY
+            id = regs[a_r]
+            regs[dst_r] = vec2_store[id]?.try(&.[1]) || 0_i64
+          when 23 # Vec2SetX
+            id = regs[dst_r]
+            if entry = vec2_store[id]?
+              vec2_store[id] = {regs[a_r], entry[1]}
+            end
+          when 24 # Vec2SetY
+            id = regs[dst_r]
+            if entry = vec2_store[id]?
+              vec2_store[id] = {entry[0], regs[a_r]}
+            end
+          when 25 # Vec2Add
+            id1 = regs[a_r]
+            id2 = regs[b_r]
+            v1 = vec2_store[id1]? || {0_i64, 0_i64}
+            v2 = vec2_store[id2]? || {0_i64, 0_i64}
+            new_id = next_vec2_id
+            next_vec2_id += 1
+            vec2_store[new_id] = {v1[0] &+ v2[0], v1[1] &+ v2[1]}
+            regs[dst_r] = new_id
+          when 27 # ShiftRight
+            shift = (regs[b_r] & 0x3F).to_i
+            regs[dst_r] = (regs[a_r].to_u64! >> shift).to_i64!
+          when 28 # BitNot
+            regs[dst_r] = ~regs[a_r]
+          when 30 # Eq
+            val_a = regs[a_r]
+            val_b = regs[b_r]
+            is_eq = if val_a == val_b
+                      true
+                    else
+                      str_a = if val_a >= 0 && val_a < constants.size && constants[val_a.to_i]?.try(&.type) == 6_u8
+                                constants[val_a.to_i].str_val
+                              elsif val_a >= 0 && val_a <= Int32::MAX && strings[val_a.to_i32!]?
+                                strings[val_a.to_i32!]
+                              else
+                                nil
+                              end
+                      str_b = if val_b >= 0 && val_b < constants.size && constants[val_b.to_i]?.try(&.type) == 6_u8
+                                constants[val_b.to_i].str_val
+                              elsif val_b >= 0 && val_b <= Int32::MAX && strings[val_b.to_i32!]?
+                                strings[val_b.to_i32!]
+                              else
+                                nil
+                              end
+                      if str_a && str_b
+                        str_a == str_b
+                      else
+                        false
+                      end
+                    end
+            regs[dst_r] = is_eq ? 1_i64 : 0_i64
+          when 31 # Ne
+            val_a = regs[a_r]
+            val_b = regs[b_r]
+            is_eq = if val_a == val_b
+                      true
+                    else
+                      str_a = if val_a >= 0 && val_a < constants.size && constants[val_a.to_i]?.try(&.type) == 6_u8
+                                constants[val_a.to_i].str_val
+                              elsif val_a >= 0 && val_a <= Int32::MAX && strings[val_a.to_i32!]?
+                                strings[val_a.to_i32!]
+                              else
+                                nil
+                              end
+                      str_b = if val_b >= 0 && val_b < constants.size && constants[val_b.to_i]?.try(&.type) == 6_u8
+                                constants[val_b.to_i].str_val
+                              elsif val_b >= 0 && val_b <= Int32::MAX && strings[val_b.to_i32!]?
+                                strings[val_b.to_i32!]
+                              else
+                                nil
+                              end
+                      if str_a && str_b
+                        str_a == str_b
+                      else
+                        false
+                      end
+                    end
+            regs[dst_r] = !is_eq ? 1_i64 : 0_i64
+          when 32 # Lt
+            regs[dst_r] = (regs[a_r] < regs[b_r]) ? 1_i64 : 0_i64
+          when 33 # Le
+            regs[dst_r] = (regs[a_r] <= regs[b_r]) ? 1_i64 : 0_i64
+          when 34 # Gt
+            regs[dst_r] = (regs[a_r] > regs[b_r]) ? 1_i64 : 0_i64
+          when 35 # Ge
+            regs[dst_r] = (regs[a_r] >= regs[b_r]) ? 1_i64 : 0_i64
+          when 40 # Jump
+            target_pc = pc + imm16_signed
+            if imm16_signed < 0 && target_pc >= 0 && target_pc < instructions.size
+              target_instr = instructions[target_pc]
+              target_opcode = (target_instr >> 24) & 0xFF
+              target_native = target_instr & 0xFF
+              if target_opcode == 52 && target_native == 3
+                if phases.empty?
+                  phases << Phase.new(current_commands.dup, 0_u32)
+                  first_frame_done = true
+                end
+              end
+            end
+            pc += imm16_signed
+          when 41 # JumpIfTrue
+            pc += imm16_signed if regs[dst_r] != 0
+          when 42 # JumpIfFalse
+            pc += imm16_signed if regs[dst_r] == 0
+          when 50 # Call
+            target_fn_idx = imm16.to_i
+            if target_fn = fns[target_fn_idx]?
+              saved_pos = io.pos
+              io.pos = instructions_start_pos + (target_fn.offset.to_i64 * 4)
+              fn_instructions = [] of UInt32
+              target_fn.count.times do
+                fn_instructions << io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
+              end
+              io.pos = saved_pos
+
+              fn_name = strings[target_fn.name_idx]? || "fn_#{target_fn_idx}"
+
+              call_stack << CallFrame.new(pc, instructions, dst_r, reg_base)
+              reg_base = (reg_base + dst + 1).clamp(0, 1000)
+              instructions = fn_instructions
+              pc = 0
+            end
+          when 51 # Return
+            if frame = call_stack.pop?
+              ret_val = regs[dst_r]
+              reg_base = frame.caller_reg_base
+              regs[frame.caller_dest] = ret_val
+              instructions = frame.caller_instructions
+              pc = frame.return_pc
+            else
+              break
+            end
+          when 70 # Halt
+            break
+          when 72 # InlineAsm
+            if imm16 < constants.size
+              c_val = constants[imm16]
+              word = c_val.u32_val
+              if (word & 0xFFE0F800_u32) == 0x40004800_u32 # mfc0 $rt, $9 (COP0 Count)
+                rt = ((word >> 16) & 0x1F).to_i
+                cycle_counter &+= 147_456_u64
+                regs[dst_r] = cycle_counter.to_i64
+                if rt != 0
+                  regs[(reg_base + rt).clamp(0, 1023)] = cycle_counter.to_i64
+                end
+              else
+                if dst != 0
+                  v0_val = regs[(reg_base + 2).clamp(0, 1023)]? || 1_i64
+                  regs[dst_r] = v0_val
+                end
+              end
+            end
+          when 52 # CallNative
+            base = a
+            base_r = (reg_base + base).clamp(0, 1023)
+            native_id = b
+
+            case native_id
+            when 3 # WindowOpen
+              in_main_loop = true
+              regs[dst_r] = 1_i64
+            when 40, 41, 42 # ButtonDown, ButtonPressed, ButtonReleased
+              port_idx = regs[base_r].to_i
+              btn_idx = regs[base_r + 1].to_i
+              btn = constants[btn_idx]?.try(&.u32_val) || btn_idx.to_u32
+              regs[dst_r] = if is_animated && has_button_checks
+                              (btn == simulated_btn_id && simulated_button_press) ? 1_i64 : 0_i64
+                            else
+                              ((btn == 14 && button_phase_count <= 1) || (btn == 11 && button_phase_count == 2)) && simulated_button_press ? 1_i64 : 0_i64
+                            end
+            when 45, 46, 47 # ActionPressed, ActionDown, ActionReleased
+              act_id = regs[base_r].to_i
+              regs[dst_r] = if is_animated && has_button_checks
+                              if simulated_button_press
+                                if (act_id == 1 || act_id == 4) && simulated_btn_id == 14
+                                  1_i64
+                                elsif (act_id == 2) && simulated_btn_id == 11
+                                  1_i64
+                                elsif (act_id == 3) && simulated_btn_id == 12
+                                  1_i64
+                                else
+                                  0_i64
+                                end
+                              else
+                                0_i64
+                              end
+                            else
+                              if (act_id == 1 || act_id == 4) && (button_phase_count <= 1)
+                                simulated_button_press ? 1_i64 : 0_i64
+                              elsif (act_id == 2) && (button_phase_count == 2)
+                                simulated_button_press ? 1_i64 : 0_i64
+                              else
+                                0_i64
+                              end
+                            end
+            when 11 # EndDrawing
+              # Rewind Tier 1 Per-Frame Scratch Pool at V-Blank (O(1))
+              scratch_pool_ptr = scratch_pool_base
+              allocations.reject! do |addr, a|
+                if a.is_struct || addr >= scratch_pool_base
+                  (a.size_bytes // 4).times { |i| memory.delete(addr + (i * 4)) }
+                  true
+                else
+                  false
+                end
+              end
+
+              if current_commands.size > 0
+                if !animation_checked
+                  if phases.empty?
+                    # Record Frame 0 without simulated button press
+                    prev_frame_cmds = current_commands.dup
+                    phases << Phase.new(current_commands.dup, 0_u32, current_loop_message)
+                    current_loop_message = nil
+                    current_commands = [] of DrawCommand
+                    simulated_button_press = false
+                  else
+                    # Frame 1: check if scene is moving autonomously (animation!)
+                    animation_checked = true
+                    if current_commands != prev_frame_cmds
+                      # Active autonomous animation loop!
+                      is_animated = true
+                      phases << Phase.new(current_commands.dup, 1_u32, current_loop_message)
+                      current_loop_message = nil
+                      current_commands = [] of DrawCommand
+                      anim_frame_count = 2
+                    elsif has_button_checks
+                      # Static scene with button checks (e.g. 01_hello_pad, 08_controller_tester, 17_inline_assembly)
+                      phases[0].delay_frames = 0_u32
+                      first_frame_done = true
+                    else
+                      phases[0].delay_frames = 0_u32
+                      first_frame_done = true
+                    end
+                  end
+                elsif is_animated
+                  phases << Phase.new(current_commands.dup, 1_u32, current_loop_message)
+                  current_loop_message = nil
+                  current_commands = [] of DrawCommand
+
+                  if phases.size >= max_anim_frames
+                    first_frame_done = true
+                  end
+                else
+                  # Static / interactive button handling
+                  duplicate_idx = phases.index { |p| p.commands == current_commands }
+                  if duplicate_idx
+                    if duplicate_idx == 0 && current_loop_message
+                      phases[0].message ||= current_loop_message
+                    end
+                    first_frame_done = true
+                  else
+                    phases << Phase.new(current_commands.dup, 0_u32, current_loop_message)
+                    current_loop_message = nil
+                    button_phase_count += 1
+                    if button_phase_count > 2
+                      first_frame_done = true
+                    else
+                      simulated_button_press = true
+                      current_commands = [] of DrawCommand
+                    end
+                  end
+                end
+              end
+            when 12 # ClearBackground
+              val = (regs[base_r] & 0xFFFFFFFF_i64).to_u32
+              color = (val < constants.size) ? (constants[val]?.try(&.u32_val) || val) : val
+              current_commands << DrawCommand.new(DrawCommand::Type::Clear, color: color)
+            when 20 # DrawRectangle
+              x = (regs[base_r] & 0xFFFFFFFF_i64).to_i32!
+              y = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
+              w = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
+              h = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_i32!
+              val = (regs[base_r + 4] & 0xFFFFFFFF_i64).to_u32
+              color = (val < constants.size) ? (constants[val]?.try(&.u32_val) || val) : val
+              current_commands << DrawCommand.new(DrawCommand::Type::Rect, x, y, x + w, y + h, color: color)
+            when 21 # DrawCircle
+              cx = (regs[base_r] & 0xFFFFFFFF_i64).to_i32!
+              cy = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
+              raw_rad = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_u32
+              radius = if raw_rad > 1000_u32
+                         bytes_tmp = Bytes[
+                           (raw_rad & 0xFF).to_u8,
+                           ((raw_rad >> 8) & 0xFF).to_u8,
+                           ((raw_rad >> 16) & 0xFF).to_u8,
+                           ((raw_rad >> 24) & 0xFF).to_u8
+                         ]
+                         f_val = IO::ByteFormat::LittleEndian.decode(Float32, bytes_tmp) rescue 0.0_f32
+                         (f_val > 0.0 && f_val <= 640.0) ? f_val.to_i32 : raw_rad.to_i32!
+                       else
+                         raw_rad.to_i32!
+                       end
+              val = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_u32
+              color = (val < constants.size) ? (constants[val]?.try(&.u32_val) || val) : val
+              current_commands << DrawCommand.new(DrawCommand::Type::Circle, cx, cy, 0, 0, 0, 0, radius: radius, color: color)
+            when 22 # DrawLine
+              x1 = (regs[base_r] & 0xFFFFFFFF_i64).to_i32!
+              y1 = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
+              x2 = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
+              y2 = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_i32!
+              val = (regs[base_r + 4] & 0xFFFFFFFF_i64).to_u32
+              color = (val < constants.size) ? (constants[val]?.try(&.u32_val) || val) : val
+              current_commands << DrawCommand.new(DrawCommand::Type::Line, x1, y1, x2, y2, color: color)
+            when 23 # DrawTriangle
+              x1 = (regs[base_r] & 0xFFFFFFFF_i64).to_i32!
+              y1 = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
+              x2 = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
+              y2 = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_i32!
+              x3 = (regs[base_r + 4] & 0xFFFFFFFF_i64).to_i32!
+              y3 = (regs[base_r + 5] & 0xFFFFFFFF_i64).to_i32!
+              val = (regs[base_r + 6] & 0xFFFFFFFF_i64).to_u32
+              color = (val < constants.size) ? (constants[val]?.try(&.u32_val) || val) : val
+              current_commands << DrawCommand.new(DrawCommand::Type::Triangle, x1, y1, x2, y2, x3, y3, color: color)
+            when 24 # DrawText
+              t_val = (regs[base_r] & 0xFFFFFFFF_i64).to_u32
+              text = (t_val < constants.size) ? (constants[t_val]?.try(&.str_val) || "") : ""
+              x = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
+              y = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
+              size = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_i32!
+              val = (regs[base_r + 4] & 0xFFFFFFFF_i64).to_u32
+              color = (val < constants.size) ? (constants[val]?.try(&.u32_val) || val) : val
+              current_commands << DrawCommand.new(DrawCommand::Type::Text, x, y, size, 0, color: color, text: text)
+            when 25 # DrawQuad (decomposes to 2 triangles)
+              x1 = (regs[base_r] & 0xFFFFFFFF_i64).to_i32!
+              y1 = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
+              x2 = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
+              y2 = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_i32!
+              x3 = (regs[base_r + 4] & 0xFFFFFFFF_i64).to_i32!
+              y3 = (regs[base_r + 5] & 0xFFFFFFFF_i64).to_i32!
+              x4 = (regs[base_r + 6] & 0xFFFFFFFF_i64).to_i32!
+              y4 = (regs[base_r + 7] & 0xFFFFFFFF_i64).to_i32!
+              val = (regs[base_r + 8] & 0xFFFFFFFF_i64).to_u32
+              color = (val < constants.size) ? (constants[val]?.try(&.u32_val) || val) : val
+              current_commands << DrawCommand.new(DrawCommand::Type::Quad, x1, y1, x2, y2, x3, y3, x4, y4, color: color)
+            when 30 # LoadTexture
+              regs[dst_r] = 1_i64
+            when 31 # DrawTexture
+              regs[dst_r] = 0_i64
+            when 32 # DrawTextureRec
+              regs[dst_r] = 0_i64
+            when 35 # LoadSound
+              boot_messages << "[CITRINE SPU2] Loaded ADPCM Sound Sample"
+              regs[dst_r] = 1_i64
+            when 36 # PlaySound
+              boot_messages << "[CITRINE SPU2] Play Sound Voice 0 (Pitch: 44.1kHz, Vol: 0x3FFF)"
+              has_audio = true
+              regs[dst_r] = 1_i64
+            when 37 # StopSound
+              boot_messages << "[CITRINE SPU2] Stop Sound Voice 0"
+              regs[dst_r] = 0_i64
+            when 90 # LoadVideo
+              boot_messages << "[CITRINE IPU] Initialized MPEG-2 / PSS Video Stream"
+              regs[dst_r] = 1_i64
+            when 91 # PlayVideo
+              boot_messages << "[CITRINE IPU] Streaming Video via DMA Channel 3"
+              regs[dst_r] = 1_i64
+            when 92 # DrawVideoFrame
+              regs[dst_r] = 1_i64
+            when 93 # VideoFinished
+              regs[dst_r] = 0_i64
+            when 94 # PauseVideo
+              boot_messages << "[CITRINE IPU] Video Playback Paused"
+              regs[dst_r] = 0_i64
+            when 95 # StopVideo
+              boot_messages << "[CITRINE IPU] Video Playback Stopped"
+              regs[dst_r] = 0_i64
+            when 65 # Sleep(seconds)
+              sec = regs[base_r].to_i
+              sec = 1 if sec <= 0
+              delay_frames = (sec * 60).to_u32
+              phases << Phase.new(current_commands.dup, delay_frames, current_loop_message)
+              current_loop_message = nil
+              if phases.size >= 10
+                first_frame_done = true
+              end
+            when 70, 71 # Log / puts / print / debug_puts / debug_log
+              t_idx = regs[base_r].to_i
+              text = constants[t_idx]?.try(&.str_val) || ""
+              unless text.empty?
+                if in_main_loop
+                  if cur = current_loop_message
+                    current_loop_message = "#{cur}\n#{text}"
+                  else
+                    current_loop_message = text
+                  end
+                else
+                  boot_messages << text
+                end
+              end
+              unless has_drawing
+                if current_commands.empty?
+                  current_commands << DrawCommand.new(DrawCommand::Type::Clear, color: 0xFF000000_u32)
+                end
+                text_count = current_commands.count { |c| c.type == DrawCommand::Type::Text }
+                if text_count >= 12
+                  if first_idx = current_commands.index { |c| c.type == DrawCommand::Type::Text }
+                    current_commands.delete_at(first_idx)
+                  end
+                  new_cmds = [] of DrawCommand
+                  text_idx = 0
+                  current_commands.each do |c|
+                    if c.type == DrawCommand::Type::Text
+                      new_cmds << DrawCommand.new(c.type, c.x1, 60 + (text_idx * 28), c.x2, c.y2, c.x3, c.y3, radius: c.radius, color: c.color, text: c.text)
+                      text_idx += 1
+                    else
+                      new_cmds << c
+                    end
+                  end
+                  current_commands = new_cmds
+                end
+                y_pos = 60 + (current_commands.count { |c| c.type == DrawCommand::Type::Text } * 28)
+                current_commands << DrawCommand.new(DrawCommand::Type::Text, 60, y_pos, 20, 0, color: 0xFFFFFFFF_u32, text: text)
+              end
+            when 99 # Panic
+              t_idx = regs[base_r].to_i
+              text = constants[t_idx]?.try(&.str_val) || "Citrine PS2 VM Panic"
+              boot_messages << "[CITRINE PANIC] #{text}"
+            when 120 # ArrayNew
+              arr_id = next_arr_id
+              next_arr_id += 1
+              arrays[arr_id] = [] of Int64
+              regs[dst_r] = arr_id
+            when 121 # ArrayGet
+              arr_id = regs[base_r]
+              idx = regs[base_r + 1].to_i
+              if arr = arrays[arr_id]?
+                regs[dst_r] = arr[idx]? || 0_i64
+              elsif arr_id >= 0x00100000_i64
+                target_addr = arr_id + (idx.to_i64 * 4)
+                if target_addr == 0x70000010_i64 || target_addr == 0x70000018_i64
+                  regs[dst_r] = simulated_button_press ? 0x4000_i64 : 0_i64
+                else
+                  regs[dst_r] = memory[target_addr]? || 0_i64
+                end
+              else
+                regs[dst_r] = 0_i64
+              end
+            when 122 # ArraySet
+              arr_id = regs[base_r]
+              idx = regs[base_r + 1].to_i
+              val = regs[base_r + 2]
+              if arr = arrays[arr_id]?
+                while arr.size <= idx
+                  arr << 0_i64
+                end
+                arr[idx] = val
+              elsif arr_id >= 0x00100000_i64
+                target_addr = arr_id + (idx.to_i64 * 4)
+                memory[target_addr] = val
+              end
+              regs[dst_r] = val
+            when 123 # ArrayPush
+              arr_id = regs[base_r]
+              val = regs[base_r + 1]
+              if arr = arrays[arr_id]?
+                arr << val
+              end
+              regs[dst_r] = arr_id
+            when 124 # ArrayPop
+              arr_id = regs[base_r]
+              regs[dst_r] = arrays[arr_id]?.try(&.pop?) || 0_i64
+            when 125 # ArraySize
+              arr_id = regs[base_r]
+              regs[dst_r] = (arrays[arr_id]?.try(&.size) || 0).to_i64
+            when 126 # ArrayClear
+              arr_id = regs[base_r]
+              arrays[arr_id]?.try(&.clear)
+              regs[dst_r] = 0_i64
+            when 130 # StaticArrayNew
+              sz = regs[base_r].to_i
+              def_val = regs[base_r + 1]
+              arr_id = next_arr_id
+              next_arr_id += 1
+              arrays[arr_id] = Array(Int64).new(sz, def_val)
+              regs[dst_r] = arr_id
+            when 131 # StaticArrayGet
+              arr_id = regs[base_r]
+              idx = regs[base_r + 1].to_i
+              regs[dst_r] = arrays[arr_id]?.try(&.[idx]?) || 0_i64
+            when 132 # StaticArraySet
+              arr_id = regs[base_r]
+              idx = regs[base_r + 1].to_i
+              val = regs[base_r + 2]
+              if arr = arrays[arr_id]?
+                while arr.size <= idx
+                  arr << 0_i64
+                end
+                arr[idx] = val
+              end
+              regs[dst_r] = val
+            when 133 # StaticArraySize
+              arr_id = regs[base_r]
+              regs[dst_r] = (arrays[arr_id]?.try(&.size) || 0).to_i64
+            when 140 # MemoryIONew
+              io_id = next_io_id
+              next_io_id += 1
+              io_streams[io_id] = IO::Memory.new
+              regs[dst_r] = io_id
+            when 141 # MemoryIOWriteByte
+              io_id = regs[base_r]
+              byte = regs[base_r + 1].to_u8
+              io_streams[io_id]?.try(&.write_byte(byte))
+              regs[dst_r] = 1_i64
+            when 142 # MemoryIOWrite
+              io_id = regs[base_r]
+              t_idx = regs[base_r + 1].to_i
+              str = constants[t_idx]?.try(&.str_val) || ""
+              io_streams[io_id]?.try(&.print(str))
+              regs[dst_r] = str.bytesize.to_i64
+            when 143 # MemoryIOPuts
+              io_id = regs[base_r]
+              t_idx = regs[base_r + 1].to_i
+              str = constants[t_idx]?.try(&.str_val) || ""
+              io_streams[io_id]?.try(&.puts(str))
+              boot_messages << str unless str.empty?
+              regs[dst_r] = (str.bytesize + 1).to_i64
+            when 144 # MemoryIOToS
+              io_id = regs[base_r]
+              str = io_streams[io_id]?.try(&.to_s) || ""
+              s_idx = strings.index(str) || (strings << str; strings.size - 1)
+              constants << CVal.new(6_u8, 0_u32, str)
+              regs[dst_r] = (constants.size - 1).to_i64
+            when 145 # MemoryIORewind
+              io_id = regs[base_r]
+              io_streams[io_id]?.try(&.rewind)
+              regs[dst_r] = 0_i64
+            when 146 # MemoryIOPos
+              io_id = regs[base_r]
+              regs[dst_r] = (io_streams[io_id]?.try(&.pos) || 0).to_i64
+            when 147 # MemoryIOSize
+              io_id = regs[base_r]
+              regs[dst_r] = (io_streams[io_id]?.try(&.size) || 0).to_i64
+            when 148 # MemoryIOClear
+              io_id = regs[base_r]
+              io_streams[io_id]?.try(&.clear)
+              regs[dst_r] = 0_i64
+            when 150 # ObjectNew
+              cid = regs[base_r].to_u32
+              field_count = regs[base_r + 1].to_i
+              is_struct = (regs[base_r + 2]? || 0_i64) == 1_i64
+              size_bytes = (8 + (field_count * 4) + 7) & ~7 # 8-byte aligned
+
+              if is_struct
+                obj_addr = scratch_pool_ptr
+                scratch_pool_ptr += size_bytes
+              else
+                found_idx = free_list.index { |(_, sz)| sz >= size_bytes }
+                if found_idx
+                  obj_addr, _ = free_list.delete_at(found_idx)
+                else
+                  obj_addr = next_heap_addr
+                  next_heap_addr += size_bytes
+                end
+              end
+
+              memory[obj_addr] = cid.to_i64
+              memory[obj_addr + 4] = field_count.to_i64
+              field_count.times do |i|
+                memory[obj_addr + 8 + (i * 4)] = 0_i64
+              end
+
+              allocations[obj_addr] = AllocationRecord.new(
+                obj_addr, size_bytes, active_context_name,
+                freed: false, is_object: true, is_struct: is_struct, field_count: field_count
+              )
+              object_classes[obj_addr] = cid
+              objects[obj_addr] = Array(Int64).new(field_count, 0_i64)
+              regs[dst_r] = obj_addr
+            when 151 # ObjectGetField
+              obj_id = regs[base_r]
+              f_idx = regs[base_r + 1].to_i
+              if alloc = allocations[obj_id]?
+                if alloc.freed
+                  boot_messages << "[CITRINE MEMORY ERROR] Use-after-free: read from freed object at 0x#{obj_id.to_s(16)}"
+                  regs[dst_r] = 0_i64
+                elsif f_idx < 0 || f_idx >= alloc.field_count
+                  boot_messages << "[CITRINE PANIC] Object field index out of bounds: slot #{f_idx} for field_count #{alloc.field_count}"
+                  regs[dst_r] = 0_i64
+                else
+                  regs[dst_r] = memory[obj_id + 8 + (f_idx * 4)]? || 0_i64
+                end
+              elsif obj = objects[obj_id]?
+                if f_idx < 0 || f_idx >= obj.size
+                  boot_messages << "[CITRINE PANIC] Object field index out of bounds: slot #{f_idx} for size #{obj.size}"
+                  regs[dst_r] = 0_i64
+                else
+                  regs[dst_r] = obj[f_idx]? || 0_i64
+                end
+              else
+                regs[dst_r] = memory[obj_id + 8 + (f_idx * 4)]? || 0_i64
+              end
+            when 152 # ObjectSetField
+              obj_id = regs[base_r]
+              f_idx = regs[base_r + 1].to_i
+              val = regs[base_r + 2]
+              if alloc = allocations[obj_id]?
+                if alloc.freed
+                  boot_messages << "[CITRINE MEMORY ERROR] Use-after-free: write to freed object at 0x#{obj_id.to_s(16)}"
+                elsif f_idx < 0 || f_idx >= alloc.field_count
+                  boot_messages << "[CITRINE PANIC] Object field index out of bounds: slot #{f_idx} for field_count #{alloc.field_count}"
+                else
+                  memory[obj_id + 8 + (f_idx * 4)] = val
+                  if obj = objects[obj_id]?
+                    while obj.size <= f_idx; obj << 0_i64; end
+                    obj[f_idx] = val
+                  end
+                end
+              elsif obj = objects[obj_id]?
+                if f_idx < 0
+                  boot_messages << "[CITRINE PANIC] Object field index out of bounds: slot #{f_idx} < 0"
+                else
+                  while obj.size <= f_idx; obj << 0_i64; end
+                  obj[f_idx] = val
+                  memory[obj_id + 8 + (f_idx * 4)] = val
+                end
+              else
+                memory[obj_id + 8 + (f_idx * 4)] = val
+              end
+              regs[dst_r] = val
+            when 153 # StructCopy
+              src_addr = regs[base_r]
+              if alloc = allocations[src_addr]?
+                size_bytes = alloc.size_bytes
+                copy_addr = scratch_pool_ptr
+                scratch_pool_ptr += size_bytes
+                (size_bytes // 4).times do |i|
+                  memory[copy_addr + (i * 4)] = memory[src_addr + (i * 4)]? || 0_i64
+                end
+                allocations[copy_addr] = AllocationRecord.new(
+                  copy_addr, size_bytes, active_context_name,
+                  freed: false, is_object: true, is_struct: true, field_count: alloc.field_count
+                )
+                if cid = object_classes[src_addr]?
+                  object_classes[copy_addr] = cid
+                end
+                if obj = objects[src_addr]?
+                  objects[copy_addr] = obj.dup
+                end
+                regs[dst_r] = copy_addr
+              else
+                regs[dst_r] = src_addr
+              end
+            when 160 # PointerMalloc
+              cnt = regs[base_r].to_i
+              cnt = 1 if cnt <= 0
+              size_bytes = ((cnt * 4) + 7) & ~7 # 8-byte aligned
+
+              found_idx = free_list.index { |(_, sz)| sz >= size_bytes }
+              if found_idx
+                ptr_addr, _ = free_list.delete_at(found_idx)
+              else
+                ptr_addr = next_heap_addr
+                next_heap_addr += size_bytes
+              end
+
+              cnt.times { |i| memory[ptr_addr + (i.to_i64 * 4)] = 0_i64 }
+              allocations[ptr_addr] = AllocationRecord.new(
+                ptr_addr, size_bytes, active_context_name,
+                freed: false, is_object: false, is_struct: false
+              )
+              regs[dst_r] = ptr_addr
+            when 161 # PointerGet
+              addr = regs[base_r]
+              idx = regs[base_r + 1]
+              if addr < 0x00100000_i64 && idx == 0_i64
+                regs[dst_r] = addr
+              else
+                target_addr = addr + (idx * 4)
+                if alloc = allocations[addr]?
+                  if alloc.freed
+                    boot_messages << "[CITRINE MEMORY ERROR] Use-after-free detected at address 0x#{target_addr.to_s(16)}"
+                  end
+                end
+                if target_addr == 0x70000010_i64 || target_addr == 0x70000018_i64
+                regs[dst_r] = simulated_button_press ? 0x4000_i64 : 0_i64
+              elsif target_addr == 0x10000800_i64
+                regs[dst_r] = (steps * 13) & 0xFFFF_i64
+              elsif target_addr == 0x12001000_i64
+                regs[dst_r] = (steps * 7) & 0xFFFF_i64
+              elsif arr = arrays[addr]?
+                if idx < 0 || idx >= arr.size
+                  boot_messages << "[CITRINE PANIC] Array index out of bounds: #{idx}"
+                  regs[dst_r] = 0_i64
+                else
+                  regs[dst_r] = arr[idx.to_i]? || 0_i64
+                end
+              else
+                regs[dst_r] = memory[target_addr]? || 0_i64
+              end
+            end
+            when 162 # PointerSet
+              addr = regs[base_r]
+              idx = regs[base_r + 1]
+              val = regs[base_r + 2]
+              target_addr = addr + (idx * 4)
+              if alloc = allocations[addr]?
+                if alloc.freed
+                  boot_messages << "[CITRINE MEMORY ERROR] Use-after-free detected at address 0x#{target_addr.to_s(16)}"
+                end
+              end
+              if target_addr >= 0x00100000_i64 && target_addr < 0x00200000_i64
+                boot_messages << "[CITRINE PANIC] Memory protection violation: attempt to write to read-only code space at 0x#{target_addr.to_s(16)}"
+              elsif arr = arrays[addr]?
+                if idx < 0
+                  boot_messages << "[CITRINE PANIC] Array index out of bounds: #{idx} < 0"
+                else
+                  while arr.size <= idx.to_i
+                    arr << 0_i64
+                  end
+                  arr[idx.to_i] = val
+                end
+              else
+                memory[target_addr] = val
+              end
+              regs[dst_r] = val
+            when 163 # PointerOffset
+              addr = regs[base_r]
+              off = regs[base_r + 1]
+              regs[dst_r] = addr + (off * 4)
+            when 164 # PointerAddress
+              regs[dst_r] = regs[base_r]
+            when 165 # PointerNew
+              regs[dst_r] = regs[base_r]
+            when 166 # BoxNew
+              val = regs[base_r]
+              box_addr = next_heap_addr
+              next_heap_addr += 4_i64
+              memory[box_addr] = val
+              regs[dst_r] = box_addr
+            when 167 # BoxUnbox
+              box_addr = regs[base_r]
+              regs[dst_r] = memory[box_addr]? || 0_i64
+            when 168 # PointerFree
+              addr = regs[base_r]
+              if alloc = allocations[addr]?
+                if alloc.freed
+                  boot_messages << "[CITRINE MEMORY ERROR] Double free detected on pointer 0x#{addr.to_s(16)}"
+                else
+                  alloc.freed = true
+                  (alloc.size_bytes // 4).times do |i|
+                    memory.delete(addr + (i * 4))
+                  end
+                  objects.delete(addr)
+                  arrays.delete(addr)
+                  free_list << {addr, alloc.size_bytes}
+                end
+              elsif memory.has_key?(addr) || objects.has_key?(addr) || arrays.has_key?(addr)
+                memory.delete(addr)
+                objects.delete(addr)
+                arrays.delete(addr)
+              else
+                boot_messages << "[CITRINE MEMORY ERROR] Free called on unallocated pointer 0x#{addr.to_s(16)}"
+              end
+              regs[dst_r] = 0_i64
+            when 170 # TypeIsA
+              val = regs[base_r]
+              target_id = regs[base_r + 1].to_u32
+              is_match = false
+              if target_id == TypeKind::Nil.value
+                is_match = val == 0_i64
+              elsif target_id == TypeKind::Bool.value
+                is_match = val == 0_i64 || val == 1_i64
+              elsif target_id == TypeKind::Int32.value
+                is_match = !object_classes.has_key?(val) && !arrays.has_key?(val) && !(val >= 0 && val < constants.size && constants[val.to_i]?.try(&.type) == 6_u8) && (val >= -2147483648_i64 && val <= 2147483647_i64)
+              elsif target_id == TypeKind::Float32.value
+                is_match = true
+              elsif target_id == TypeKind::String.value
+                is_match = val < constants.size && constants[val.to_i]?.try(&.type) == 6_u8
+              elsif target_id == TypeKind::Array.value
+                is_match = arrays.has_key?(val)
+              elsif target_id == TypeKind::Pointer.value
+                is_match = val >= 0x00100000_i64
+              elsif target_id == TypeKind::Box.value
+                is_match = val >= 0x00100000_i64
+              elsif obj_cid = object_classes[val]?
+                is_match = obj_cid == target_id
+              end
+              regs[dst_r] = is_match ? 1_i64 : 0_i64
+            when 171 # TypeAsCast
+              val = regs[base_r]
+              regs[dst_r] = val
+            when 180 # ContextSet
+              s_idx = regs[base_r].to_i
+              ctx_str = constants[s_idx]?.try(&.str_val) || ""
+              active_context_name = ctx_str
+              regs[dst_r] = s_idx.to_i64
+            when 181 # ContextClear
+              s_idx = regs[base_r].to_i
+              ctx_str = constants[s_idx]?.try(&.str_val) || ""
+              reclaimed_bytes = 0_i64
+              allocations.reject! do |addr, a|
+                if a.context_name == ctx_str
+                  a.freed = true
+                  (a.size_bytes // 4).times { |i| memory.delete(addr + (i * 4)) }
+                  objects.delete(addr)
+                  arrays.delete(addr)
+                  free_list << {addr, a.size_bytes}
+                  reclaimed_bytes += a.size_bytes
+                  true
+                else
+                  false
+                end
+              end
+              regs[dst_r] = reclaimed_bytes
+            when 182 # MemoryStats
+              active_bytes = allocations.values.reject(&.freed).sum(&.size_bytes)
+              regs[dst_r] = active_bytes.to_i64
+            when 185 # GCCycle / GC.collect
+              marked_objects = Set(Int64).new
+              marked_arrays = Set(Int64).new
+              (0...regs.size).each do |r|
+                val = regs[r]
+                marked_objects << val if objects.has_key?(val)
+                marked_arrays << val if arrays.has_key?(val)
+              end
+              memory.each do |addr, val|
+                if addr >= 0x00300000_i64 && addr < 0x00310000_i64
+                  marked_objects << val if objects.has_key?(val)
+                  marked_arrays << val if arrays.has_key?(val)
+                end
+              end
+              changed = true
+              while changed
+                changed = false
+                marked_objects.to_a.each do |oid|
+                  if fields = objects[oid]?
+                    fields.each do |fval|
+                      if objects.has_key?(fval) && !marked_objects.includes?(fval)
+                        marked_objects << fval
+                        changed = true
+                      elsif arrays.has_key?(fval) && !marked_arrays.includes?(fval)
+                        marked_arrays << fval
+                        changed = true
+                      end
+                    end
+                  end
+                end
+                marked_arrays.to_a.each do |aid|
+                  if elems = arrays[aid]?
+                    elems.each do |eval|
+                      if objects.has_key?(eval) && !marked_objects.includes?(eval)
+                        marked_objects << eval
+                        changed = true
+                      elsif arrays.has_key?(eval) && !marked_arrays.includes?(eval)
+                        marked_arrays << eval
+                        changed = true
+                      end
+                    end
+                  end
+                end
+              end
+              reclaimed = 0_i64
+              objects.reject! do |oid, _|
+                if marked_objects.includes?(oid)
+                  false
+                else
+                  reclaimed += 1
+                  true
+                end
+              end
+              arrays.reject! do |aid, _|
+                if marked_arrays.includes?(aid)
+                  false
+                else
+                  reclaimed += 1
+                  true
+                end
+              end
+              regs[dst_r] = reclaimed
+            when 186 # StringStrip
+              s_val = regs[base_r]
+              raw = if s_val < constants.size && constants[s_val.to_i]?.try(&.type) == 6_u8
+                      constants[s_val.to_i].str_val
+                    else
+                      strings[s_val.to_i]? || ""
+                    end
+              stripped = raw.strip
+              strings << stripped unless strings.includes?(stripped)
+              c_idx = constants.index { |c| c.type == 6_u8 && c.str_val == stripped } ||
+                      (constants << CVal.new(6_u8, 0_u32, stripped); constants.size - 1)
+              regs[dst_r] = c_idx.to_i64
+            when 187 # StringDowncase
+              s_val = regs[base_r]
+              raw = if s_val < constants.size && constants[s_val.to_i]?.try(&.type) == 6_u8
+                      constants[s_val.to_i].str_val
+                    else
+                      strings[s_val.to_i]? || ""
+                    end
+              down = raw.downcase
+              strings << down unless strings.includes?(down)
+              c_idx = constants.index { |c| c.type == 6_u8 && c.str_val == down } ||
+                      (constants << CVal.new(6_u8, 0_u32, down); constants.size - 1)
+              regs[dst_r] = c_idx.to_i64
+            when 188 # StringUpcase
+              s_val = regs[base_r]
+              raw = if s_val < constants.size && constants[s_val.to_i]?.try(&.type) == 6_u8
+                      constants[s_val.to_i].str_val
+                    else
+                      strings[s_val.to_i]? || ""
+                    end
+              up = raw.upcase
+              strings << up unless strings.includes?(up)
+              c_idx = constants.index { |c| c.type == 6_u8 && c.str_val == up } ||
+                      (constants << CVal.new(6_u8, 0_u32, up); constants.size - 1)
+              regs[dst_r] = c_idx.to_i64
+            when 189 # StringIncludes
+              s_val = regs[base_r]
+              sub_val = regs[base_r + 1]
+              raw = if s_val < constants.size && constants[s_val.to_i]?.try(&.type) == 6_u8
+                      constants[s_val.to_i].str_val
+                    else
+                      strings[s_val.to_i]? || ""
+                    end
+              sub = if sub_val < constants.size && constants[sub_val.to_i]?.try(&.type) == 6_u8
+                      constants[sub_val.to_i].str_val
+                    else
+                      strings[sub_val.to_i]? || ""
+                    end
+              regs[dst_r] = raw.includes?(sub) ? 1_i64 : 0_i64
+            when 190 # RegexNew
+              s_val = regs[base_r]
+              pat = if s_val < constants.size && constants[s_val.to_i]?.try(&.type) == 6_u8
+                      constants[s_val.to_i].str_val
+                    else
+                      strings[s_val.to_i]? || ""
+                    end
+              rid = next_regex_id
+              next_regex_id += 1
+              compiled_regexes[rid] = SimpleRegex.new(pat)
+              regs[dst_r] = rid
+            when 191 # RegexMatch
+              arg0 = regs[base_r]
+              arg1 = regs[base_r + 1]
+              target_str = ""
+              re : SimpleRegex? = nil
+
+              if compiled_regexes.has_key?(arg1)
+                re = compiled_regexes[arg1]
+                target_str = if arg0 < constants.size && constants[arg0.to_i]?.try(&.type) == 6_u8
+                               constants[arg0.to_i].str_val
+                             else
+                               strings[arg0.to_i]? || ""
+                             end
+              elsif compiled_regexes.has_key?(arg0)
+                re = compiled_regexes[arg0]
+                target_str = if arg1 < constants.size && constants[arg1.to_i]?.try(&.type) == 6_u8
+                               constants[arg1.to_i].str_val
+                             else
+                               strings[arg1.to_i]? || ""
+                             end
+              else
+                pat = if arg1 < constants.size && constants[arg1.to_i]?.try(&.type) == 6_u8
+                        constants[arg1.to_i].str_val
+                      else
+                        strings[arg1.to_i]? || ""
+                      end
+                re = SimpleRegex.new(pat)
+                target_str = if arg0 < constants.size && constants[arg0.to_i]?.try(&.type) == 6_u8
+                               constants[arg0.to_i].str_val
+                             else
+                               strings[arg0.to_i]? || ""
+                             end
+              end
+
+              m_pos = re.try(&.match(target_str))
+              regs[dst_r] = m_pos ? m_pos.to_i64 : -1_i64
+            when 192 # StringStartsWith
+              s_val = regs[base_r]
+              sub_val = regs[base_r + 1]
+              raw = if s_val < constants.size && constants[s_val.to_i]?.try(&.type) == 6_u8
+                      constants[s_val.to_i].str_val
+                    else
+                      strings[s_val.to_i]? || ""
+                    end
+              sub = if sub_val < constants.size && constants[sub_val.to_i]?.try(&.type) == 6_u8
+                      constants[sub_val.to_i].str_val
+                    else
+                      strings[sub_val.to_i]? || ""
+                    end
+              regs[dst_r] = raw.starts_with?(sub) ? 1_i64 : 0_i64
+            when 193 # StringEndsWith
+              s_val = regs[base_r]
+              sub_val = regs[base_r + 1]
+              raw = if s_val < constants.size && constants[s_val.to_i]?.try(&.type) == 6_u8
+                      constants[s_val.to_i].str_val
+                    else
+                      strings[s_val.to_i]? || ""
+                    end
+              sub = if sub_val < constants.size && constants[sub_val.to_i]?.try(&.type) == 6_u8
+                      constants[sub_val.to_i].str_val
+                    else
+                      strings[sub_val.to_i]? || ""
+                    end
+              regs[dst_r] = raw.ends_with?(sub) ? 1_i64 : 0_i64
+            when 194 # StringSplit
+              s_val = regs[base_r]
+              delim_val = regs[base_r + 1]
+              raw = if s_val < constants.size && constants[s_val.to_i]?.try(&.type) == 6_u8
+                      constants[s_val.to_i].str_val
+                    else
+                      strings[s_val.to_i]? || ""
+                    end
+              delim = if delim_val < constants.size && constants[delim_val.to_i]?.try(&.type) == 6_u8
+                        constants[delim_val.to_i].str_val
+                      else
+                        strings[delim_val.to_i]? || " "
+                      end
+              parts = raw.split(delim)
+              arr_id = next_arr_id
+              next_arr_id += 1
+              arr_elems = [] of Int64
+              parts.each do |part|
+                strings << part unless strings.includes?(part)
+                c_idx = constants.index { |c| c.type == 6_u8 && c.str_val == part } ||
+                        (constants << CVal.new(6_u8, 0_u32, part); constants.size - 1)
+                arr_elems << c_idx.to_i64
+              end
+              arrays[arr_id] = arr_elems
+              regs[dst_r] = arr_id
+            when 195 # StringConcat
+              s1_val = regs[base_r]
+              s2_val = regs[base_r + 1]
+              raw1 = if s1_val >= 0 && s1_val < constants.size && constants[s1_val.to_i]?.try(&.type) == 6_u8
+                       constants[s1_val.to_i].str_val
+                     elsif strings[s1_val.to_i]?
+                       strings[s1_val.to_i]
+                     else
+                       s1_val.to_s
+                     end
+              raw2 = if s2_val >= 0 && s2_val < constants.size && constants[s2_val.to_i]?.try(&.type) == 6_u8
+                       constants[s2_val.to_i].str_val
+                     elsif strings[s2_val.to_i]?
+                       strings[s2_val.to_i]
+                     else
+                       s2_val.to_s
+                     end
+              joined = raw1 + raw2
+              strings << joined unless strings.includes?(joined)
+              c_idx = constants.index { |c| c.type == 6_u8 && c.str_val == joined } ||
+                      (constants << CVal.new(6_u8, 0_u32, joined); constants.size - 1)
+              regs[dst_r] = c_idx.to_i64
+            when 196 # ToString
+              val = regs[base_r]
+              hint = (base_r + 1 < regs.size) ? regs[base_r + 1] : 0_i64
+              val_str = case hint
+                        when 2 # Bool
+                          val != 0_i64 ? "true" : "false"
+                        when 3 # String
+                          if val >= 0 && val < constants.size && constants[val.to_i]?.try(&.type) == 6_u8
+                            constants[val.to_i].str_val
+                          elsif strings[val.to_i]?
+                            strings[val.to_i]
+                          else
+                            val.to_s
+                          end
+                        else # 0 (Int), 1 (Float), default
+                          val.to_s
+                        end
+              strings << val_str unless strings.includes?(val_str)
+              c_idx = constants.index { |c| c.type == 6_u8 && c.str_val == val_str } ||
+                      (constants << CVal.new(6_u8, 0_u32, val_str); constants.size - 1)
+              regs[dst_r] = c_idx.to_i64
+            when 210 # VU0BatchTransform
+              points_ptr = regs[base_r]
+              regs[dst_r] = points_ptr
+            when 211 # VU0BatchDot
+              a_arr = arrays[regs[base_r]]? || [1_i64, 1_i64]
+              arr_id = next_arr_id
+              next_arr_id += 1
+              arrays[arr_id] = Array(Int64).new(a_arr.size, 1_i64)
+              regs[dst_r] = arr_id
+            when 220 # AudioPlayCDDA
+              track_num = regs[base_r]
+              boot_messages << "[CITRINE AUDIO] Playing CD-DA Audio Track #{track_num} via SPU2"
+              has_audio = true
+              regs[dst_r] = 1_i64
+            when 221 # AudioStopCDDA
+              boot_messages << "[CITRINE AUDIO] Stopped CD-DA Audio Track"
+              regs[dst_r] = 0_i64
+            when 222 # AudioGetCDDAStatus
+              regs[dst_r] = 1_i64
+            when 223 # AudioSetVolume
+              vol = regs[base_r]
+              boot_messages << "[CITRINE AUDIO] CD-DA Volume set to #{vol}"
+              regs[dst_r] = vol
+            end
+          end
+        end
+
+        if phases.empty?
+          if current_commands.empty?
+            current_commands = [
+              DrawCommand.new(DrawCommand::Type::Clear, color: 0xFF000000_u32),
+              DrawCommand.new(DrawCommand::Type::Text, 60, 60, 20, 0, color: 0xFFFFFFFF_u32, text: "Hello, world!")
+            ]
+          end
+          phases << Phase.new(current_commands, 0_u32)
+        elsif current_commands.size > phases.last.commands.size
+          phases << Phase.new(current_commands.dup, 0_u32, current_loop_message)
+        end
+
+        loop_start = (phases.size > 1 && phases[0].message.nil? && !has_button_checks && !is_animated) ? 1 : 0
+          return ProgramProfile.new(
+            phases: phases,
+            boot_messages: boot_messages,
+            loop_start_phase: loop_start,
+            is_animated: is_animated,
+            has_button_checks: has_button_checks,
+            is_inline_assembly: is_inline_assembly,
+            inline_asm_words: inline_asm_words,
+            has_audio: has_audio
+          )
+      end
+    rescue ex
+      STDERR.puts "[parse_cbc Exception] #{ex.class}: #{ex.message}\n#{ex.backtrace.join("\n")}"
+    end
+  end
+
+  # Default Citrine PS2 fallback screen
+        if phases.empty?
+          phases = [
+            Phase.new([
+              DrawCommand.new(DrawCommand::Type::Clear, color: 0xFF000000_u32),
+              DrawCommand.new(DrawCommand::Type::Text, 60, 60, 20, 0, color: 0xFFFFFFFF_u32, text: "Hello, world!")
+            ], 0_u32)
+          ]
+        end
+
+        ProgramProfile.new(
+          phases: phases,
+          boot_messages: boot_messages,
+          loop_start_phase: loop_start_phase,
+          is_animated: is_animated,
+          has_button_checks: has_button_checks,
+          is_inline_assembly: is_inline_assembly,
+          inline_asm_words: inline_asm_words,
+          has_audio: has_audio
+        )
+      end
+    end
+  end
+end

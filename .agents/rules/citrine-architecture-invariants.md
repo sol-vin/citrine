@@ -1,9 +1,11 @@
 # Citrine Architecture & Code Invariants
 
-## 1. Engine Purity
-- `src/citrine/iso/elf_builder.cr` and `src/stubs/citrine/inputmap.cr` are core engine runtime components.
-- NEVER add game-specific or example-specific action names, enum entries, or MIPS branching logic into engine files.
-- DualShock 2 buttons (`Button::Cross`, `Button::Circle`, `Button::Square`, `Button::Triangle`, `Button::R1`, `Button::L1`, `Button::R2`, `Button::L2`, `Button::Up`, `Button::Down`, `Button::Left`, `Button::Right`) are universal hardware standards accessed via `pad.button_pressed?` and `pad.button_down?`.
+## 1. Engine Purity & Anti-Cheating Doctrine
+- **Absolute General-Purpose Invariant**: Core Citrine compiler (`src/citrine/compiler/`), bytecode VM interpreter (`src/citrine/iso/phase_extractor.cr`), MIPS code generator (`src/citrine/iso/text_segment_builder.cr`, `mips_emitter.cr`), and ISO runner (`elf_builder.cr`) MUST remain 100% general-purpose.
+- **NEVER Sniff Example Strings or Titles**: NEVER scan bytecode strings or constants for specific example names (e.g. `BouncingLogo`, `06 DVD Bounce`, `Controller Tester`, `CD-DA Album Player`, `theme.vag`).
+- **NEVER Hardcode Example-Specific Scenes or Mechanics**: NEVER create example-specific scene files (e.g. `dvd_screensaver_scene.cr`, `audio_player_scene.cr`, `controller_tester_scene.cr`) or hardcode application game logic, physics (e.g. DVD bouncing loops), custom telemetry overlays, or metadata files (`album_metadata.json`) inside the compiler or runtime.
+- **Pure Bytecode & Standard Hardware Execution**: All graphics, audio calls, controller responses, and animations MUST originate exclusively from user source code compiled into Citrine Bytecode (CBC) and executed via the general-purpose bytecode VM and standard PS2 hardware interfaces (GS GIF packets, DMAC Channel 2, SPU2/CD-DA RPC, DualShock 2 registers).
+- **Universal Hardware Buttons**: DualShock 2 buttons (`Button::Cross`, `Button::Circle`, etc.) are universal hardware standards queried via `pad.button_pressed?` and `pad.button_down?`. Never introduce game-specific action enums or MIPS branch hacks into engine files.
 
 ## 2. Clean Data Modeling & DRY
 - NEVER generate repetitive `case` ladders (e.g. 50-line track/duration switch blocks) inside per-frame loops.
