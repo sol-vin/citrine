@@ -55,8 +55,21 @@ module Citrine
         emitter.ori(T1, T1, 0x8080)
         emitter.sw(T1, 32, T0)
 
+        # Initial phase delay frames at 0x7000000C
+        if @profile.phases.size > 0
+          init_delay = @profile.phases[0].delay_frames
+          emitter.li(T1, init_delay)
+          emitter.sw(T1, 12, T0)
+        end
+
+        # Initialize DualShock 2 Pad Driver & Sound Driver in IOP
+        emitter.li(T9, PadRuntimePayload::INIT_ENTRY)
+        emitter.jalr(T9)
+        emitter.nop
+
         # Audio state initialization
         if @profile.has_audio
+          emitter.lui(T0, 0x7000)
           emitter.ori(T1, ZERO, 1)
           emitter.sw(T1, 60, T0)      # 0x7000003C: audio playing flag = 1
           emitter.ori(T1, ZERO, 240)
@@ -73,20 +86,14 @@ module Citrine
           emitter.ori(A0, ZERO, 1)
           emitter.jalr(T9)
           emitter.nop
+
+          # Set initial volume (240)
+          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+          emitter.ori(A0, ZERO, 0x1000 | 240)
+          emitter.jalr(T9)
+          emitter.nop
           emitter.lui(T0, 0x7000)
         end
-
-        # Initial phase delay frames at 0x7000000C
-        if @profile.phases.size > 0
-          init_delay = @profile.phases[0].delay_frames
-          emitter.li(T1, init_delay)
-          emitter.sw(T1, 12, T0)
-        end
-
-        # Initialize DualShock 2 Pad Driver in IOP
-        emitter.li(T9, PadRuntimePayload::INIT_ENTRY)
-        emitter.jalr(T9)
-        emitter.nop
 
         # Reset DMAC
         emitter.call("dma_reset")
