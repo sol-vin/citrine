@@ -3,8 +3,8 @@ require "../compiler/bytecode_compiler"
 require "../parser/dsl_parser"
 require "../iso/iso_builder"
 require "../iso/elf_builder"
+require "../importers/fluorite_media"
 require "../debugger/pcsx2_bridge"
-require "../debugger/virtual_pad_bridge"
 
 module Citrine
   class Runner
@@ -53,6 +53,9 @@ module Citrine
     end
 
     def compile_game(source_path : String, output_cbc_path : String, release : Bool = false) : BytecodeCompiler
+      src_dir = File.dirname(source_path)
+      auto_prepare_assets(src_dir)
+
       source = File.read(source_path)
       parser = DslParser.new(filename: source_path)
       program = parser.parse(source)
@@ -72,14 +75,118 @@ module Citrine
       compiler
     end
 
-    def build_iso(cbc_path : String, output_iso_path : String, extra_files : Hash(String, Bytes) = {} of String => Bytes) : String
+    def auto_prepare_assets(src_dir : String)
+      album_dir = File.join(src_dir, "album")
+      return unless Dir.exists?(album_dir)
+
+      metadata_file = File.join(src_dir, "album_metadata.json")
+      track02_file = File.join(src_dir, "track02.raw")
+      audio_exts = [".ogg", ".mp3", ".wav", ".flac", ".m4a"]
+
+      album_audio_files = Dir.children(album_dir).select do |f|
+        audio_exts.includes?(File.extname(f).downcase)
+      end
+
+      # 1. Check if cover needs conversion (cover.jpg/png -> cover.cbt)
+      ["cover.jpg", "cover.png", "folder.jpg", "cover.jpeg"].each do |cname|
+        cpath = File.join(album_dir, cname)
+        out_cbt = File.join(src_dir, "cover.cbt")
+        if File.exists?(cpath)
+          cbt_stale = !File.exists?(out_cbt) || (File.info(cpath).modification_time > File.info(out_cbt).modification_time)
+          if cbt_stale
+            puts "[Citrine Media] Auto-converting album cover #{cpath} -> #{out_cbt} (GS CLUT8)..."
+            Importers::FluoriteMedia.convert_texture(cpath, out_cbt, Importers::FluoriteMedia::TextureConfig.new(width: 128, height: 128, clut_bits: 8))
+          end
+          break
+        end
+      end
+
+      # 2. Check if CD-DA album tracks need transcoding
+      needs_import = false
+      if !File.exists?(metadata_file) || !File.exists?(track02_file)
+        needs_import = true
+      else
+        meta_mtime = File.info(metadata_file).modification_time
+        if album_audio_files.any? { |f| File.info(File.join(album_dir, f)).modification_time > meta_mtime }
+          needs_import = true
+        else
+          begin
+            meta_json = JSON.parse(File.read(metadata_file)).as_a
+            needs_import = (meta_json.size != album_audio_files.size)
+          rescue
+            needs_import = true
+          end
+        end
+      end
+
+      if needs_import
+        puts "[Citrine Media] Auto-importing CD-DA album tracks from #{album_dir}..."
+        # Clean up old raw track files
+        Dir.children(src_dir).select { |f| f =~ /^track\d+\.raw$/i }.each do |f|
+          File.delete(File.join(src_dir, f)) rescue nil
+        end
+        # Delete old track01.vag so SPU2 track gets regenerated
+        File.delete(File.join(src_dir, "track01.vag")) rescue nil
+
+        Importers::FluoriteMedia.import_album(album_dir, src_dir) { |msg| puts "[Citrine Media] #{msg}" }
+      end
+
+      # 3. Check if primary track VAG needs conversion (for SPU2 playback)
+      track01_vag = File.join(src_dir, "track01.vag")
+      first_audio = album_audio_files.sort.first?
+      if first_audio
+        first_path = File.join(album_dir, first_audio)
+        vag_stale = !File.exists?(track01_vag) || (File.info(first_path).modification_time > File.info(track01_vag).modification_time)
+        if vag_stale
+          puts "[Citrine Media] Auto-converting primary album track #{first_path} -> #{track01_vag} (SPU2 4-bit ADPCM)..."
+          Importers::FluoriteMedia.convert_audio(first_path, track01_vag, Importers::FluoriteMedia::AudioConfig.new(sample_rate: 22050, loop_audio: true))
+        end
+      end
+    end
+
+    def build_iso(cbc_path : String, output_iso_path : String, extra_files : Hash(String, Bytes) = {} of String => Bytes, audio_tracks : Array(String) = [] of String) : String
       cbc_data = File.read(cbc_path).to_slice
+      src_dir = File.dirname(cbc_path)
+      auto_prepare_assets(src_dir)
+      vag_files = Dir.glob(File.join(src_dir, "*.vag").gsub('\\', '/'))
+      first_vag_data = vag_files.first? ? File.read(vag_files.first).to_slice : nil
+
       elf_data = if @runner_elf_path != "runtime/bin/citrine_runner.elf" && File.exists?(@runner_elf_path)
                    File.read(@runner_elf_path).to_slice
                  else
-                   ElfBuilder.build_default_runner_elf(cbc_data)
+                   ElfBuilder.build_default_runner_elf(cbc_data, vag_bytes: first_vag_data)
                  end
-      IsoBuilder.build(output_iso_path, cbc_data, elf_data, extra_files)
+
+      tracks = audio_tracks.dup
+      if tracks.empty? && Dir.exists?(src_dir)
+        discovered = Dir.children(src_dir).select do |f|
+          ext = File.extname(f).downcase
+          (ext == ".raw" || ext == ".bin") && f.downcase.starts_with?("track")
+        end.map { |f| File.join(src_dir, f) }.sort_by do |p|
+          base = File.basename(p)
+          if md = base.match(/track(\d+)/i)
+            md[1].to_i
+          else
+            999
+          end
+        end
+
+        if discovered.empty?
+          ["track02.raw", "track02.bin", "cdda.raw", "audio.raw"].each do |f|
+            candidate = File.join(src_dir, f)
+            tracks << candidate if File.exists?(candidate)
+          end
+        else
+          discovered.each { |d| tracks << d }
+        end
+      end
+
+      vag_files.each do |vag_file|
+        base = File.basename(vag_file)
+        extra_files[base] ||= File.read(vag_file).to_slice
+      end
+
+      IsoBuilder.build(output_iso_path, cbc_data, elf_data, extra_files, audio_tracks: tracks, vag_bytes: first_vag_data)
       output_iso_path
     end
 
@@ -140,17 +247,10 @@ module Citrine
           proc = Process.new(pcsx2, args)
           proc.wait
         else
-          bridge = Debugger::VirtualPadBridge.new
-          bridge.clean_previous_log
           proc = Process.new(pcsx2, args, input: Process::Redirect::Inherit)
-          bridge.start(proc.pid)
           puts "[Citrine] PCSX2 process running. (Close PCSX2 or press Ctrl+C to exit)..."
-          begin
-            while !proc.terminated?
-              sleep 0.1.seconds
-            end
-          ensure
-            bridge.stop
+          while !proc.terminated?
+            sleep 0.1.seconds
           end
         end
       else

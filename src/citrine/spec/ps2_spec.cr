@@ -185,7 +185,35 @@ module Citrine
       def boot_pcsx2(timeout : ::Time::Span = 4.seconds) : Ps2ExecutionResult
         bytes, sm = compile
         temp_iso = "tmp_spec_#{@name.gsub(/[^a-zA-Z0-9_]/, "_")}.iso"
-        IsoBuilder.build(temp_iso, bytes, input_schedule: @input_schedule)
+
+        extra_files = Hash(String, Bytes).new
+        audio_tracks = [] of String
+
+        if tf = @target_file
+          target_dir = File.dirname(tf)
+          if Dir.exists?(target_dir)
+            Dir.glob(File.join(target_dir, "*.cbt").gsub('\\', '/')).each do |f|
+              extra_files[File.basename(f)] = File.read(f).to_slice
+            end
+            Dir.glob(File.join(target_dir, "*.vag").gsub('\\', '/')).each do |f|
+              extra_files[File.basename(f)] = File.read(f).to_slice
+            end
+            discovered = Dir.children(target_dir).select do |f|
+              ext = File.extname(f).downcase
+              (ext == ".raw" || ext == ".bin") && f.downcase.starts_with?("track")
+            end.map { |f| File.join(target_dir, f) }.sort_by do |p|
+              base = File.basename(p)
+              if md = base.match(/track(\d+)/i)
+                md[1].to_i
+              else
+                999
+              end
+            end
+            audio_tracks = discovered
+          end
+        end
+
+        IsoBuilder.build(temp_iso, bytes, extra_files: extra_files, input_schedule: @input_schedule, audio_tracks: audio_tracks)
 
         bridge = Debugger::Pcsx2Bridge.new
         lines = [] of String
@@ -198,7 +226,7 @@ module Citrine
         if @screenshot_frame && (out_p = @screenshot_output)
           snap_path = out_p
           spawn do
-            sleep 2.8.seconds
+            sleep 3.2.seconds
             bridge.capture_screenshot(out_p)
             bridge.copy_to_artifacts(out_p, "screen.png") rescue nil
           end
@@ -217,8 +245,9 @@ module Citrine
           end
         end
 
+        nogui_mode = @screenshot_frame.nil?
         begin
-          status = bridge.spawn_pcsx2(temp_iso, batch: true, gdb_port: active_port, timeout: timeout) do |line|
+          status = bridge.spawn_pcsx2(temp_iso, batch: true, nogui: nogui_mode, gdb_port: active_port, timeout: timeout) do |line|
             lines << line
             if rep = Debugger::CrashAnalyzer.analyze(line, sm)
               panic_found = true

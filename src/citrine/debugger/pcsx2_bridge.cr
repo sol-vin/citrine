@@ -156,6 +156,7 @@ module Citrine
       def spawn_pcsx2(
         iso_path : String,
         batch : Bool = false,
+        nogui : Bool = true,
         debugger_gui : Bool = false,
         gdb_port : Int32? = nil,
         timeout : Time::Span? = nil,
@@ -174,6 +175,8 @@ module Citrine
 
         if batch
           args << "-batch"
+        end
+        if nogui
           args << "-nogui"
         end
 
@@ -312,8 +315,11 @@ module Citrine
             status = process.wait rescue nil
           end
         else
-          # Interactive wait until user closes PCSX2
-          status = process.wait
+          # Interactive wait until user closes PCSX2 (sleep yields to tail fibers)
+          while !process.terminated?
+            sleep 0.05.seconds
+          end
+          status = process.wait rescue nil
         end
 
         stop_tailing = true
@@ -408,7 +414,7 @@ module Citrine
           "C:\\Users\\Ian\\Documents\\PCSX2\\snaps"
         ]
         active_snap_dir = snap_dirs.find { |d| Dir.exists?(d) } || snap_dirs.first
-        before_snaps = Dir.glob(File.join(active_snap_dir, "*.png")) rescue [] of String
+        before_snaps = Dir.glob(File.join(active_snap_dir, "*.png").gsub('\\', '/')) rescue [] of String
 
         script = <<-POWERSHELL
         $ErrorActionPreference = 'SilentlyContinue'
@@ -420,15 +426,24 @@ module Citrine
         public class WinSnap {
             [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
             [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+            [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
             [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
         }
         "@
         $proc = Get-Process -Name "pcsx2-qt" -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($proc -and $proc.MainWindowHandle -ne [IntPtr]::Zero) {
-            # Send F8 snapshot hotkey (WM_KEYDOWN = 0x0100, WM_KEYUP = 0x0101, VK_F8 = 0x77)
+            [WinSnap]::SetForegroundWindow($proc.MainWindowHandle)
+            Start-Sleep -Milliseconds 150
+            # Send F8 via hardware keybd_event, PostMessage, and WScript.Shell
+            [WinSnap]::keybd_event(0x77, 0, 0, 0)
+            [WinSnap]::keybd_event(0x77, 0, 2, 0)
             [WinSnap]::PostMessage($proc.MainWindowHandle, 0x0100, [IntPtr]0x77, [IntPtr]0)
             [WinSnap]::PostMessage($proc.MainWindowHandle, 0x0101, [IntPtr]0x77, [IntPtr]0)
-            Start-Sleep -Milliseconds 600
+            $ws = New-Object -ComObject WScript.Shell
+            $ws.AppActivate($proc.Id)
+            $ws.SendKeys('{F8}')
+            Start-Sleep -Milliseconds 800
 
             # GDI Capture fallback
             $rect = New-Object WinSnap+RECT
@@ -444,12 +459,16 @@ module Citrine
         }
         POWERSHELL
 
-        Process.run("powershell", ["-NoProfile", "-Command", "$outputPath = '#{abs_output.gsub('\'', "''")}'; " + script]) rescue nil
+        Process.run("powershell", ["-NoProfile", "-Command", "$outputPath = '#{abs_output.gsub('\'', "''")}'; " + script], env: {"LIB" => ""}) rescue nil
 
         # If F8 produced a native GS framebuffer snapshot in snaps/, use that high-res file!
-        after_snaps = (Dir.glob(File.join(active_snap_dir, "*.png")) rescue [] of String) - before_snaps
-        if newest = after_snaps.last?
-          FileUtils.cp(newest, abs_output) rescue nil
+        8.times do
+          after_snaps = (Dir.glob(File.join(active_snap_dir, "*.png").gsub('\\', '/')) rescue [] of String) - before_snaps
+          if newest = after_snaps.last?
+            FileUtils.cp(newest, abs_output) rescue nil
+            break
+          end
+          sleep 0.25.seconds
         end
         {% end %}
 
