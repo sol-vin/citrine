@@ -17,12 +17,16 @@ require "citrine"
 #   DPAD Up     - Volume +
 #   DPAD Down   - Volume -
 
+# Code-first Disc Asset Baking DSL
+Citrine.bake_cd_album "album/"
+Citrine.bake_texture "album/cover.png", "cover.cbt", 128, 128, 8
+
 # Code-first album metadata loading (Album Agnostic)
 TRACK_TITLES = Citrine.album_track_titles
 TRACK_DURATIONS = Citrine.album_track_durations
 ALBUM_TITLE = Citrine.album_title
 ALBUM_ARTIST = Citrine.album_artist
-TOTAL_TRACKS = TRACK_TITLES.size
+TOTAL_TRACKS = Citrine.album_track_count
 ALBUM_HEADER = "#{ALBUM_ARTIST.upcase} - #{ALBUM_TITLE.upcase}"
 
 Citrine.init_window(640, 448, "#{ALBUM_ARTIST} - #{ALBUM_TITLE} (Citrine PS2 CD-DA Player)")

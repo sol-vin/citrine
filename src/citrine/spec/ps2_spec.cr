@@ -247,9 +247,15 @@ module Citrine
           end
         end
 
+        target_image = temp_iso
+        temp_cue = temp_iso.sub(/\.iso$/i, ".cue")
+        if File.exists?(temp_cue) && !audio_tracks.empty?
+          target_image = temp_cue
+        end
+
         nogui_mode = @screenshot_frame.nil?
         begin
-          status = bridge.spawn_pcsx2(temp_iso, batch: true, nogui: nogui_mode, gdb_port: active_port, timeout: timeout) do |line|
+          status = bridge.spawn_pcsx2(target_image, batch: true, nogui: nogui_mode, gdb_port: active_port, timeout: timeout) do |line|
             lines << line
             if rep = Debugger::CrashAnalyzer.analyze(line, sm)
               panic_found = true
@@ -259,6 +265,7 @@ module Citrine
           end
         ensure
           File.delete(temp_iso) if File.exists?(temp_iso)
+          File.delete(temp_cue) if File.exists?(temp_cue)
         end
         canary_ok = !lines.any? { |l| l.includes?("SPRAM Stack Canary Corrupted") }
 

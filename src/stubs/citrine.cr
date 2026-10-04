@@ -888,10 +888,76 @@ module Citrine
     end
   end
 
+  # Declarative Disc Asset Baking Stubs (processed at compile-time by MacroExpander)
+  def self.bake(path : String, target : String? = nil) : String
+    target || path
+  end
+
+  def self.bake_texture(path : String, target : String? = nil, width : Int32 = 128, height : Int32 = 128, clut : Int32 = 8) : String
+    target || path
+  end
+
+  def self.bake_cd_track(path : String, track_number : Int32? = nil) : Int32
+    track_number || 2
+  end
+
+  def self.bake_cd_album(path : String = "album/") : Int32
+    0
+  end
+
+  def self.bake_dvd_video(path : String, target : String? = nil) : String
+    target || path
+  end
+
+  def self.bake_spu2_sound(path : String, target : String? = nil) : String
+    target || path
+  end
+
+  def self.album_track_count(path : String = "album_metadata.json") : Int32
+    0
+  end
+
+  def self.disc_files : Array(String)
+    [] of String
+  end
+
   # Raises an unrecoverable engine panic with error description `msg`.
   def self.panic(msg : String)
     raise msg
   end
+end
+
+# Top-level DSL helpers for declarative disc baking
+def bake(path : String, target : String? = nil) : String
+  Citrine.bake(path, target)
+end
+
+def bake_texture(path : String, target : String? = nil, width : Int32 = 128, height : Int32 = 128, clut : Int32 = 8) : String
+  Citrine.bake_texture(path, target, width, height, clut)
+end
+
+def bake_cd_track(path : String, track_number : Int32? = nil) : Int32
+  Citrine.bake_cd_track(path, track_number)
+end
+
+def bake_cd_album(path : String = "album/") : Int32
+  Citrine.bake_cd_album(path)
+end
+
+def bake_dvd_video(path : String, target : String? = nil) : String
+  Citrine.bake_dvd_video(path, target)
+end
+
+def bake_spu2_sound(path : String, target : String? = nil) : String
+  Citrine.bake_spu2_sound(path, target)
+end
+
+def album_track_count(path : String = "album_metadata.json") : Int32
+  Citrine.album_track_count(path)
+end
+
+def disc_files : Array(String)
+  Citrine.disc_files
 end
 
 # Top-level DSL helper for inline MIPS R5900 assembly.

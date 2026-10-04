@@ -1,6 +1,7 @@
 require "compiler/crystal/syntax"
 require "json"
 require "../importers/fluorite_media"
+require "../iso/disc_manifest"
 
 module Citrine
   class VarInfo
@@ -204,6 +205,18 @@ module Citrine
     end
 
     private def is_macro_call?(call : Crystal::Call) : Bool
+      is_citrine_bake_macro = (call.obj.nil? || call.obj.to_s == "Citrine") && [
+        "bake",
+        "bake_asset",
+        "bake_texture",
+        "bake_cd_track",
+        "bake_cd_album",
+        "bake_dvd_video",
+        "bake_spu2_sound",
+        "album_track_count",
+        "disc_files"
+      ].includes?(call.name)
+
       is_citrine_media_macro = (call.obj.nil? || call.obj.to_s == "Citrine") && [
         "load_track_titles",
         "load_track_durations",
@@ -214,7 +227,8 @@ module Citrine
         "album_artist"
       ].includes?(call.name)
 
-      is_citrine_media_macro ||
+      is_citrine_bake_macro ||
+        is_citrine_media_macro ||
         call.name.ends_with?("!") ||
         call.name == "fsm" ||
         call.name == "citrine_ecs" ||
@@ -227,6 +241,22 @@ module Citrine
         expand_ecs(call)
       when "fsm!", "fsm"
         expand_fsm(call)
+      when "bake", "bake_asset"
+        expand_bake(call)
+      when "bake_texture"
+        expand_bake_texture(call)
+      when "bake_cd_track"
+        expand_bake_cd_track(call)
+      when "bake_cd_album"
+        expand_bake_cd_album(call)
+      when "bake_dvd_video"
+        expand_bake_dvd_video(call)
+      when "bake_spu2_sound"
+        expand_bake_spu2_sound(call)
+      when "album_track_count"
+        expand_album_track_count(call)
+      when "disc_files"
+        expand_disc_files(call)
       when "load_track_titles", "album_track_titles"
         expand_track_titles(call)
       when "load_track_durations", "album_track_durations"
@@ -449,18 +479,210 @@ module Citrine
       Crystal::Expressions.new(exprs)
     end
 
+    private def resolve_asset_path(rel_path : String) : String
+      base_dir = @filename ? File.dirname(@filename.not_nil!) : "."
+      File.expand_path(rel_path, base_dir)
+    end
+
+    private def expand_bake(call : Crystal::Call) : Crystal::ASTNode
+      return Crystal::StringLiteral.new("") if call.args.empty?
+      arg0 = call.args[0]
+      src_rel = arg0.is_a?(Crystal::StringLiteral) ? arg0.value : arg0.to_s
+      target_rel = (call.args.size > 1 && call.args[1].is_a?(Crystal::StringLiteral)) ? call.args[1].as(Crystal::StringLiteral).value : nil
+
+      full_src = resolve_asset_path(src_rel)
+      asset = Citrine::ISO::DiscManifest.current.add_file(full_src, target_rel)
+      Crystal::StringLiteral.new(asset.target_name)
+    end
+
+    private def expand_bake_texture(call : Crystal::Call) : Crystal::ASTNode
+      return Crystal::StringLiteral.new("") if call.args.empty?
+      arg0 = call.args[0]
+      src_rel = arg0.is_a?(Crystal::StringLiteral) ? arg0.value : arg0.to_s
+      target_rel = (call.args.size > 1 && call.args[1].is_a?(Crystal::StringLiteral)) ? call.args[1].as(Crystal::StringLiteral).value : nil
+      width = (call.args.size > 2 && call.args[2].is_a?(Crystal::NumberLiteral)) ? call.args[2].as(Crystal::NumberLiteral).value.to_i : 128
+      height = (call.args.size > 3 && call.args[3].is_a?(Crystal::NumberLiteral)) ? call.args[3].as(Crystal::NumberLiteral).value.to_i : 128
+      clut = (call.args.size > 4 && call.args[4].is_a?(Crystal::NumberLiteral)) ? call.args[4].as(Crystal::NumberLiteral).value.to_i : 8
+
+      full_src = resolve_asset_path(src_rel)
+      base_dir = @filename ? File.dirname(@filename.not_nil!) : "."
+      out_target = target_rel || File.basename(src_rel).sub(/\.(png|jpg|jpeg|bmp)$/i, ".cbt")
+      out_full = File.join(base_dir, out_target)
+
+      # Convert if source is an image and target is .cbt and target is missing or stale
+      if File.exists?(full_src)
+        ext = File.extname(full_src).downcase
+        if [".png", ".jpg", ".jpeg", ".bmp"].includes?(ext) && out_full.ends_with?(".cbt")
+          is_stale = !File.exists?(out_full) || (File.info(full_src).modification_time > File.info(out_full).modification_time)
+          if is_stale
+            begin
+              Importers::FluoriteMedia.convert_texture(
+                full_src,
+                out_full,
+                Importers::FluoriteMedia::TextureConfig.new(width: width, height: height, clut_bits: clut)
+              )
+            rescue
+            end
+          end
+        end
+      end
+
+      asset = Citrine::ISO::DiscManifest.current.add_texture(
+        File.exists?(out_full) ? out_full : full_src,
+        out_target,
+        width: width,
+        height: height,
+        clut: clut
+      )
+      Crystal::StringLiteral.new(asset.target_name)
+    end
+
+    private def expand_bake_cd_track(call : Crystal::Call) : Crystal::ASTNode
+      return Crystal::NumberLiteral.new(0) if call.args.empty?
+      arg0 = call.args[0]
+      src_rel = arg0.is_a?(Crystal::StringLiteral) ? arg0.value : arg0.to_s
+      track_num = (call.args.size > 1 && call.args[1].is_a?(Crystal::NumberLiteral)) ? call.args[1].as(Crystal::NumberLiteral).value.to_i : nil
+
+      full_src = resolve_asset_path(src_rel)
+      base_dir = @filename ? File.dirname(@filename.not_nil!) : "."
+      ext = File.extname(full_src).downcase
+      final_track_path = full_src
+      if [".wav", ".mp3", ".ogg", ".flac"].includes?(ext)
+        out_raw_name = sprintf("track%02d.raw", track_num || Citrine::ISO::DiscManifest.current.next_cd_track_number)
+        out_raw_path = File.join(base_dir, out_raw_name)
+        if !File.exists?(out_raw_path) || (File.info(full_src).modification_time > File.info(out_raw_path).modification_time)
+          begin
+            Citrine::Importers::FluoriteMedia.convert_cdda(full_src, out_raw_path)
+          rescue
+          end
+        end
+        final_track_path = out_raw_path if File.exists?(out_raw_path)
+      end
+
+      asset = Citrine::ISO::DiscManifest.current.add_cd_track(final_track_path, track_num)
+      Crystal::NumberLiteral.new(asset.track_number || 2)
+    end
+
+    private def expand_bake_cd_album(call : Crystal::Call) : Crystal::ASTNode
+      base_dir = @filename ? File.dirname(@filename.not_nil!) : "."
+      meta = load_album_metadata(call)
+
+      # Register all generated track*.raw into DiscManifest
+      if Dir.exists?(base_dir)
+        raw_tracks = Dir.children(base_dir).select { |f| f =~ /^track\d+\.raw$/i }.sort_by do |f|
+          md = f.match(/track(\d+)/i)
+          md ? md[1].to_i : 999
+        end
+
+        raw_tracks.each do |raw_f|
+          raw_path = File.join(base_dir, raw_f)
+          md = raw_f.match(/track(\d+)/i)
+          t_num = md ? md[1].to_i : nil
+          Citrine::ISO::DiscManifest.current.add_cd_track(raw_path, t_num)
+        end
+
+        # Register cover.cbt if present
+        cbt_path = File.join(base_dir, "cover.cbt")
+        if File.exists?(cbt_path)
+          Citrine::ISO::DiscManifest.current.add_file(cbt_path, "COVER.CBT")
+        end
+
+        # Register album_metadata.json if present
+        json_path = File.join(base_dir, "album_metadata.json")
+        if File.exists?(json_path)
+          Citrine::ISO::DiscManifest.current.add_file(json_path, "ALBUM.JSON")
+        end
+      end
+
+      count = meta ? meta.size : Citrine::ISO::DiscManifest.current.cd_audio_tracks.size
+      Crystal::NumberLiteral.new(count)
+    end
+
+    private def expand_bake_dvd_video(call : Crystal::Call) : Crystal::ASTNode
+      return Crystal::StringLiteral.new("") if call.args.empty?
+      arg0 = call.args[0]
+      src_rel = arg0.is_a?(Crystal::StringLiteral) ? arg0.value : arg0.to_s
+      target_rel = (call.args.size > 1 && call.args[1].is_a?(Crystal::StringLiteral)) ? call.args[1].as(Crystal::StringLiteral).value : nil
+
+      full_src = resolve_asset_path(src_rel)
+      base_dir = @filename ? File.dirname(@filename.not_nil!) : "."
+      out_target = target_rel || File.basename(src_rel).sub(/\.(mp4|avi|mov|mkv)$/i, ".pss")
+      out_full = File.join(base_dir, out_target)
+
+      if File.exists?(full_src) && (!File.exists?(out_full) || File.info(full_src).modification_time > File.info(out_full).modification_time)
+        ext = File.extname(full_src).downcase
+        if [".mp4", ".avi", ".mov", ".mkv", ".webm"].includes?(ext)
+          begin
+            Citrine::Importers::FluoriteMedia.convert_video(full_src, out_full, Citrine::Importers::FluoriteMedia::VideoConfig.new(fps: 15))
+          rescue
+          end
+        end
+      end
+
+      asset = Citrine::ISO::DiscManifest.current.add_dvd_video(File.exists?(out_full) ? out_full : full_src, out_target)
+      Crystal::StringLiteral.new(asset.target_name)
+    end
+
+    private def expand_bake_spu2_sound(call : Crystal::Call) : Crystal::ASTNode
+      return Crystal::StringLiteral.new("") if call.args.empty?
+      arg0 = call.args[0]
+      src_rel = arg0.is_a?(Crystal::StringLiteral) ? arg0.value : arg0.to_s
+      target_rel = (call.args.size > 1 && call.args[1].is_a?(Crystal::StringLiteral)) ? call.args[1].as(Crystal::StringLiteral).value : nil
+
+      full_src = resolve_asset_path(src_rel)
+      base_dir = @filename ? File.dirname(@filename.not_nil!) : "."
+      out_target = target_rel || File.basename(src_rel).sub(/\.(wav|ogg|mp3|flac)$/i, ".vag")
+      out_full = File.join(base_dir, out_target)
+
+      if File.exists?(full_src) && (!File.exists?(out_full) || File.info(full_src).modification_time > File.info(out_full).modification_time)
+        ext = File.extname(full_src).downcase
+        if [".wav", ".ogg", ".mp3", ".flac"].includes?(ext)
+          begin
+            Citrine::Importers::FluoriteMedia.convert_audio(full_src, out_full, Citrine::Importers::FluoriteMedia::AudioConfig.new(sample_rate: 22050))
+          rescue
+          end
+        end
+      end
+
+      asset = Citrine::ISO::DiscManifest.current.add_spu2_sound(File.exists?(out_full) ? out_full : full_src, out_target)
+      Crystal::StringLiteral.new(asset.target_name)
+    end
+
+    private def expand_album_track_count(call : Crystal::Call) : Crystal::ASTNode
+      meta = load_album_metadata(call)
+      count = meta ? meta.size : 0
+      Crystal::NumberLiteral.new(count)
+    end
+
+    private def expand_disc_files(call : Crystal::Call) : Crystal::ASTNode
+      elems = [] of Crystal::ASTNode
+      Citrine::ISO::DiscManifest.current.data_files.each do |a|
+        elems << Crystal::StringLiteral.new(a.target_name)
+      end
+      Crystal::ArrayLiteral.new(elems)
+    end
+
     private def load_album_metadata(call : Crystal::Call) : Array(JSON::Any)?
-      meta_path = if call.args.size > 0 && call.args.first.is_a?(Crystal::StringLiteral)
-                    call.args.first.as(Crystal::StringLiteral).value
-                  else
-                    "album_metadata.json"
-                  end
+      arg_path = if call.args.size > 0 && call.args.first.is_a?(Crystal::StringLiteral)
+                   call.args.first.as(Crystal::StringLiteral).value
+                 else
+                   nil
+                 end
 
       base_dir = @filename ? File.dirname(@filename.not_nil!) : "."
-      full_path = File.expand_path(meta_path, base_dir)
+      album_dir = File.join(base_dir, "album")
+      full_path = File.join(base_dir, "album_metadata.json")
+
+      if arg_path
+        expanded = File.expand_path(arg_path, base_dir)
+        if Dir.exists?(expanded) || arg_path.ends_with?("/") || arg_path.ends_with?("\\")
+          album_dir = expanded
+        elsif arg_path.ends_with?(".json")
+          full_path = expanded
+        end
+      end
 
       # If metadata JSON does not exist or is stale, check if an album directory exists to auto-generate it
-      album_dir = File.join(base_dir, "album")
       if Dir.exists?(album_dir)
         needs_regen = false
         if !File.exists?(full_path)

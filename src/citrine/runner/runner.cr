@@ -3,6 +3,7 @@ require "../compiler/bytecode_compiler"
 require "../parser/dsl_parser"
 require "../iso/iso_builder"
 require "../iso/elf_builder"
+require "../iso/disc_manifest"
 require "../importers/fluorite_media"
 require "../debugger/pcsx2_bridge"
 
@@ -19,6 +20,15 @@ module Citrine
     )
       @pcsx2_path ||= find_pcsx2
       ensure_runner_elf
+    end
+
+    def kill_running_pcsx2
+      {% if flag?(:windows) %}
+        Process.run("taskkill", ["/F", "/IM", "pcsx2-qt.exe", "/T"], output: Process::Redirect::Close, error: Process::Redirect::Close) rescue nil
+        Process.run("taskkill", ["/F", "/IM", "pcsx2.exe", "/T"], output: Process::Redirect::Close, error: Process::Redirect::Close) rescue nil
+      {% else %}
+        Process.run("pkill", ["-f", "pcsx2"], output: Process::Redirect::Close, error: Process::Redirect::Close) rescue nil
+      {% end %}
     end
 
     def ensure_runner_elf
@@ -53,6 +63,9 @@ module Citrine
     end
 
     def compile_game(source_path : String, output_cbc_path : String, release : Bool = false) : BytecodeCompiler
+      # Reset disc manifest for clean build session
+      Citrine::ISO::DiscManifest.reset!
+
       src_dir = File.dirname(source_path)
       auto_prepare_assets(src_dir)
 
@@ -148,6 +161,30 @@ module Citrine
       cbc_data = File.read(cbc_path).to_slice
       src_dir = File.dirname(cbc_path)
       auto_prepare_assets(src_dir)
+
+      # 1. Ingest all data assets registered via Citrine DiscManifest
+      Citrine::ISO::DiscManifest.current.data_files.each do |asset|
+        tname = asset.target_name
+        spath = asset.source_path
+        if File.exists?(spath)
+          extra_files[tname] ||= File.read(spath).to_slice
+        end
+      end
+
+      # 2. Auto-discover project assets in src_dir (cbt, vag, json, fnt, mesh)
+      if Dir.exists?(src_dir)
+        Dir.children(src_dir).each do |child|
+          next if child == "SYSTEM.CNF" || child.ends_with?(".elf") || child.ends_with?(".cbc") || child.ends_with?(".iso") || child.ends_with?(".cue") || child.ends_with?(".cr")
+          ext = File.extname(child).downcase
+          if [".vag", ".cbt", ".json", ".fnt", ".mesh"].includes?(ext)
+            cpath = File.join(src_dir, child)
+            if File.file?(cpath)
+              extra_files[child] ||= File.read(cpath).to_slice
+            end
+          end
+        end
+      end
+
       vag_files = Dir.glob(File.join(src_dir, "*.vag").gsub('\\', '/'))
       first_vag_data = vag_files.first? ? File.read(vag_files.first).to_slice : nil
 
@@ -158,6 +195,15 @@ module Citrine
                  end
 
       tracks = audio_tracks.dup
+
+      # 3. Ingest CD-DA audio tracks from DiscManifest
+      Citrine::ISO::DiscManifest.current.cd_audio_tracks.each do |asset|
+        if File.exists?(asset.source_path) && !tracks.includes?(asset.source_path)
+          tracks << asset.source_path
+        end
+      end
+
+      # 4. Fallback discovery for track*.raw / track*.bin if not in DiscManifest
       if tracks.empty? && Dir.exists?(src_dir)
         discovered = Dir.children(src_dir).select do |f|
           ext = File.extname(f).downcase
@@ -195,6 +241,9 @@ module Citrine
         run_host_simulator(source_path, host_dir)
         return
       end
+
+      # Terminate any running PCSX2 instance to release file locks on target disc files
+      kill_running_pcsx2
 
       output_iso = ""
       output_cbc = ""
@@ -237,12 +286,14 @@ module Citrine
       if pcsx2
         Debugger::Pcsx2Bridge.new.ensure_logging_configured rescue nil
         abs_iso = File.expand_path(output_iso).gsub('/', '\\')
-        puts "[Citrine] Launching PCSX2 with #{abs_iso}..."
+        launch_target = abs_iso
+
+        puts "[Citrine] Launching PCSX2 with #{launch_target}..."
         args = [] of String
         args << "-fastboot"
         args << "-earlyconsolelog"
         args << "-batch" if batch_mode
-        args << abs_iso
+        args << launch_target
         if batch_mode
           proc = Process.new(pcsx2, args)
           proc.wait
