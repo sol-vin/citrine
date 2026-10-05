@@ -18,7 +18,7 @@ require "citrine"
 #   DPAD Down   - Volume -
 
 # Code-first Disc Asset Baking DSL
-Citrine.bake_stream_album "album/", bitrate: 96.kbps
+Citrine.bake_stream_album "album/", bitrate: 32.kbps
 Citrine.bake_texture "album/cover.png", "cover.cbt", 128, 128, 8
 
 # Code-first album metadata loading (Album Agnostic)
@@ -168,7 +168,7 @@ Citrine.main_loop do
 
   # Dynamic optical track string
   opt_num = track_idx + 1
-  opt_str = opt_num < 10 ? "Track 0#{opt_num}: TRACK0#{opt_num}.CAS (96 kbps SPU2 Stream)" : "Track #{opt_num}: TRACK#{opt_num}.CAS (96 kbps SPU2 Stream)"
+  opt_str = opt_num < 10 ? "Track 0#{opt_num}: TRACK0#{opt_num}.CAS (32 kbps SPU2 Stream)" : "Track #{opt_num}: TRACK#{opt_num}.CAS (32 kbps SPU2 Stream)"
 
   # Duration formatting
   dur_i = dur.to_i

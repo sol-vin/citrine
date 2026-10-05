@@ -436,19 +436,9 @@ module Citrine
             emitter.beqz(T1, "cdda_play_entry")
             emitter.nop
 
-            # If A0 >= 2: optical CDDA track N -> track index (N - 2)
-            emitter.ori(T0, ZERO, 2)
-            emitter.sltu(T1, A0, T0)
-            emitter.bnez(T1, "cdda_play_def")
-            emitter.nop
-            emitter.addiu(A0, A0, -2)
+            # Map 0-based stream track index: 0x0100 | (A0 & 0xFF)
             emitter.andi(A0, A0, 0xFF)
             emitter.ori(A0, A0, 0x0100)
-            emitter.jump("cdda_play_entry")
-
-            emitter.label("cdda_play_def")
-            # If A0 <= 1: cmd = 1 (Play default / current)
-            emitter.ori(A0, ZERO, 1)
 
             emitter.label("cdda_play_entry")
             emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)

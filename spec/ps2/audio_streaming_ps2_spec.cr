@@ -69,8 +69,8 @@ describe "Citrine PS2 Audio Streaming Suite" do
       Citrine::IsoBuilder.build(temp_iso, bytes, extra_files: extra_files)
       File.exists?(temp_iso).should be_true
       iso_size = File.size(temp_iso)
-      # 13 tracks + cover + ELF + S.IRX should be > 30 MB
-      iso_size.should be > 30_000_000
+      # 13 tracks + cover + ELF + S.IRX should be > 10 MB at 32 kbps
+      iso_size.should be > 10_000_000
     ensure
       File.delete(temp_iso) if File.exists?(temp_iso)
     end

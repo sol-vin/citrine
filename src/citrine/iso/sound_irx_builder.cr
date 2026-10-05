@@ -555,19 +555,19 @@ module Citrine
         base_elf[text_off + 0x0e90, 4].copy_from(Bytes[0x05, 0x00, 0x00, 0x10])
         base_elf[text_off + 0x0e94, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
 
-        # Add cdvdman import table at 0x0b40 (after streaming engine code at 0x4dc..0xb28, before 0x0c54)
-        pos = text_off + 0x0b40
+        # Add cdvdman import table at 0x0bd0 (giving 0x4dc..0x0bd0 = 1,780 bytes for engine code)
+        pos = text_off + 0x0bd0
         IO::ByteFormat::LittleEndian.encode(0x41e00000_u32, base_elf[pos, 4])
         IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[pos + 4, 4])
         IO::ByteFormat::LittleEndian.encode(0x0101_u16, base_elf[pos + 8, 2])
         IO::ByteFormat::LittleEndian.encode(0_u16, base_elf[pos + 10, 2])
         "cdvdman\0".to_slice.copy_to(base_elf[pos + 12, 8])
 
-        # Stub 0 (0x0b54): sceCdRead (ordinal 6)
+        # Stub 0 (0x0be4): sceCdRead (ordinal 6)
         IO::ByteFormat::LittleEndian.encode(0x03e00008_u32, base_elf[pos + 20, 4]) # jr $ra
         IO::ByteFormat::LittleEndian.encode(0x24000006_u32, base_elf[pos + 24, 4]) # addiu $zero, $zero, 6
 
-        # Stub 1 (0x0b5c): sceCdSync (ordinal 11 = 0x000b)
+        # Stub 1 (0x0bec): sceCdSync (ordinal 11 = 0x000b)
         IO::ByteFormat::LittleEndian.encode(0x03e00008_u32, base_elf[pos + 28, 4]) # jr $ra
         IO::ByteFormat::LittleEndian.encode(0x2400000b_u32, base_elf[pos + 32, 4]) # addiu $zero, $zero, 11
 
@@ -575,7 +575,7 @@ module Citrine
         IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[pos + 36, 4])
         IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[pos + 40, 4])
 
-        # Store 4-byte sceCdRMode struct at 0x0b6c: { trycount=5, spindlctrl=0, datapattern=0, pad=0 }
+        # Store 4-byte sceCdRMode struct at 0x0bfc: { trycount=5, spindlctrl=0, datapattern=0, pad=0 }
         IO::ByteFormat::LittleEndian.encode(0x00000005_u32, base_elf[pos + 44, 4])
 
         # Patch vblank import table at 0x10a0 to import thbase DelayThread (ordinal 33 = 0x21)
@@ -601,12 +601,12 @@ module Citrine
         IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x1918, 4]) # frame_counter
 
         # Dynamic timing variables at 0x18E0:
-        first_pitch = track_table.first?.try(&.pitch_reg) || 0x075A_u16
-        first_pitch = 0x075A_u16 if first_pitch == 0_u16
-        first_bank_frames = (146931 // first_pitch).to_u32
+        first_pitch = track_table.first?.try(&.pitch_reg) || 0x02AB_u16
+        first_pitch = 0x02AB_u16 if first_pitch == 0_u16
+        first_bank_frames = (146800 // first_pitch).to_u32
         first_period = first_bank_frames * 2
-        first_refill_b = first_bank_frames // 2
-        first_refill_a = first_bank_frames + first_refill_b
+        first_refill_b = 4_u32
+        first_refill_a = first_bank_frames + 4_u32
         IO::ByteFormat::LittleEndian.encode(first_period, base_elf[text_off + 0x18E0, 4])
         IO::ByteFormat::LittleEndian.encode(first_refill_a, base_elf[text_off + 0x18E4, 4])
         IO::ByteFormat::LittleEndian.encode(first_refill_b, base_elf[text_off + 0x18E8, 4])
@@ -868,14 +868,19 @@ module Citrine
         mips.addu(A0, S4, T5)   # A0 = sector to read from disc!
         mips.ori(A1, ZERO, 8)   # A1 = 8 sectors (16 KB)
         mips.addiu(A2, S0, 0x1A00) # A2 = staging_buf (16 KB at S0 + 0x1A00)
-        mips.addiu(A3, S0, 0x0b6c) # A3 = &mode (sceCdRMode struct)
-        mips.addiu(T9, S0, 0x0b54) # sceCdRead (stub at 0x0b54)
+        mips.addiu(A3, S0, 0x0bfc) # A3 = &mode (sceCdRMode struct)
+        mips.addiu(T9, S0, 0x0be4) # sceCdRead (stub at 0x0be4)
         mips.jalr(T9); mips.nop
 
         # sceCdSync(0)
         mips.move(A0, ZERO)
-        mips.addiu(T9, S0, 0x0b5c) # sceCdSync (stub at 0x0b5c)
+        mips.addiu(T9, S0, 0x0bec) # sceCdSync (stub at 0x0bec)
         mips.jalr(T9); mips.nop
+
+        # Compensate frame_counter for time spent blocking in sceCdSync (~12 frames = ~200ms)
+        mips.lw(T0, 0x1918, S0)
+        mips.addiu(T0, T0, 12)
+        mips.sw(T0, 0x1918, S0)
 
         # Print refill message
         mips.bal("load_refill_msg")
@@ -1024,6 +1029,13 @@ module Citrine
         mips.ori(A1, A1, 0x5000)
         mips.jalr(T9); mips.nop
 
+        # Set Voice 0 Loop Address (LSA = 0x2060) to 0x15000
+        mips.addiu(T9, S0, 0x0f1c) # sceSdSetAddr
+        mips.ori(A0, ZERO, 0x2060)  # SD_VA_LSA
+        mips.lui(A1, 0x0001)
+        mips.ori(A1, A1, 0x5000)
+        mips.jalr(T9); mips.nop
+
         # Set Voice 0 Pitch & dynamic frame timing:
         mips.sll(T2, S6, 3)     # S6 * 8
         mips.addiu(T3, S0, 0x1920)
@@ -1031,18 +1043,18 @@ module Citrine
         mips.lhu(A1, 6, T3)     # pitch_reg
         mips.bnez(A1, "pitch_val_ok")
         mips.nop
-        mips.ori(A1, ZERO, 0x075A)
+        mips.ori(A1, ZERO, 0x02AB)
         mips.label("pitch_val_ok")
         mips.sw(A1, 0x18EC, S0) # cur_pitch
 
-        # Compute dynamic bank frames: bank_frames = 146931 // pitch_reg
+        # Compute dynamic bank frames: bank_frames = 146800 // pitch_reg
         mips.lui(T0, 0x0002)
-        mips.ori(T0, T0, 0x3DF3) # 146931
+        mips.ori(T0, T0, 0x3D70) # 146800 = 0x00023D70
         mips.divu(T0, A1)
         mips.mflo(T1)            # T1 = bank_frames
         mips.sll(T2, T1, 1)      # T2 = period_frames = bank_frames * 2
-        mips.srl(T3, T1, 1)      # T3 = refill_b_frame = bank_frames / 2
-        mips.addu(T4, T1, T3)    # T4 = refill_a_frame = bank_frames + refill_b_frame
+        mips.ori(T3, ZERO, 4)    # T3 = refill_b_frame = 4
+        mips.addiu(T4, T1, 4)    # T4 = refill_a_frame = bank_frames + 4
         mips.sw(T2, 0x18E0, S0)  # period_frames
         mips.sw(T4, 0x18E4, S0)  # refill_a_frame
         mips.sw(T3, 0x18E8, S0)  # refill_b_frame
@@ -1064,6 +1076,10 @@ module Citrine
         mips.addiu(T9, S0, 0x0f0c)
         mips.ori(A0, ZERO, 0x0a80); mips.move(A1, S7); mips.jalr(T9); mips.nop
 
+        # Reset frame_counter and next_bank right before voice key-on
+        mips.sw(ZERO, 0x1908, S0) # next_bank = 0
+        mips.sw(ZERO, 0x1918, S0) # frame_counter = 0
+
         # Key on Voice 0:
         mips.addiu(T9, S0, 0x0f14)
         mips.ori(A0, ZERO, 0x1500) # SD_S_KON
@@ -1077,6 +1093,9 @@ module Citrine
 
         mips.resolve!
         engine_bytes = mips.to_slice
+        if engine_bytes.size > (0xbd0 - 0x4dc)
+          raise "Streaming engine code too large: #{engine_bytes.size} bytes > #{0xbd0 - 0x4dc} bytes max"
+        end
         base_elf[text_off + 0x4dc, engine_bytes.size].copy_from(engine_bytes)
 
         # Hook at 0x0c90 to jump to entry

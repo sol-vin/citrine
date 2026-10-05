@@ -699,6 +699,26 @@ module Citrine
           end
         end
 
+        if !needs_regen && existing_cas
+          first_cas = Dir.children(base_dir).find { |f| f =~ /^track\d+\.cas$/i }
+          if first_cas
+            f_path = File.join(base_dir, first_cas)
+            if File.size(f_path) >= 16
+              hdr_bytes = Bytes.new(16)
+              has_hdr = File.open(f_path) do |f|
+                f.read_fully?(hdr_bytes) != nil
+              end rescue false
+              if has_hdr && hdr_bytes[0, 4] == Bytes[0x43, 0x41, 0x53, 0x01]
+                cas_sr = IO::ByteFormat::LittleEndian.decode(UInt32, hdr_bytes[8, 4])
+                target_sr = Citrine::Importers::CasConfig.new(bitrate: bitrate).sample_rate.to_u32
+                if cas_sr != target_sr
+                  needs_regen = true
+                end
+              end
+            end
+          end
+        end
+
         if needs_regen
           Citrine::Importers::FluoriteMedia.import_stream_album(album_dir, base_dir, bitrate: bitrate) rescue nil
         end
