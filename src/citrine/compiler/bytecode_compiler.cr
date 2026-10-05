@@ -289,7 +289,7 @@ module Citrine
 
       # Return at end of main
       ret_reg = allocator.alloc_temp
-      fn_instructions << Instruction.encode_abc(Opcode::LoadNil, ret_reg, 0_u8, 0_u8)
+      fn_instructions << Instruction.encode_load_nil(ret_reg)
       fn_instructions << Instruction.encode_ab_imm(Opcode::Return, ret_reg, 0_u16)
       main_fn.num_registers = allocator.max_registers
       main_fn.instructions = fn_instructions
@@ -580,7 +580,7 @@ module Citrine
       allocator.free_temp(cond_reg)
 
       ret_reg = allocator.alloc_temp
-      instructions << Instruction.encode_abc(Opcode::LoadNil, ret_reg, 0_u8, 0_u8)
+      instructions << Instruction.encode_load_nil(ret_reg)
       ret_reg
     end
 
@@ -604,7 +604,7 @@ module Citrine
         end
 
         if assembled_words.empty?
-          instructions << Instruction.encode_ab_imm(Opcode::LoadInt, dest, 0_u16)
+          instructions << Instruction.encode_load_int(dest, 0_u16)
         else
           assembled_words.each_with_index do |word, idx|
             const_idx = add_constant(ConstValue.new(ConstType::Int32, int_val: word.to_i32!, uint_val: word))
@@ -632,7 +632,7 @@ module Citrine
           val_reg = compile_node(node.value, allocator, instructions, fn)
           f_idx = cls.field_index(node.target.to_s)
           f_reg = allocator.alloc_temp
-          instructions << Instruction.encode_ab_imm(Opcode::LoadInt, f_reg, f_idx.to_u16)
+          instructions << Instruction.encode_load_int(f_reg, f_idx.to_u16)
           seq_base = allocator.alloc_contiguous(3)
           instructions << Instruction.encode_abc(Opcode::Move, seq_base, self_reg, 0_u8)
           instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, f_reg, 0_u8)
@@ -655,7 +655,7 @@ module Citrine
           addr_val = CLASS_PROP_BASE + (prop_offset.to_u32 * 4)
           addr_reg = allocator.alloc_temp
           idx_reg = allocator.alloc_temp
-          instructions << Instruction.encode_ab_imm(Opcode::LoadInt, idx_reg, 0_u16)
+          instructions << Instruction.encode_load_int(idx_reg, 0_u16)
           c_idx = add_constant(ConstValue.new(ConstType::Int32, int_val: addr_val.to_i32))
           instructions << Instruction.encode_ab_imm(Opcode::LoadConst, addr_reg, c_idx.to_u16)
           seq_base = allocator.alloc_contiguous(3)
@@ -759,7 +759,7 @@ module Citrine
         else
           # Unknown local, allocate
           reg = allocator.allocate_local(name)
-          instructions << Instruction.encode_abc(Opcode::LoadNil, reg, 0_u8, 0_u8)
+          instructions << Instruction.encode_load_nil(reg)
           reg
         end
 
@@ -773,7 +773,7 @@ module Citrine
                   clean_str.to_i64? || clean_str.to_u64?.try(&.to_i64!) || 0_i64
                 end
           if v64 >= -32768 && v64 <= 32767
-            instructions << Instruction.encode_ab_imm(Opcode::LoadInt, dest, v64.to_u16!)
+            instructions << Instruction.encode_load_int(dest, v64.to_u16!)
           else
             const_idx = add_constant(ConstValue.new(ConstType::Int32, int_val: v64.to_i32!, uint_val: v64.to_u32!))
             instructions << Instruction.encode_ab_imm(Opcode::LoadConst, dest, const_idx.to_u16)
@@ -797,12 +797,12 @@ module Citrine
 
       when Crystal::BoolLiteral
         dest = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadBool, dest, node.value ? 1_u16 : 0_u16)
+        instructions << Instruction.encode_load_bool(dest, node.value)
         dest
 
       when Crystal::NilLiteral
         dest = allocator.alloc_temp
-        instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+        instructions << Instruction.encode_load_nil(dest)
         dest
 
       when Crystal::And
@@ -839,8 +839,8 @@ module Citrine
         # Not: if true -> false, if false -> true
         # Compare with false/nil
         false_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadBool, false_reg, 0_u16)
-        instructions << Instruction.encode_abc(Opcode::Eq, dest, inner_reg, false_reg)
+        instructions << Instruction.encode_load_bool(false_reg, false)
+        instructions << Instruction.encode_cmp(CompareSubOp::Eq, dest, inner_reg, false_reg)
         allocator.free_temp(inner_reg)
         allocator.free_temp(false_reg)
         dest
@@ -940,7 +940,7 @@ module Citrine
         end
 
         allocator.free_temp(cond_reg)
-        instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+        instructions << Instruction.encode_load_nil(dest)
         dest
 
       when Crystal::Until
@@ -976,7 +976,7 @@ module Citrine
         end
 
         allocator.free_temp(cond_reg)
-        instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+        instructions << Instruction.encode_load_nil(dest)
         dest
 
       when Crystal::Break
@@ -986,7 +986,7 @@ module Citrine
         if @loop_break_jumps.size > 0
           @loop_break_jumps.last << j
         end
-        instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+        instructions << Instruction.encode_load_nil(dest)
         dest
 
       when Crystal::Next
@@ -996,7 +996,7 @@ module Citrine
         if @loop_next_jumps.size > 0
           @loop_next_jumps.last << j
         end
-        instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+        instructions << Instruction.encode_load_nil(dest)
         dest
 
       when Crystal::Call
@@ -1013,7 +1013,7 @@ module Citrine
         dest = allocator.alloc_temp
         val = resolve_constant_path(node)
         if val.type == ConstType::Int32 && val.int_val >= -32768 && val.int_val <= 32767
-          instructions << Instruction.encode_ab_imm(Opcode::LoadInt, dest, val.int_val.to_u16!)
+          instructions << Instruction.encode_load_int(dest, val.int_val.to_u16!)
         else
           const_idx = add_constant(val)
           instructions << Instruction.encode_ab_imm(Opcode::LoadConst, dest, const_idx.to_u16)
@@ -1026,7 +1026,7 @@ module Citrine
                     compile_node(ret_val, allocator, instructions, fn)
                   else
                     r = allocator.alloc_temp
-                    instructions << Instruction.encode_abc(Opcode::LoadNil, r, 0_u8, 0_u8)
+                    instructions << Instruction.encode_load_nil(r)
                     r
                   end
         instructions << Instruction.encode_ab_imm(Opcode::Return, ret_reg, 0_u16)
@@ -1037,7 +1037,7 @@ module Citrine
         if (cls = @current_class) && (self_reg = @current_self_reg)
           f_idx = cls.field_index(node.name)
           f_reg = allocator.alloc_temp
-          instructions << Instruction.encode_ab_imm(Opcode::LoadInt, f_reg, f_idx.to_u16)
+          instructions << Instruction.encode_load_int(f_reg, f_idx.to_u16)
           seq_base = allocator.alloc_contiguous(2)
           instructions << Instruction.encode_abc(Opcode::Move, seq_base, self_reg, 0_u8)
           instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, f_reg, 0_u8)
@@ -1047,7 +1047,7 @@ module Citrine
           allocator.free_temp(seq_base)
           allocator.free_temp((seq_base + 1).to_u8)
         else
-          instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+          instructions << Instruction.encode_load_nil(dest)
         end
         dest
 
@@ -1060,7 +1060,7 @@ module Citrine
         addr_val = CLASS_PROP_BASE + (prop_offset.to_u32 * 4)
         addr_reg = allocator.alloc_temp
         idx_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, idx_reg, 0_u16)
+        instructions << Instruction.encode_load_int(idx_reg, 0_u16)
         c_idx = add_constant(ConstValue.new(ConstType::Int32, int_val: addr_val.to_i32))
         instructions << Instruction.encode_ab_imm(Opcode::LoadConst, addr_reg, c_idx.to_u16)
         seq_base = allocator.alloc_contiguous(2)
@@ -1079,7 +1079,7 @@ module Citrine
         if self_reg = @current_self_reg
           instructions << Instruction.encode_abc(Opcode::Move, dest, self_reg, 0_u8)
         else
-          instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+          instructions << Instruction.encode_load_nil(dest)
         end
         dest
 
@@ -1087,7 +1087,7 @@ module Citrine
         dest = allocator.alloc_temp
         cap = node.elements.size > 0 ? node.elements.size : 4
         cap_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, cap_reg, cap.to_u16)
+        instructions << Instruction.encode_load_int(cap_reg, cap.to_u16)
         instr_val = Instruction.call_native_raw(dest, cap_reg, NativeId::ArrayNew)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(cap_reg)
@@ -1131,10 +1131,10 @@ module Citrine
         target_ids.uniq!
 
         if target_ids.empty?
-          instructions << Instruction.encode_ab_imm(Opcode::LoadBool, dest, 0_u16)
+          instructions << Instruction.encode_load_bool(dest, false)
         elsif target_ids.size == 1
           tid_reg = allocator.alloc_temp
-          instructions << Instruction.encode_ab_imm(Opcode::LoadInt, tid_reg, target_ids[0].to_u16)
+          instructions << Instruction.encode_load_int(tid_reg, target_ids[0].to_u16)
           seq_base = allocator.alloc_contiguous(2)
           instructions << Instruction.encode_abc(Opcode::Move, seq_base, obj_reg, 0_u8)
           instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
@@ -1145,12 +1145,12 @@ module Citrine
           allocator.free_temp((seq_base + 1).to_u8)
         else
           match_dest = allocator.alloc_temp
-          instructions << Instruction.encode_ab_imm(Opcode::LoadBool, match_dest, 0_u16)
+          instructions << Instruction.encode_load_bool(match_dest, false)
           jump_end_indices = [] of Int32
 
           target_ids.each do |tid|
             tid_reg = allocator.alloc_temp
-            instructions << Instruction.encode_ab_imm(Opcode::LoadInt, tid_reg, tid.to_u16)
+            instructions << Instruction.encode_load_int(tid_reg, tid.to_u16)
             seq_base = allocator.alloc_contiguous(2)
             instructions << Instruction.encode_abc(Opcode::Move, seq_base, obj_reg, 0_u8)
             instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
@@ -1163,7 +1163,7 @@ module Citrine
 
             j_next = instructions.size
             instructions << Instruction.encode_jump_if_false(cur_check, 0_i16)
-            instructions << Instruction.encode_ab_imm(Opcode::LoadBool, match_dest, 1_u16)
+            instructions << Instruction.encode_load_bool(match_dest, true)
             j_end = instructions.size
             instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, 0_i16)
             jump_end_indices << j_end
@@ -1187,7 +1187,7 @@ module Citrine
         target_name = node.to.to_s
         target_id = resolve_type_id(target_name) || 0_u32
         tid_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, tid_reg, target_id.to_u16)
+        instructions << Instruction.encode_load_int(tid_reg, target_id.to_u16)
         seq_base = allocator.alloc_contiguous(2)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, obj_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
@@ -1225,10 +1225,10 @@ module Citrine
         target_ids.uniq!
 
         if target_ids.empty?
-          instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+          instructions << Instruction.encode_load_nil(dest)
         elsif target_ids.size == 1
           tid_reg = allocator.alloc_temp
-          instructions << Instruction.encode_ab_imm(Opcode::LoadInt, tid_reg, target_ids[0].to_u16)
+          instructions << Instruction.encode_load_int(tid_reg, target_ids[0].to_u16)
           seq_base = allocator.alloc_contiguous(2)
           instructions << Instruction.encode_abc(Opcode::Move, seq_base, obj_reg, 0_u8)
           instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
@@ -1247,16 +1247,16 @@ module Citrine
           instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, 0_i16)
 
           instructions[jump_nil] = Instruction.encode_jump_if_false(is_match, (instructions.size - jump_nil - 1).to_i16)
-          instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+          instructions << Instruction.encode_load_nil(dest)
           instructions[jump_end] = Instruction.encode_branch(Opcode::Jump, 0_u8, (instructions.size - jump_end - 1).to_i16)
         else
           match_dest = allocator.alloc_temp
-          instructions << Instruction.encode_ab_imm(Opcode::LoadBool, match_dest, 0_u16)
+          instructions << Instruction.encode_load_bool(match_dest, false)
           jump_end_indices = [] of Int32
 
           target_ids.each do |tid|
             tid_reg = allocator.alloc_temp
-            instructions << Instruction.encode_ab_imm(Opcode::LoadInt, tid_reg, tid.to_u16)
+            instructions << Instruction.encode_load_int(tid_reg, tid.to_u16)
             seq_base = allocator.alloc_contiguous(2)
             instructions << Instruction.encode_abc(Opcode::Move, seq_base, obj_reg, 0_u8)
             instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
@@ -1271,7 +1271,7 @@ module Citrine
             instructions << Instruction.encode_jump_if_false(cur_check, 0_i16)
             allocator.free_temp(cur_check)
 
-            instructions << Instruction.encode_ab_imm(Opcode::LoadBool, match_dest, 1_u16)
+            instructions << Instruction.encode_load_bool(match_dest, true)
             jump_end_indices << instructions.size
             instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, 0_i16)
 
@@ -1291,7 +1291,7 @@ module Citrine
           instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, 0_i16)
 
           instructions[jump_nil] = Instruction.encode_jump_if_false(match_dest, (instructions.size - jump_nil - 1).to_i16)
-          instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+          instructions << Instruction.encode_load_nil(dest)
           instructions[jump_end] = Instruction.encode_branch(Opcode::Jump, 0_u8, (instructions.size - jump_end - 1).to_i16)
         end
         allocator.free_temp(obj_reg)
@@ -1314,12 +1314,12 @@ module Citrine
         end
 
         if matching_classes.empty?
-          instructions << Instruction.encode_ab_imm(Opcode::LoadBool, dest, 0_u16)
+          instructions << Instruction.encode_load_bool(dest, false)
         else
           target_ids = matching_classes.map(&.class_id).uniq
           if target_ids.size == 1
             tid_reg = allocator.alloc_temp
-            instructions << Instruction.encode_ab_imm(Opcode::LoadInt, tid_reg, target_ids[0].to_u16)
+            instructions << Instruction.encode_load_int(tid_reg, target_ids[0].to_u16)
             seq_base = allocator.alloc_contiguous(2)
             instructions << Instruction.encode_abc(Opcode::Move, seq_base, obj_reg, 0_u8)
             instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
@@ -1330,12 +1330,12 @@ module Citrine
             allocator.free_temp((seq_base + 1).to_u8)
           else
             match_dest = allocator.alloc_temp
-            instructions << Instruction.encode_ab_imm(Opcode::LoadBool, match_dest, 0_u16)
+            instructions << Instruction.encode_load_bool(match_dest, false)
             jump_end_indices = [] of Int32
 
             target_ids.each do |tid|
               tid_reg = allocator.alloc_temp
-              instructions << Instruction.encode_ab_imm(Opcode::LoadInt, tid_reg, tid.to_u16)
+              instructions << Instruction.encode_load_int(tid_reg, tid.to_u16)
               seq_base = allocator.alloc_contiguous(2)
               instructions << Instruction.encode_abc(Opcode::Move, seq_base, obj_reg, 0_u8)
               instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
@@ -1350,7 +1350,7 @@ module Citrine
               instructions << Instruction.encode_jump_if_false(cur_check, 0_i16)
               allocator.free_temp(cur_check)
 
-              instructions << Instruction.encode_ab_imm(Opcode::LoadBool, match_dest, 1_u16)
+              instructions << Instruction.encode_load_bool(match_dest, true)
               jump_end_indices << instructions.size
               instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, 0_i16)
 
@@ -1378,7 +1378,7 @@ module Citrine
           compile_node(assign, allocator, instructions, fn)
         else
           local_reg = allocator.allocate_local(target_name)
-          instructions << Instruction.encode_abc(Opcode::LoadNil, local_reg, 0_u8, 0_u8)
+          instructions << Instruction.encode_load_nil(local_reg)
           local_reg
         end
 
@@ -1399,7 +1399,7 @@ module Citrine
 
       else
         dest = allocator.alloc_temp
-        instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+        instructions << Instruction.encode_load_nil(dest)
         dest
       end
     end
@@ -1429,17 +1429,17 @@ module Citrine
               to_reg = compile_node(c.to, allocator, instructions, fn)
 
               ge_reg = allocator.alloc_temp
-              instructions << Instruction.encode_abc(Opcode::Ge, ge_reg, cond_reg, from_reg)
+              instructions << Instruction.encode_cmp(CompareSubOp::Ge, ge_reg, cond_reg, from_reg)
 
               le_reg = allocator.alloc_temp
               if c.exclusive?
-                instructions << Instruction.encode_abc(Opcode::Lt, le_reg, cond_reg, to_reg)
+                instructions << Instruction.encode_cmp(CompareSubOp::Lt, le_reg, cond_reg, to_reg)
               else
-                instructions << Instruction.encode_abc(Opcode::Le, le_reg, cond_reg, to_reg)
+                instructions << Instruction.encode_cmp(CompareSubOp::Le, le_reg, cond_reg, to_reg)
               end
 
               range_match = allocator.alloc_temp
-              instructions << Instruction.encode_abc(Opcode::BitAnd, range_match, ge_reg, le_reg)
+              instructions << Instruction.encode_rrr(Opcode::Bitwise, BitwiseSubOp::And.value, range_match, ge_reg, le_reg)
               allocator.free_temp(from_reg)
               allocator.free_temp(to_reg)
               allocator.free_temp(ge_reg)
@@ -1478,10 +1478,10 @@ module Citrine
 
               type_match = allocator.alloc_temp
               if target_ids.empty?
-                instructions << Instruction.encode_ab_imm(Opcode::LoadBool, type_match, 0_u16)
+                instructions << Instruction.encode_load_bool(type_match, false)
               elsif target_ids.size == 1
                 tid_reg = allocator.alloc_temp
-                instructions << Instruction.encode_ab_imm(Opcode::LoadInt, tid_reg, target_ids[0].to_u16)
+                instructions << Instruction.encode_load_int(tid_reg, target_ids[0].to_u16)
                 seq_base = allocator.alloc_contiguous(2)
                 instructions << Instruction.encode_abc(Opcode::Move, seq_base, cond_reg, 0_u8)
                 instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
@@ -1491,11 +1491,11 @@ module Citrine
                 allocator.free_temp(seq_base)
                 allocator.free_temp((seq_base + 1).to_u8)
               else
-                instructions << Instruction.encode_ab_imm(Opcode::LoadBool, type_match, 0_u16)
+                instructions << Instruction.encode_load_bool(type_match, false)
                 tid_jump_ends = [] of Int32
                 target_ids.each do |tid|
                   tid_reg = allocator.alloc_temp
-                  instructions << Instruction.encode_ab_imm(Opcode::LoadInt, tid_reg, tid.to_u16)
+                  instructions << Instruction.encode_load_int(tid_reg, tid.to_u16)
                   seq_base = allocator.alloc_contiguous(2)
                   instructions << Instruction.encode_abc(Opcode::Move, seq_base, cond_reg, 0_u8)
                   instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
@@ -1508,7 +1508,7 @@ module Citrine
 
                   j_next = instructions.size
                   instructions << Instruction.encode_jump_if_false(cur_check, 0_i16)
-                  instructions << Instruction.encode_ab_imm(Opcode::LoadBool, type_match, 1_u16)
+                  instructions << Instruction.encode_load_bool(type_match, true)
                   j_done = instructions.size
                   instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, 0_i16)
                   tid_jump_ends << j_done
@@ -1535,7 +1535,7 @@ module Citrine
             else
               val_reg = compile_node(c, allocator, instructions, fn)
               eq_reg = allocator.alloc_temp
-              instructions << Instruction.encode_abc(Opcode::Eq, eq_reg, cond_reg, val_reg)
+              instructions << Instruction.encode_cmp(CompareSubOp::Eq, eq_reg, cond_reg, val_reg)
               allocator.free_temp(val_reg)
 
               if is_last_cond
@@ -1618,10 +1618,10 @@ module Citrine
           instructions << Instruction.encode_abc(Opcode::Move, dest, el_reg, 0_u8)
           allocator.free_temp(el_reg)
         else
-          instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+          instructions << Instruction.encode_load_nil(dest)
         end
       else
-        instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+        instructions << Instruction.encode_load_nil(dest)
       end
 
       end_pos = instructions.size
@@ -1786,7 +1786,7 @@ module Citrine
         end
 
         if assembled_words.empty?
-          instructions << Instruction.encode_ab_imm(Opcode::LoadInt, dest, 0_u16)
+          instructions << Instruction.encode_load_int(dest, 0_u16)
         else
           assembled_words.each_with_index do |word, idx|
             const_idx = add_constant(ConstValue.new(ConstType::Int32, int_val: word.to_i32!, uint_val: word))
@@ -1838,48 +1838,45 @@ module Citrine
 
         left_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
         right_reg = compile_node(node.args[0], allocator, instructions, fn)
-        op = case node.name
-             when "+" then Opcode::Add
-             when "&+" then Opcode::Add
-             when "-" then Opcode::Sub
-             when "&-" then Opcode::Sub
-             when "*" then Opcode::Mul
-             when "&*" then Opcode::Mul
-             when "/", "//" then Opcode::Div
-             when "%" then Opcode::Mod
-             when "&" then Opcode::BitAnd
-             when "|" then Opcode::BitOr
-             when "^" then Opcode::BitXor
-             when "<<" then Opcode::ShiftLeft
-             when ">>" then Opcode::ShiftRight
-             when "==" then Opcode::Eq
-             when "!=" then Opcode::Ne
-             when "<" then Opcode::Lt
-             when "<=" then Opcode::Le
-             when ">" then Opcode::Gt
-             when ">=" then Opcode::Ge
-             else Opcode::Add
-             end
-        instructions << Instruction.encode_abc(op, dest, left_reg, right_reg)
+        op, subop = case node.name
+                    when "+", "&+" then {Opcode::Add, AddSubOp::AddI32.value}
+                    when "-", "&-" then {Opcode::Sub, SubSubOp::SubI32.value}
+                    when "*", "&*" then {Opcode::Mul, MulSubOp::MulLo.value}
+                    when "/", "//" then {Opcode::DivMod, DivModSubOp::DivS32.value}
+                    when "%"       then {Opcode::DivMod, DivModSubOp::ModS32.value}
+                    when "&"       then {Opcode::Bitwise, BitwiseSubOp::And.value}
+                    when "|"       then {Opcode::Bitwise, BitwiseSubOp::Or.value}
+                    when "^"       then {Opcode::Bitwise, BitwiseSubOp::Xor.value}
+                    when "<<"      then {Opcode::Shift, ShiftSubOp::Sll.value}
+                    when ">>"      then {Opcode::Shift, ShiftSubOp::Sra.value}
+                    when "=="      then {Opcode::Compare, CompareSubOp::Eq.value}
+                    when "!="      then {Opcode::Compare, CompareSubOp::Ne.value}
+                    when "<"       then {Opcode::Compare, CompareSubOp::Lt.value}
+                    when "<="      then {Opcode::Compare, CompareSubOp::Le.value}
+                    when ">"       then {Opcode::Compare, CompareSubOp::Gt.value}
+                    when ">="      then {Opcode::Compare, CompareSubOp::Ge.value}
+                    else {Opcode::Add, AddSubOp::AddI32.value}
+                    end
+        instructions << Instruction.encode_rrr(op, subop, dest, left_reg, right_reg)
         allocator.free_temp(left_reg)
         allocator.free_temp(right_reg)
         return dest
       elsif node.name == "!" && node.obj
         inner_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
         false_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadBool, false_reg, 0_u16)
-        instructions << Instruction.encode_abc(Opcode::Eq, dest, inner_reg, false_reg)
+        instructions << Instruction.encode_load_bool(false_reg, false)
+        instructions << Instruction.encode_cmp(CompareSubOp::Eq, dest, inner_reg, false_reg)
         allocator.free_temp(inner_reg)
         allocator.free_temp(false_reg)
         return dest
       elsif node.name == "-" && node.obj && node.args.empty?
         inner_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        instructions << Instruction.encode_abc(Opcode::Neg, dest, inner_reg, 0_u8)
+        instructions << Instruction.encode_rrr(Opcode::Sub, SubSubOp::NegI32.value, dest, inner_reg, 0_u8)
         allocator.free_temp(inner_reg)
         return dest
       elsif node.name == "~" && node.obj && node.args.empty?
         inner_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        instructions << Instruction.encode_abc(Opcode::BitNot, dest, inner_reg, 0_u8)
+        instructions << Instruction.encode_rrr(Opcode::Bitwise, BitwiseSubOp::Nor.value, dest, inner_reg, 0_u8)
         allocator.free_temp(inner_reg)
         return dest
       end
@@ -1907,7 +1904,7 @@ module Citrine
 
       # Concurrency: yield
       if node.name == "yield" && (obj_str.empty? || obj_str == "Citrine" || obj_str == "Fiber")
-        instructions << Instruction.encode_abc(Opcode::Yield, 0_u8, 0_u8, 0_u8)
+        instructions << Instruction.encode_yield
         return dest
       end
 
@@ -1917,7 +1914,7 @@ module Citrine
                     compile_node(node.args[0], allocator, instructions, fn)
                   else
                     r = allocator.alloc_temp
-                    instructions << Instruction.encode_ab_imm(Opcode::LoadInt, r, 32_u16)
+                    instructions << Instruction.encode_load_int(r, 32_u16)
                     r
                   end
         instr_val = Instruction.call_native_raw(dest, cap_reg, NativeId::ChannelNew)
@@ -2066,7 +2063,7 @@ module Citrine
           end
 
           if @release_mode && (native_id == NativeId::Log || native_id == NativeId::DebugLog || native_id == NativeId::SetDebugOverlay)
-            instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+            instructions << Instruction.encode_load_nil(dest)
             return dest
           end
 
@@ -2104,7 +2101,7 @@ module Citrine
       if obj_str == "Vector2" && node.name == "new"
         x_reg = compile_node(node.args[0], allocator, instructions, fn)
         y_reg = compile_node(node.args[1], allocator, instructions, fn)
-        instructions << Instruction.encode_abc(Opcode::Vec2New, dest, x_reg, y_reg)
+        instructions << Instruction.encode_vec2_new(dest, x_reg, y_reg)
         allocator.free_temp(x_reg)
         allocator.free_temp(y_reg)
         return dest
@@ -2145,45 +2142,45 @@ module Citrine
         else
           r_reg = node.args.size > 0 ? compile_node(node.args[0], allocator, instructions, fn) : begin
             t = allocator.alloc_temp
-            instructions << Instruction.encode_ab_imm(Opcode::LoadInt, t, 0_u16)
+            instructions << Instruction.encode_load_int(t, 0_u16)
             t
           end
           g_reg = node.args.size > 1 ? compile_node(node.args[1], allocator, instructions, fn) : begin
             t = allocator.alloc_temp
-            instructions << Instruction.encode_ab_imm(Opcode::LoadInt, t, 0_u16)
+            instructions << Instruction.encode_load_int(t, 0_u16)
             t
           end
           b_reg = node.args.size > 2 ? compile_node(node.args[2], allocator, instructions, fn) : begin
             t = allocator.alloc_temp
-            instructions << Instruction.encode_ab_imm(Opcode::LoadInt, t, 0_u16)
+            instructions << Instruction.encode_load_int(t, 0_u16)
             t
           end
           a_reg = node.args.size > 3 ? compile_node(node.args[3], allocator, instructions, fn) : begin
             t = allocator.alloc_temp
-            instructions << Instruction.encode_ab_imm(Opcode::LoadInt, t, 255_u16)
+            instructions << Instruction.encode_load_int(t, 255_u16)
             t
           end
 
           shift8 = allocator.alloc_temp
-          instructions << Instruction.encode_ab_imm(Opcode::LoadInt, shift8, 8_u16)
+          instructions << Instruction.encode_load_int(shift8, 8_u16)
           g_sh = allocator.alloc_temp
-          instructions << Instruction.encode_abc(Opcode::ShiftLeft, g_sh, g_reg, shift8)
+          instructions << Instruction.encode_rrr(Opcode::Shift, ShiftSubOp::Sll.value, g_sh, g_reg, shift8)
 
           shift16 = allocator.alloc_temp
-          instructions << Instruction.encode_ab_imm(Opcode::LoadInt, shift16, 16_u16)
+          instructions << Instruction.encode_load_int(shift16, 16_u16)
           b_sh = allocator.alloc_temp
-          instructions << Instruction.encode_abc(Opcode::ShiftLeft, b_sh, b_reg, shift16)
+          instructions << Instruction.encode_rrr(Opcode::Shift, ShiftSubOp::Sll.value, b_sh, b_reg, shift16)
 
           shift24 = allocator.alloc_temp
-          instructions << Instruction.encode_ab_imm(Opcode::LoadInt, shift24, 24_u16)
+          instructions << Instruction.encode_load_int(shift24, 24_u16)
           a_sh = allocator.alloc_temp
-          instructions << Instruction.encode_abc(Opcode::ShiftLeft, a_sh, a_reg, shift24)
+          instructions << Instruction.encode_rrr(Opcode::Shift, ShiftSubOp::Sll.value, a_sh, a_reg, shift24)
 
           t1 = allocator.alloc_temp
-          instructions << Instruction.encode_abc(Opcode::BitOr, t1, r_reg, g_sh)
+          instructions << Instruction.encode_rrr(Opcode::Bitwise, BitwiseSubOp::Or.value, t1, r_reg, g_sh)
           t2 = allocator.alloc_temp
-          instructions << Instruction.encode_abc(Opcode::BitOr, t2, t1, b_sh)
-          instructions << Instruction.encode_abc(Opcode::BitOr, dest, t2, a_sh)
+          instructions << Instruction.encode_rrr(Opcode::Bitwise, BitwiseSubOp::Or.value, t2, t1, b_sh)
+          instructions << Instruction.encode_rrr(Opcode::Bitwise, BitwiseSubOp::Or.value, dest, t2, a_sh)
 
           allocator.free_temp(r_reg)
           allocator.free_temp(g_reg)
@@ -2206,21 +2203,21 @@ module Citrine
       if !has_class_method
         if node.name == "x" && node.obj
           obj_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-          instructions << Instruction.encode_abc(Opcode::Vec2GetX, dest, obj_reg, 0_u8)
+          instructions << Instruction.encode_vec2_get_x(dest, obj_reg)
           return dest
         elsif node.name == "y" && node.obj
           obj_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-          instructions << Instruction.encode_abc(Opcode::Vec2GetY, dest, obj_reg, 0_u8)
+          instructions << Instruction.encode_vec2_get_y(dest, obj_reg)
           return dest
         elsif node.name == "x=" && node.obj && node.args.size > 0
           obj_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
           val_reg = compile_node(node.args[0], allocator, instructions, fn)
-          instructions << Instruction.encode_abc(Opcode::Vec2SetX, obj_reg, val_reg, 0_u8)
+          instructions << Instruction.encode_vec2_set_x(obj_reg, val_reg)
           return obj_reg
         elsif node.name == "y=" && node.obj && node.args.size > 0
           obj_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
           val_reg = compile_node(node.args[0], allocator, instructions, fn)
-          instructions << Instruction.encode_abc(Opcode::Vec2SetY, obj_reg, val_reg, 0_u8)
+          instructions << Instruction.encode_vec2_set_y(obj_reg, val_reg)
           return obj_reg
         end
       end
@@ -2230,7 +2227,7 @@ module Citrine
       if node.name == "times" && node.obj && (block = node.block)
         count_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
         iter_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, iter_reg, 0_u16)
+        instructions << Instruction.encode_load_int(iter_reg, 0_u16)
 
         if block_arg = block.args.first?
           allocator.allocate_local(block_arg.name)
@@ -2241,7 +2238,7 @@ module Citrine
 
         loop_start = instructions.size
         cond_reg = allocator.alloc_temp
-        instructions << Instruction.encode_abc(Opcode::Lt, cond_reg, iter_reg, count_reg)
+        instructions << Instruction.encode_cmp(CompareSubOp::Lt, cond_reg, iter_reg, count_reg)
         exit_jump_idx = instructions.size
         instructions << Instruction.encode_jump_if_false(cond_reg, 0_i16)
 
@@ -2251,7 +2248,7 @@ module Citrine
 
         # iter += 1
         one_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, one_reg, 1_u16)
+        instructions << Instruction.encode_load_int(one_reg, 1_u16)
         instructions << Instruction.encode_abc(Opcode::Add, iter_reg, iter_reg, one_reg)
 
         back_offset = (loop_start - instructions.size - 1).to_i16
@@ -2343,7 +2340,7 @@ module Citrine
       if node.name == "first" && node.obj && node.args.empty?
         arr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
         zero_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, zero_reg, 0_u16)
+        instructions << Instruction.encode_load_int(zero_reg, 0_u16)
         seq_base = allocator.alloc_contiguous(2)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, arr_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, zero_reg, 0_u8)
@@ -2363,7 +2360,7 @@ module Citrine
         sz_instr = Instruction.call_native_raw(sz_reg, arr_reg, NativeId::ArraySize)
         instructions << Instruction.new(sz_instr)
         one_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, one_reg, 1_u16)
+        instructions << Instruction.encode_load_int(one_reg, 1_u16)
         idx_reg = allocator.alloc_temp
         instructions << Instruction.encode_abc(Opcode::Sub, idx_reg, sz_reg, one_reg)
         allocator.free_temp(sz_reg)
@@ -2388,8 +2385,8 @@ module Citrine
         sz_instr = Instruction.call_native_raw(sz_reg, arr_reg, NativeId::ArraySize)
         instructions << Instruction.new(sz_instr)
         zero_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, zero_reg, 0_u16)
-        instructions << Instruction.encode_abc(Opcode::Eq, dest, sz_reg, zero_reg)
+        instructions << Instruction.encode_load_int(zero_reg, 0_u16)
+        instructions << Instruction.encode_cmp(CompareSubOp::Eq, dest, sz_reg, zero_reg)
         allocator.free_temp(arr_reg)
         allocator.free_temp(sz_reg)
         allocator.free_temp(zero_reg)
@@ -2422,9 +2419,9 @@ module Citrine
         loop_start = instructions.size
         cond_reg = allocator.alloc_temp
         if range.exclusive?
-          instructions << Instruction.encode_abc(Opcode::Lt, cond_reg, iter_reg, to_reg)
+          instructions << Instruction.encode_cmp(CompareSubOp::Lt, cond_reg, iter_reg, to_reg)
         else
-          instructions << Instruction.encode_abc(Opcode::Le, cond_reg, iter_reg, to_reg)
+          instructions << Instruction.encode_cmp(CompareSubOp::Le, cond_reg, iter_reg, to_reg)
         end
         exit_jump_idx = instructions.size
         instructions << Instruction.encode_jump_if_false(cond_reg, 0_i16)
@@ -2433,7 +2430,7 @@ module Citrine
         compile_node(block.body, allocator, instructions, fn)
 
         one_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, one_reg, 1_u16)
+        instructions << Instruction.encode_load_int(one_reg, 1_u16)
         instructions << Instruction.encode_abc(Opcode::Add, iter_reg, iter_reg, one_reg)
         allocator.free_temp(one_reg)
 
@@ -2457,7 +2454,7 @@ module Citrine
         instructions << Instruction.new(instr_val)
 
         iter_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, iter_reg, 0_u16)
+        instructions << Instruction.encode_load_int(iter_reg, 0_u16)
 
         block_item_reg = if block_arg = block.args.first?
                            allocator.allocate_local(block_arg.name)
@@ -2467,7 +2464,7 @@ module Citrine
 
         loop_start = instructions.size
         cond_reg = allocator.alloc_temp
-        instructions << Instruction.encode_abc(Opcode::Lt, cond_reg, iter_reg, size_reg)
+        instructions << Instruction.encode_cmp(CompareSubOp::Lt, cond_reg, iter_reg, size_reg)
         exit_jump_idx = instructions.size
         instructions << Instruction.encode_jump_if_false(cond_reg, 0_i16)
 
@@ -2482,7 +2479,7 @@ module Citrine
         compile_node(block.body, allocator, instructions, fn)
 
         one_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, one_reg, 1_u16)
+        instructions << Instruction.encode_load_int(one_reg, 1_u16)
         instructions << Instruction.encode_abc(Opcode::Add, iter_reg, iter_reg, one_reg)
         allocator.free_temp(one_reg)
 
@@ -2512,7 +2509,7 @@ module Citrine
         allocator.free_temp(cap_reg)
 
         iter_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, iter_reg, 0_u16)
+        instructions << Instruction.encode_load_int(iter_reg, 0_u16)
 
         block_item_reg = if block_arg = block.args.first?
                            allocator.allocate_local(block_arg.name)
@@ -2522,7 +2519,7 @@ module Citrine
 
         loop_start = instructions.size
         cond_reg = allocator.alloc_temp
-        instructions << Instruction.encode_abc(Opcode::Lt, cond_reg, iter_reg, size_reg)
+        instructions << Instruction.encode_cmp(CompareSubOp::Lt, cond_reg, iter_reg, size_reg)
         exit_jump_idx = instructions.size
         instructions << Instruction.encode_jump_if_false(cond_reg, 0_i16)
 
@@ -2551,7 +2548,7 @@ module Citrine
         allocator.free_temp(dummy_dest)
 
         one_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, one_reg, 1_u16)
+        instructions << Instruction.encode_load_int(one_reg, 1_u16)
         instructions << Instruction.encode_abc(Opcode::Add, iter_reg, iter_reg, one_reg)
         allocator.free_temp(one_reg)
 
@@ -2576,12 +2573,12 @@ module Citrine
           sz = $2.to_i
         end
         sz_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, sz_reg, sz.to_u16)
+        instructions << Instruction.encode_load_int(sz_reg, sz.to_u16)
         def_val_reg = if node.args.size > 0
                         compile_node(node.args[0], allocator, instructions, fn)
                       else
                         r = allocator.alloc_temp
-                        instructions << Instruction.encode_abc(Opcode::LoadNil, r, 0_u8, 0_u8)
+                        instructions << Instruction.encode_load_nil(r)
                         r
                       end
         seq_base = allocator.alloc_contiguous(2)
@@ -2602,7 +2599,7 @@ module Citrine
                  compile_node(node.args[0], allocator, instructions, fn)
                else
                  r = allocator.alloc_temp
-                 instructions << Instruction.encode_ab_imm(Opcode::LoadInt, r, 64_u16)
+                 instructions << Instruction.encode_load_int(r, 64_u16)
                  r
                end
         instr_val = Instruction.call_native_raw(dest, arg0, NativeId::MemoryIONew)
@@ -2662,7 +2659,7 @@ module Citrine
 
         ptr_reg = compile_node(obj, allocator, instructions, fn)
         zero_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, zero_reg, 0_u16)
+        instructions << Instruction.encode_load_int(zero_reg, 0_u16)
         seq_base = allocator.alloc_contiguous(2)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, ptr_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, zero_reg, 0_u8)
@@ -2679,7 +2676,7 @@ module Citrine
       if node.name == "value=" && node.obj && node.args.size == 1
         ptr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
         zero_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, zero_reg, 0_u16)
+        instructions << Instruction.encode_load_int(zero_reg, 0_u16)
         val_reg = compile_node(node.args[0], allocator, instructions, fn)
         seq_base = allocator.alloc_contiguous(3)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, ptr_reg, 0_u8)
@@ -2709,7 +2706,7 @@ module Citrine
                      compile_node(node.args[0], allocator, instructions, fn)
                    else
                      r = allocator.alloc_temp
-                     instructions << Instruction.encode_ab_imm(Opcode::LoadInt, r, 1_u16)
+                     instructions << Instruction.encode_load_int(r, 1_u16)
                      r
                    end
         instr_val = Instruction.call_native_raw(dest, size_reg, NativeId::PointerMalloc)
@@ -2791,7 +2788,7 @@ module Citrine
       # Memory Stats: Citrine::Memory.stats / Citrine::Memory.heap_bytes / memory_stats
       if ((node.name == "stats" || node.name == "heap_bytes") && obj_str.ends_with?("Memory")) || node.name == "memory_stats"
         zero_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, zero_reg, 0_u16)
+        instructions << Instruction.encode_load_int(zero_reg, 0_u16)
         instr_val = Instruction.call_native_raw(dest, zero_reg, NativeId::MemoryStats)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(zero_reg)
@@ -2832,7 +2829,7 @@ module Citrine
       # GC.collect
       if (obj_str == "GC" || obj_str.ends_with?("::GC")) && node.name == "collect"
         zero_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, zero_reg, 0_u16)
+        instructions << Instruction.encode_load_int(zero_reg, 0_u16)
         instr_val = Instruction.call_native_raw(dest, zero_reg, NativeId::GCCycle)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(zero_reg)
@@ -2912,8 +2909,8 @@ module Citrine
         instr_val = Instruction.call_native_raw(match_pos, seq_base, NativeId::RegexMatch)
         instructions << Instruction.new(instr_val)
         zero_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, zero_reg, 0_u16)
-        instructions << Instruction.encode_abc(Opcode::Ge, dest, match_pos, zero_reg)
+        instructions << Instruction.encode_load_int(zero_reg, 0_u16)
+        instructions << Instruction.encode_cmp(CompareSubOp::Ge, dest, match_pos, zero_reg)
         allocator.free_temp(obj_reg)
         allocator.free_temp(str_reg)
         allocator.free_temp(seq_base)
@@ -2989,10 +2986,10 @@ module Citrine
         cid_reg = allocator.alloc_temp
         cnt_reg = allocator.alloc_temp
         is_struct_reg = allocator.alloc_temp
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, cid_reg, cls_info.class_id.to_u16)
+        instructions << Instruction.encode_load_int(cid_reg, cls_info.class_id.to_u16)
         f_count = cls_info.fields.size > 0 ? cls_info.fields.size : 1
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, cnt_reg, f_count.to_u16)
-        instructions << Instruction.encode_ab_imm(Opcode::LoadInt, is_struct_reg, cls_info.is_struct ? 1_u16 : 0_u16)
+        instructions << Instruction.encode_load_int(cnt_reg, f_count.to_u16)
+        instructions << Instruction.encode_load_int(is_struct_reg, cls_info.is_struct ? 1_u16 : 0_u16)
         seq_base = allocator.alloc_contiguous(3)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, cid_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, cnt_reg, 0_u8)
@@ -3175,7 +3172,7 @@ module Citrine
           val_reg = compile_node(node.args[0], allocator, instructions, fn)
           addr_reg = allocator.alloc_temp
           idx_reg = allocator.alloc_temp
-          instructions << Instruction.encode_ab_imm(Opcode::LoadInt, idx_reg, 0_u16)
+          instructions << Instruction.encode_load_int(idx_reg, 0_u16)
           c_idx = add_constant(ConstValue.new(ConstType::Int32, int_val: addr_val.to_i32))
           instructions << Instruction.encode_ab_imm(Opcode::LoadConst, addr_reg, c_idx.to_u16)
           seq_base = allocator.alloc_contiguous(3)
@@ -3192,7 +3189,7 @@ module Citrine
         elsif node.args.empty?
           addr_reg = allocator.alloc_temp
           idx_reg = allocator.alloc_temp
-          instructions << Instruction.encode_ab_imm(Opcode::LoadInt, idx_reg, 0_u16)
+          instructions << Instruction.encode_load_int(idx_reg, 0_u16)
           c_idx = add_constant(ConstValue.new(ConstType::Int32, int_val: addr_val.to_i32))
           instructions << Instruction.encode_ab_imm(Opcode::LoadConst, addr_reg, c_idx.to_u16)
           seq_base = allocator.alloc_contiguous(2)
@@ -3265,7 +3262,7 @@ module Citrine
         return dest
       end
 
-      instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+      instructions << Instruction.encode_load_nil(dest)
       dest
     end
 
@@ -3343,7 +3340,7 @@ module Citrine
           instructions << Instruction.encode_abc(Opcode::Move, param_reg, val_reg, 0_u8)
           allocator.free_temp(val_reg)
         else
-          instructions << Instruction.encode_abc(Opcode::LoadNil, param_reg, 0_u8, 0_u8)
+          instructions << Instruction.encode_load_nil(param_reg)
         end
       end
 
@@ -3366,7 +3363,7 @@ module Citrine
       dest = allocator.alloc_temp
       block = node.block
       unless block
-        instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+        instructions << Instruction.encode_load_nil(dest)
         return dest
       end
 
@@ -3397,7 +3394,7 @@ module Citrine
         allocator.free_temp(reg)
       end
 
-      instructions << Instruction.encode_ab_imm(Opcode::SpawnFiber, dest, func_idx.to_u16)
+      instructions << Instruction.encode_spawn_fiber(dest, func_idx.to_u16)
       dest
     end
 
@@ -3459,7 +3456,7 @@ module Citrine
             dest
           else
             dest = allocator.alloc_temp
-            instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+            instructions << Instruction.encode_load_nil(dest)
             dest
           end
         else
@@ -3476,7 +3473,7 @@ module Citrine
             dest
           else
             dest = allocator.alloc_temp
-            instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
+            instructions << Instruction.encode_load_nil(dest)
             dest
           end
         else
@@ -3525,7 +3522,7 @@ module Citrine
       dest = allocator.alloc_temp
       seq_base = allocator.alloc_contiguous(2)
       instructions << Instruction.encode_abc(Opcode::Move, seq_base, val_reg, 0_u8)
-      instructions << Instruction.encode_ab_imm(Opcode::LoadInt, (seq_base + 1).to_u8, hint)
+      instructions << Instruction.encode_load_int((seq_base + 1).to_u8, hint)
       instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::ToString)
       instructions << Instruction.new(instr_val)
       allocator.free_temp(val_reg)

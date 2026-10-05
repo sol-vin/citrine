@@ -77,8 +77,10 @@ module Citrine
     LoopDecBr   = 0x1E
     # 0x1F: Fused Multiply-Accumulate and 2D vector dot product accelerator
     FusedMadd   = 0x1F
+  end
 
-    # Legacy Distinct Opcode Specifiers for Compiler (0x20..0x3F) - DISTINCT VALUES!
+  # Legacy Distinct Opcode Specifiers for Compiler (0x20..0x3F)
+  enum LegacyOpcode : UInt8
     Nop         = 0x20
     Halt        = 0x21
     LoadNil     = 0x22
@@ -477,25 +479,79 @@ module Citrine
       new(val)
     end
 
+    # Encodes a LoadNil instruction (R_IMM format with SubOp LoadImmSubOp::Nil)
+    def self.encode_load_nil(dest : UInt8) : Instruction
+      encode_r_imm(Opcode::LoadImm, LoadImmSubOp::Nil.value, dest, 0_u16)
+    end
+
+    # Encodes a LoadBool instruction (R_IMM format with SubOp LoadImmSubOp::Bool)
+    def self.encode_load_bool(dest : UInt8, val : Bool | UInt16 | Int32) : Instruction
+      b_val = val.is_a?(Bool) ? val : (val != 0)
+      encode_r_imm(Opcode::LoadImm, LoadImmSubOp::Bool.value, dest, b_val ? 1_u16 : 0_u16)
+    end
+
+    # Encodes a LoadInt instruction (R_IMM format with SubOp LoadImmSubOp::Int16)
+    def self.encode_load_int(dest : UInt8, val : Int) : Instruction
+      encode_r_imm(Opcode::LoadImm, LoadImmSubOp::Int16.value, dest, (val.to_i64 & 0xFFFF).to_u16)
+    end
+
+    # Encodes a Compare instruction (RRR format with SubOp CompareSubOp)
+    def self.encode_cmp(cmp_op : CompareSubOp, dest : UInt8, a : UInt8, b : UInt8) : Instruction
+      encode_rrr(Opcode::Compare, cmp_op.value, dest, a, b)
+    end
+
+    # Encodes a Vec2 constructor (RRR format)
+    def self.encode_vec2_new(dest : UInt8, x : UInt8, y : UInt8) : Instruction
+      encode_rrr(Opcode::Vec2Math, Vec2MathSubOp::New.value, dest, x, y)
+    end
+
+    # Encodes Vec2 property reads
+    def self.encode_vec2_get_x(dest : UInt8, obj : UInt8) : Instruction
+      encode_rrr(Opcode::Vec2Prop, Vec2PropSubOp::GetX.value, dest, obj, 0_u8)
+    end
+
+    def self.encode_vec2_get_y(dest : UInt8, obj : UInt8) : Instruction
+      encode_rrr(Opcode::Vec2Prop, Vec2PropSubOp::GetY.value, dest, obj, 0_u8)
+    end
+
+    # Encodes Vec2 property writes
+    def self.encode_vec2_set_x(obj : UInt8, val : UInt8) : Instruction
+      encode_rrr(Opcode::Vec2Prop, Vec2PropSubOp::SetX.value, obj, val, 0_u8)
+    end
+
+    def self.encode_vec2_set_y(obj : UInt8, val : UInt8) : Instruction
+      encode_rrr(Opcode::Vec2Prop, Vec2PropSubOp::SetY.value, obj, val, 0_u8)
+    end
+
+    # Encodes Fiber yield and spawn
+    def self.encode_yield : Instruction
+      encode_rrr(Opcode::FiberOp, FiberSubOp::Yield.value, 0_u8, 0_u8, 0_u8)
+    end
+
+    def self.encode_spawn_fiber(dest : UInt8, func_idx : UInt16 | Int32) : Instruction
+      encode_r_imm(Opcode::FiberOp, FiberSubOp::Spawn.value, dest, func_idx.to_u16)
+    end
+
     # Backward-compatible 3-register encoder mapping to new 5-bit opcode + 3-bit subop.
-    def self.encode_abc(op : Opcode, dst : UInt8, a : UInt8, b : UInt8, subop : UInt8 = 0_u8) : Instruction
+    def self.encode_abc(op : Opcode | LegacyOpcode, dst : UInt8, a : UInt8, b : UInt8, subop : UInt8 = 0_u8) : Instruction
       # Map legacy opcodes if needed
       real_op, real_subop = map_legacy_op(op, subop)
       encode_rrr(real_op, real_subop, dst, a, b)
     end
 
     # Backward-compatible immediate encoder mapping to new 5-bit opcode + 3-bit subop.
-    def self.encode_ab_imm(op : Opcode, dst : UInt8, imm : UInt16, subop : UInt8 = 0_u8) : Instruction
+    def self.encode_ab_imm(op : Opcode | LegacyOpcode, dst : UInt8, imm : UInt16, subop : UInt8 = 0_u8) : Instruction
       real_op, real_subop = map_legacy_op(op, subop)
       encode_r_imm(real_op, real_subop, dst, imm)
     end
 
     # Backward-compatible branch encoder mapping to new 5-bit opcode + 3-bit subop.
-    def self.encode_branch(op : Opcode, reg : UInt8, offset : Int16, subop : UInt8 = 0_u8) : Instruction
-      if op == Opcode::Jump
+    def self.encode_branch(op : Opcode | LegacyOpcode, reg : UInt8, offset : Int16, subop : UInt8 = 0_u8) : Instruction
+      real_op, real_subop = map_legacy_op(op, subop)
+      if real_op == Opcode::Jump && real_subop == JumpSubOp::JumpRel24.value
         encode_jump_rel24(offset.to_i32)
       else
-        encode_branch_rel(op, subop, reg, offset)
+        encode_branch_rel(real_op, real_subop, reg, offset)
       end
     end
 
@@ -510,78 +566,80 @@ module Citrine
     end
 
     # Helper mapping legacy opcode values to [Primary Opcode, SubOp] pairs
-    private def self.map_legacy_op(op : Opcode, default_subop : UInt8) : Tuple(Opcode, UInt8)
+    private def self.map_legacy_op(op : Opcode | LegacyOpcode, default_subop : UInt8) : Tuple(Opcode, UInt8)
       case op
-      when Opcode::JumpIfFalse
+      when LegacyOpcode::JumpIfFalse
         {Opcode::BranchZ, BranchZSubOp::Falsy.value}
-      when Opcode::JumpIfTrue
+      when LegacyOpcode::JumpIfTrue
         {Opcode::BranchZ, BranchZSubOp::Truthy.value}
-      when Opcode::LoadNil
+      when LegacyOpcode::LoadNil
         {Opcode::LoadImm, LoadImmSubOp::Nil.value}
-      when Opcode::LoadBool
+      when LegacyOpcode::LoadBool
         {Opcode::LoadImm, LoadImmSubOp::Bool.value}
-      when Opcode::LoadInt
+      when LegacyOpcode::LoadInt
         {Opcode::LoadImm, default_subop == 0_u8 ? LoadImmSubOp::Int16.value : default_subop}
-      when Opcode::Div
+      when LegacyOpcode::Div
         {Opcode::DivMod, DivModSubOp::DivS32.value}
-      when Opcode::Mod
+      when LegacyOpcode::Mod
         {Opcode::DivMod, DivModSubOp::ModS32.value}
-      when Opcode::Neg
+      when LegacyOpcode::Neg
         {Opcode::Sub, SubSubOp::NegI32.value}
-      when Opcode::BitAnd
+      when LegacyOpcode::BitAnd
         {Opcode::Bitwise, BitwiseSubOp::And.value}
-      when Opcode::BitOr
+      when LegacyOpcode::BitOr
         {Opcode::Bitwise, BitwiseSubOp::Or.value}
-      when Opcode::BitXor
+      when LegacyOpcode::BitXor
         {Opcode::Bitwise, BitwiseSubOp::Xor.value}
-      when Opcode::BitNot
+      when LegacyOpcode::BitNot
         {Opcode::Bitwise, BitwiseSubOp::Nor.value}
-      when Opcode::ShiftLeft
+      when LegacyOpcode::ShiftLeft
         {Opcode::Shift, ShiftSubOp::Sll.value}
-      when Opcode::ShiftRight
+      when LegacyOpcode::ShiftRight
         {Opcode::Shift, ShiftSubOp::Sra.value}
-      when Opcode::Eq
+      when LegacyOpcode::Eq
         {Opcode::Compare, CompareSubOp::Eq.value}
-      when Opcode::Ne
+      when LegacyOpcode::Ne
         {Opcode::Compare, CompareSubOp::Ne.value}
-      when Opcode::Lt
+      when LegacyOpcode::Lt
         {Opcode::Compare, CompareSubOp::Lt.value}
-      when Opcode::Le
+      when LegacyOpcode::Le
         {Opcode::Compare, CompareSubOp::Le.value}
-      when Opcode::Gt
+      when LegacyOpcode::Gt
         {Opcode::Compare, CompareSubOp::Gt.value}
-      when Opcode::Ge
+      when LegacyOpcode::Ge
         {Opcode::Compare, CompareSubOp::Ge.value}
-      when Opcode::Vec2New
+      when LegacyOpcode::Vec2New
         {Opcode::Vec2Math, Vec2MathSubOp::New.value}
-      when Opcode::Vec2Add
+      when LegacyOpcode::Vec2Add
         {Opcode::Vec2Math, Vec2MathSubOp::Add.value}
-      when Opcode::Vec2GetX
+      when LegacyOpcode::Vec2GetX
         {Opcode::Vec2Prop, Vec2PropSubOp::GetX.value}
-      when Opcode::Vec2GetY
+      when LegacyOpcode::Vec2GetY
         {Opcode::Vec2Prop, Vec2PropSubOp::GetY.value}
-      when Opcode::Vec2SetX
+      when LegacyOpcode::Vec2SetX
         {Opcode::Vec2Prop, Vec2PropSubOp::SetX.value}
-      when Opcode::Vec2SetY
+      when LegacyOpcode::Vec2SetY
         {Opcode::Vec2Prop, Vec2PropSubOp::SetY.value}
-      when Opcode::ColorNew
+      when LegacyOpcode::ColorNew
         {Opcode::ColorOp, ColorSubOp::Rgba32.value}
-      when Opcode::SpawnFiber
+      when LegacyOpcode::SpawnFiber
         {Opcode::FiberOp, FiberSubOp::Spawn.value}
-      when Opcode::Yield
+      when LegacyOpcode::Yield
         {Opcode::FiberOp, FiberSubOp::Yield.value}
-      when Opcode::ResumeFiber
+      when LegacyOpcode::ResumeFiber
         {Opcode::FiberOp, FiberSubOp::Resume.value}
-      when Opcode::Halt
+      when LegacyOpcode::Halt
         {Opcode::Sys, SysSubOp::Halt.value}
-      when Opcode::Nop
+      when LegacyOpcode::Nop
         {Opcode::Sys, SysSubOp::Nop.value}
       when Opcode::Jump
         {Opcode::Jump, JumpSubOp::JumpRel24.value}
       when Opcode::LoadImm
         {Opcode::LoadImm, default_subop == 0_u8 ? LoadImmSubOp::Int16.value : default_subop}
-      else
+      when Opcode
         {op, default_subop}
+      else
+        {Opcode::Sys, SysSubOp::Nop.value}
       end
     end
 

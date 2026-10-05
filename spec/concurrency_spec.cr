@@ -73,9 +73,9 @@ describe "Citrine Concurrency Subsystem" do
       fiber_fn = compiler.functions.find { |f| f.name.starts_with?("__fiber") }
       fiber_fn.should_not be_nil
 
-      # Main function should contain SpawnFiber opcode
+      # Main function should contain FiberOp (Spawn) opcode
       main_fn = compiler.functions.last
-      has_spawn = main_fn.instructions.any? { |i| i.opcode == Citrine::Opcode::SpawnFiber }
+      has_spawn = main_fn.instructions.any? { |i| i.opcode == Citrine::Opcode::FiberOp && i.subop == Citrine::FiberSubOp::Spawn.value }
       has_spawn.should be_true
     end
 
@@ -90,7 +90,7 @@ describe "Citrine Concurrency Subsystem" do
       compiler.compile(program)
 
       main_fn = compiler.functions.last
-      yield_count = main_fn.instructions.count { |i| i.opcode == Citrine::Opcode::Yield }
+      yield_count = main_fn.instructions.count { |i| i.opcode == Citrine::Opcode::FiberOp && i.subop == Citrine::FiberSubOp::Yield.value }
       yield_count.should eq(2)
     end
 
