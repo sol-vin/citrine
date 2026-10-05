@@ -15,7 +15,7 @@ describe Citrine::BytecodeCompiler do
     bytes = compiler.compile(program)
 
     bytes.size.should be > 16
-    String.new(bytes[0, 4]).should eq("CBC1")
+    String.new(bytes[0, 4]).should eq("CBC2")
   end
 
   it "compiles Vector2 manipulation and Native API calls" do

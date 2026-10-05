@@ -155,7 +155,7 @@ module Citrine
   end
 
   class BytecodeCompiler
-    MAGIC = "CBC1"
+    MAGIC = "CBC2"
 
     getter source_map : SourceMap
     getter constants : Array(ConstValue)
@@ -638,10 +638,7 @@ module Citrine
           instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, f_reg, 0_u8)
           instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 2).to_u8, val_reg, 0_u8)
           ret_dest = allocator.alloc_temp
-          instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                      (ret_dest.to_u32 << 16) |
-                      (seq_base.to_u32 << 8) |
-                      NativeId::ObjectSetField.value.to_u32
+          instr_val = Instruction.call_native_raw(ret_dest, seq_base, NativeId::ObjectSetField)
           instructions << Instruction.new(instr_val)
           allocator.free_temp(f_reg)
           allocator.free_temp(val_reg)
@@ -665,10 +662,7 @@ module Citrine
           instructions << Instruction.encode_abc(Opcode::Move, seq_base, addr_reg, 0_u8)
           instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, idx_reg, 0_u8)
           instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 2).to_u8, val_reg, 0_u8)
-          instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                      (val_reg.to_u32 << 16) |
-                      (seq_base.to_u32 << 8) |
-                      NativeId::PointerSet.value.to_u32
+          instr_val = Instruction.call_native_raw(val_reg, seq_base, NativeId::PointerSet)
           instructions << Instruction.new(instr_val)
           allocator.free_temp(addr_reg)
           allocator.free_temp(idx_reg)
@@ -740,10 +734,7 @@ module Citrine
           seq_base = allocator.alloc_contiguous(1)
           instructions << Instruction.encode_abc(Opcode::Move, seq_base, val_reg, 0_u8)
           copy_dest = allocator.alloc_temp
-          instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                      (copy_dest.to_u32 << 16) |
-                      (seq_base.to_u32 << 8) |
-                      NativeId::StructCopy.value.to_u32
+          instr_val = Instruction.call_native_raw(copy_dest, seq_base, NativeId::StructCopy)
           instructions << Instruction.new(instr_val)
           instructions << Instruction.encode_abc(Opcode::Move, local_reg, copy_dest, 0_u8)
           allocator.free_temp(seq_base)
@@ -1050,10 +1041,7 @@ module Citrine
           seq_base = allocator.alloc_contiguous(2)
           instructions << Instruction.encode_abc(Opcode::Move, seq_base, self_reg, 0_u8)
           instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, f_reg, 0_u8)
-          instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                      (dest.to_u32 << 16) |
-                      (seq_base.to_u32 << 8) |
-                      NativeId::ObjectGetField.value.to_u32
+          instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::ObjectGetField)
           instructions << Instruction.new(instr_val)
           allocator.free_temp(f_reg)
           allocator.free_temp(seq_base)
@@ -1078,10 +1066,7 @@ module Citrine
         seq_base = allocator.alloc_contiguous(2)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, addr_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, idx_reg, 0_u8)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (seq_base.to_u32 << 8) |
-                    NativeId::PointerGet.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::PointerGet)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(addr_reg)
         allocator.free_temp(idx_reg)
@@ -1103,10 +1088,7 @@ module Citrine
         cap = node.elements.size > 0 ? node.elements.size : 4
         cap_reg = allocator.alloc_temp
         instructions << Instruction.encode_ab_imm(Opcode::LoadInt, cap_reg, cap.to_u16)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (cap_reg.to_u32 << 8) |
-                    NativeId::ArrayNew.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, cap_reg, NativeId::ArrayNew)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(cap_reg)
 
@@ -1115,10 +1097,7 @@ module Citrine
           seq_base = allocator.alloc_contiguous(2)
           instructions << Instruction.encode_abc(Opcode::Move, seq_base, dest, 0_u8)
           instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, elem_reg, 0_u8)
-          push_val = (Opcode::CallNative.value.to_u32 << 24) |
-                     (dest.to_u32 << 16) |
-                     (seq_base.to_u32 << 8) |
-                     NativeId::ArrayPush.value.to_u32
+          push_val = Instruction.call_native_raw(dest, seq_base, NativeId::ArrayPush)
           instructions << Instruction.new(push_val)
           allocator.free_temp(elem_reg)
           allocator.free_temp(seq_base)
@@ -1159,10 +1138,7 @@ module Citrine
           seq_base = allocator.alloc_contiguous(2)
           instructions << Instruction.encode_abc(Opcode::Move, seq_base, obj_reg, 0_u8)
           instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
-          instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                      (dest.to_u32 << 16) |
-                      (seq_base.to_u32 << 8) |
-                      NativeId::TypeIsA.value.to_u32
+          instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::TypeIsA)
           instructions << Instruction.new(instr_val)
           allocator.free_temp(tid_reg)
           allocator.free_temp(seq_base)
@@ -1179,10 +1155,7 @@ module Citrine
             instructions << Instruction.encode_abc(Opcode::Move, seq_base, obj_reg, 0_u8)
             instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
             cur_check = allocator.alloc_temp
-            instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                        (cur_check.to_u32 << 16) |
-                        (seq_base.to_u32 << 8) |
-                        NativeId::TypeIsA.value.to_u32
+            instr_val = Instruction.call_native_raw(cur_check, seq_base, NativeId::TypeIsA)
             instructions << Instruction.new(instr_val)
             allocator.free_temp(tid_reg)
             allocator.free_temp(seq_base)
@@ -1218,10 +1191,7 @@ module Citrine
         seq_base = allocator.alloc_contiguous(2)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, obj_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (seq_base.to_u32 << 8) |
-                    NativeId::TypeAsCast.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::TypeAsCast)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(obj_reg)
         allocator.free_temp(tid_reg)
@@ -1263,10 +1233,7 @@ module Citrine
           instructions << Instruction.encode_abc(Opcode::Move, seq_base, obj_reg, 0_u8)
           instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
           is_match = allocator.alloc_temp
-          instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                      (is_match.to_u32 << 16) |
-                      (seq_base.to_u32 << 8) |
-                      NativeId::TypeIsA.value.to_u32
+          instr_val = Instruction.call_native_raw(is_match, seq_base, NativeId::TypeIsA)
           instructions << Instruction.new(instr_val)
           allocator.free_temp(tid_reg)
           allocator.free_temp(seq_base)
@@ -1294,10 +1261,7 @@ module Citrine
             instructions << Instruction.encode_abc(Opcode::Move, seq_base, obj_reg, 0_u8)
             instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
             cur_check = allocator.alloc_temp
-            instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                        (cur_check.to_u32 << 16) |
-                        (seq_base.to_u32 << 8) |
-                        NativeId::TypeIsA.value.to_u32
+            instr_val = Instruction.call_native_raw(cur_check, seq_base, NativeId::TypeIsA)
             instructions << Instruction.new(instr_val)
             allocator.free_temp(tid_reg)
             allocator.free_temp(seq_base)
@@ -1359,10 +1323,7 @@ module Citrine
             seq_base = allocator.alloc_contiguous(2)
             instructions << Instruction.encode_abc(Opcode::Move, seq_base, obj_reg, 0_u8)
             instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
-            instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                        (dest.to_u32 << 16) |
-                        (seq_base.to_u32 << 8) |
-                        NativeId::TypeIsA.value.to_u32
+            instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::TypeIsA)
             instructions << Instruction.new(instr_val)
             allocator.free_temp(tid_reg)
             allocator.free_temp(seq_base)
@@ -1379,10 +1340,7 @@ module Citrine
               instructions << Instruction.encode_abc(Opcode::Move, seq_base, obj_reg, 0_u8)
               instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
               cur_check = allocator.alloc_temp
-              instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                          (cur_check.to_u32 << 16) |
-                          (seq_base.to_u32 << 8) |
-                          NativeId::TypeIsA.value.to_u32
+              instr_val = Instruction.call_native_raw(cur_check, seq_base, NativeId::TypeIsA)
               instructions << Instruction.new(instr_val)
               allocator.free_temp(tid_reg)
               allocator.free_temp(seq_base)
@@ -1431,10 +1389,7 @@ module Citrine
         const_idx = add_constant(ConstValue.new(ConstType::String, int_val: str_idx, str_val: pat_str))
         pat_reg = allocator.alloc_temp
         instructions << Instruction.encode_ab_imm(Opcode::LoadConst, pat_reg, const_idx.to_u16)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (pat_reg.to_u32 << 8) |
-                    NativeId::RegexNew.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, pat_reg, NativeId::RegexNew)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(pat_reg)
         dest
@@ -1530,10 +1485,7 @@ module Citrine
                 seq_base = allocator.alloc_contiguous(2)
                 instructions << Instruction.encode_abc(Opcode::Move, seq_base, cond_reg, 0_u8)
                 instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
-                instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                            (type_match.to_u32 << 16) |
-                            (seq_base.to_u32 << 8) |
-                            NativeId::TypeIsA.value.to_u32
+                instr_val = Instruction.call_native_raw(type_match, seq_base, NativeId::TypeIsA)
                 instructions << Instruction.new(instr_val)
                 allocator.free_temp(tid_reg)
                 allocator.free_temp(seq_base)
@@ -1548,10 +1500,7 @@ module Citrine
                   instructions << Instruction.encode_abc(Opcode::Move, seq_base, cond_reg, 0_u8)
                   instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, tid_reg, 0_u8)
                   cur_check = allocator.alloc_temp
-                  instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                              (cur_check.to_u32 << 16) |
-                              (seq_base.to_u32 << 8) |
-                              NativeId::TypeIsA.value.to_u32
+                  instr_val = Instruction.call_native_raw(cur_check, seq_base, NativeId::TypeIsA)
                   instructions << Instruction.new(instr_val)
                   allocator.free_temp(tid_reg)
                   allocator.free_temp(seq_base)
@@ -1871,10 +1820,7 @@ module Citrine
           seq_base = allocator.alloc_contiguous(2)
           instructions << Instruction.encode_abc(Opcode::Move, seq_base, left_reg, 0_u8)
           instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, right_reg, 0_u8)
-          instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                      (dest.to_u32 << 16) |
-                      (seq_base.to_u32 << 8) |
-                      NativeId::StringConcat.value.to_u32
+          instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::StringConcat)
           instructions << Instruction.new(instr_val)
           allocator.free_temp(left_reg)
           allocator.free_temp(right_reg)
@@ -1974,10 +1920,7 @@ module Citrine
                     instructions << Instruction.encode_ab_imm(Opcode::LoadInt, r, 32_u16)
                     r
                   end
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (cap_reg.to_u32 << 8) |
-                    NativeId::ChannelNew.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, cap_reg, NativeId::ChannelNew)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(cap_reg)
         return dest
@@ -1991,10 +1934,7 @@ module Citrine
         arg1 = allocator.alloc_temp
         instructions << Instruction.encode_abc(Opcode::Move, arg0, ch_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, arg1, val_reg, 0_u8)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (arg0.to_u32 << 8) |
-                    NativeId::ChannelSend.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, arg0, NativeId::ChannelSend)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(ch_reg)
         allocator.free_temp(val_reg)
@@ -2006,10 +1946,7 @@ module Citrine
       # Concurrency: ch.receive
       if node.name == "receive" && node.obj
         ch_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (ch_reg.to_u32 << 8) |
-                    NativeId::ChannelReceive.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, ch_reg, NativeId::ChannelReceive)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(ch_reg)
         return dest
@@ -2018,10 +1955,7 @@ module Citrine
       # Concurrency: ch.try_receive
       if node.name == "try_receive" && node.obj
         ch_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (ch_reg.to_u32 << 8) |
-                    NativeId::ChannelTryReceive.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, ch_reg, NativeId::ChannelTryReceive)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(ch_reg)
         return dest
@@ -2031,10 +1965,7 @@ module Citrine
       is_chan = obj_str.downcase.includes?("chan") || node.name == "count"
       if is_chan && node.obj && (node.name == "size" || node.name == "count") && node.args.empty?
         ch_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (ch_reg.to_u32 << 8) |
-                    NativeId::ChannelCount.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, ch_reg, NativeId::ChannelCount)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(ch_reg)
         return dest
@@ -2043,10 +1974,7 @@ module Citrine
       # Concurrency: ch.capacity
       if node.name == "capacity" && node.obj && node.args.empty?
         ch_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (ch_reg.to_u32 << 8) |
-                    NativeId::ChannelCapacity.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, ch_reg, NativeId::ChannelCapacity)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(ch_reg)
         return dest
@@ -2079,10 +2007,7 @@ module Citrine
                     when "button_down?"     then NativeId::ButtonDown
                     else                         NativeId::ButtonReleased
                     end
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (seq_base.to_u32 << 8) |
-                    native_id.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, seq_base, native_id)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(ctrl_reg)
         allocator.free_temp(btn_reg)
@@ -2107,10 +2032,7 @@ module Citrine
                       else                                         nil
                       end
           if native_id
-            instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                        (dest.to_u32 << 16) |
-                        (seq_base.to_u32 << 8) |
-                        native_id.value.to_u32
+            instr_val = Instruction.call_native_raw(dest, seq_base, native_id)
             instructions << Instruction.new(instr_val)
             allocator.free_temp(act_reg)
             allocator.free_temp(seq_base)
@@ -2166,10 +2088,7 @@ module Citrine
                      end
 
           # Instruction: OP_CALL_NATIVE dest, base_reg, argc | imm16: native_id
-          instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                      (dest.to_u32 << 16) |
-                      (base_reg.to_u32 << 8) |
-                      native_id.value.to_u32
+          instr_val = Instruction.call_native_raw(dest, base_reg, native_id)
           instructions << Instruction.new(instr_val)
           arg_regs.each { |r| allocator.free_temp(r) }
           if !arg_regs.empty? && base_reg != arg_regs[0]
@@ -2350,10 +2269,7 @@ module Citrine
         seq_base = allocator.alloc_contiguous(2)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, arr_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, idx_reg, 0_u8)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (seq_base.to_u32 << 8) |
-                    NativeId::ArrayGet.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::ArrayGet)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(arr_reg)
         allocator.free_temp(idx_reg)
@@ -2371,10 +2287,7 @@ module Citrine
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, arr_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, idx_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 2).to_u8, val_reg, 0_u8)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (seq_base.to_u32 << 8) |
-                    NativeId::ArraySet.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::ArraySet)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(arr_reg)
         allocator.free_temp(idx_reg)
@@ -2390,10 +2303,7 @@ module Citrine
         seq_base = allocator.alloc_contiguous(2)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, arr_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, val_reg, 0_u8)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (seq_base.to_u32 << 8) |
-                    NativeId::ArrayPush.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::ArrayPush)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(arr_reg)
         allocator.free_temp(val_reg)
@@ -2405,10 +2315,7 @@ module Citrine
       # Array pop: arr.pop
       if node.name == "pop" && node.obj && node.args.empty?
         arr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (arr_reg.to_u32 << 8) |
-                    NativeId::ArrayPop.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, arr_reg, NativeId::ArrayPop)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(arr_reg)
         return dest
@@ -2417,10 +2324,7 @@ module Citrine
       # Array size: arr.size / arr.length
       if (node.name == "size" || node.name == "length") && node.obj && node.args.empty?
         arr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (arr_reg.to_u32 << 8) |
-                    NativeId::ArraySize.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, arr_reg, NativeId::ArraySize)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(arr_reg)
         return dest
@@ -2429,10 +2333,7 @@ module Citrine
       # Array clear: arr.clear
       if node.name == "clear" && node.obj && node.args.empty?
         arr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (arr_reg.to_u32 << 8) |
-                    NativeId::ArrayClear.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, arr_reg, NativeId::ArrayClear)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(arr_reg)
         return dest
@@ -2446,10 +2347,7 @@ module Citrine
         seq_base = allocator.alloc_contiguous(2)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, arr_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, zero_reg, 0_u8)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (seq_base.to_u32 << 8) |
-                    NativeId::ArrayGet.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::ArrayGet)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(arr_reg)
         allocator.free_temp(zero_reg)
@@ -2462,10 +2360,7 @@ module Citrine
       if node.name == "last" && node.obj && node.args.empty?
         arr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
         sz_reg = allocator.alloc_temp
-        sz_instr = (Opcode::CallNative.value.to_u32 << 24) |
-                   (sz_reg.to_u32 << 16) |
-                   (arr_reg.to_u32 << 8) |
-                   NativeId::ArraySize.value.to_u32
+        sz_instr = Instruction.call_native_raw(sz_reg, arr_reg, NativeId::ArraySize)
         instructions << Instruction.new(sz_instr)
         one_reg = allocator.alloc_temp
         instructions << Instruction.encode_ab_imm(Opcode::LoadInt, one_reg, 1_u16)
@@ -2477,10 +2372,7 @@ module Citrine
         seq_base = allocator.alloc_contiguous(2)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, arr_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, idx_reg, 0_u8)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (seq_base.to_u32 << 8) |
-                    NativeId::ArrayGet.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::ArrayGet)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(arr_reg)
         allocator.free_temp(idx_reg)
@@ -2493,10 +2385,7 @@ module Citrine
       if node.name == "empty?" && node.obj && node.args.empty?
         arr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
         sz_reg = allocator.alloc_temp
-        sz_instr = (Opcode::CallNative.value.to_u32 << 24) |
-                   (sz_reg.to_u32 << 16) |
-                   (arr_reg.to_u32 << 8) |
-                   NativeId::ArraySize.value.to_u32
+        sz_instr = Instruction.call_native_raw(sz_reg, arr_reg, NativeId::ArraySize)
         instructions << Instruction.new(sz_instr)
         zero_reg = allocator.alloc_temp
         instructions << Instruction.encode_ab_imm(Opcode::LoadInt, zero_reg, 0_u16)
@@ -2564,10 +2453,7 @@ module Citrine
       if node.name == "each" && node.obj && (block = node.block)
         arr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
         size_reg = allocator.alloc_temp
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (size_reg.to_u32 << 16) |
-                    (arr_reg.to_u32 << 8) |
-                    NativeId::ArraySize.value.to_u32
+        instr_val = Instruction.call_native_raw(size_reg, arr_reg, NativeId::ArraySize)
         instructions << Instruction.new(instr_val)
 
         iter_reg = allocator.alloc_temp
@@ -2588,10 +2474,7 @@ module Citrine
         seq_base = allocator.alloc_contiguous(2)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, arr_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, iter_reg, 0_u8)
-        get_val = (Opcode::CallNative.value.to_u32 << 24) |
-                  (block_item_reg.to_u32 << 16) |
-                  (seq_base.to_u32 << 8) |
-                  NativeId::ArrayGet.value.to_u32
+        get_val = Instruction.call_native_raw(block_item_reg, seq_base, NativeId::ArrayGet)
         instructions << Instruction.new(get_val)
         allocator.free_temp(seq_base)
         allocator.free_temp((seq_base + 1).to_u8)
@@ -2617,20 +2500,14 @@ module Citrine
       if node.name == "map" && node.obj && (block = node.block)
         arr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
         size_reg = allocator.alloc_temp
-        sz_instr = (Opcode::CallNative.value.to_u32 << 24) |
-                   (size_reg.to_u32 << 16) |
-                   (arr_reg.to_u32 << 8) |
-                   NativeId::ArraySize.value.to_u32
+        sz_instr = Instruction.call_native_raw(size_reg, arr_reg, NativeId::ArraySize)
         instructions << Instruction.new(sz_instr)
 
         # Allocate result array
         res_arr = allocator.alloc_temp
         cap_reg = allocator.alloc_temp
         instructions << Instruction.encode_abc(Opcode::Move, cap_reg, size_reg, 0_u8)
-        new_instr = (Opcode::CallNative.value.to_u32 << 24) |
-                    (res_arr.to_u32 << 16) |
-                    (cap_reg.to_u32 << 8) |
-                    NativeId::ArrayNew.value.to_u32
+        new_instr = Instruction.call_native_raw(res_arr, cap_reg, NativeId::ArrayNew)
         instructions << Instruction.new(new_instr)
         allocator.free_temp(cap_reg)
 
@@ -2653,10 +2530,7 @@ module Citrine
         seq_base = allocator.alloc_contiguous(2)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, arr_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, iter_reg, 0_u8)
-        get_val = (Opcode::CallNative.value.to_u32 << 24) |
-                  (block_item_reg.to_u32 << 16) |
-                  (seq_base.to_u32 << 8) |
-                  NativeId::ArrayGet.value.to_u32
+        get_val = Instruction.call_native_raw(block_item_reg, seq_base, NativeId::ArrayGet)
         instructions << Instruction.new(get_val)
         allocator.free_temp(seq_base)
         allocator.free_temp((seq_base + 1).to_u8)
@@ -2669,10 +2543,7 @@ module Citrine
         instructions << Instruction.encode_abc(Opcode::Move, push_base, res_arr, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (push_base + 1).to_u8, mapped_val_reg, 0_u8)
         dummy_dest = allocator.alloc_temp
-        push_instr = (Opcode::CallNative.value.to_u32 << 24) |
-                     (dummy_dest.to_u32 << 16) |
-                     (push_base.to_u32 << 8) |
-                     NativeId::ArrayPush.value.to_u32
+        push_instr = Instruction.call_native_raw(dummy_dest, push_base, NativeId::ArrayPush)
         instructions << Instruction.new(push_instr)
         allocator.free_temp(mapped_val_reg)
         allocator.free_temp(push_base)
@@ -2716,10 +2587,7 @@ module Citrine
         seq_base = allocator.alloc_contiguous(2)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, sz_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, def_val_reg, 0_u8)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (seq_base.to_u32 << 8) |
-                    NativeId::StaticArrayNew.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::StaticArrayNew)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(sz_reg)
         allocator.free_temp(def_val_reg)
@@ -2737,10 +2605,7 @@ module Citrine
                  instructions << Instruction.encode_ab_imm(Opcode::LoadInt, r, 64_u16)
                  r
                end
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (arg0.to_u32 << 8) |
-                    NativeId::MemoryIONew.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, arg0, NativeId::MemoryIONew)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(arg0)
         return dest
@@ -2765,20 +2630,14 @@ module Citrine
         if native_op && (node.name == "to_s" || node.name == "rewind" || node.name == "pos" || node.name == "clear" || !node.args.empty?)
           io_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
           if node.args.empty?
-            instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                        (dest.to_u32 << 16) |
-                        (io_reg.to_u32 << 8) |
-                        native_op.value.to_u32
+            instr_val = Instruction.call_native_raw(dest, io_reg, native_op)
             instructions << Instruction.new(instr_val)
           else
             val_reg = compile_node(node.args[0], allocator, instructions, fn)
             seq_base = allocator.alloc_contiguous(2)
             instructions << Instruction.encode_abc(Opcode::Move, seq_base, io_reg, 0_u8)
             instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, val_reg, 0_u8)
-            instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                        (dest.to_u32 << 16) |
-                        (seq_base.to_u32 << 8) |
-                        native_op.value.to_u32
+            instr_val = Instruction.call_native_raw(dest, seq_base, native_op)
             instructions << Instruction.new(instr_val)
             allocator.free_temp(val_reg)
             allocator.free_temp(seq_base)
@@ -2807,10 +2666,7 @@ module Citrine
         seq_base = allocator.alloc_contiguous(2)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, ptr_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, zero_reg, 0_u8)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (seq_base.to_u32 << 8) |
-                    NativeId::PointerGet.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::PointerGet)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(ptr_reg)
         allocator.free_temp(zero_reg)
@@ -2829,10 +2685,7 @@ module Citrine
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, ptr_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, zero_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 2).to_u8, val_reg, 0_u8)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (seq_base.to_u32 << 8) |
-                    NativeId::PointerSet.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::PointerSet)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(ptr_reg)
         allocator.free_temp(zero_reg)
@@ -2844,10 +2697,7 @@ module Citrine
       # Pointer address: ptr.address
       if node.name == "address" && node.obj && node.args.empty?
         ptr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (ptr_reg.to_u32 << 8) |
-                    NativeId::PointerAddress.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, ptr_reg, NativeId::PointerAddress)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(ptr_reg)
         return dest
@@ -2862,10 +2712,7 @@ module Citrine
                      instructions << Instruction.encode_ab_imm(Opcode::LoadInt, r, 1_u16)
                      r
                    end
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (size_reg.to_u32 << 8) |
-                    NativeId::PointerMalloc.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, size_reg, NativeId::PointerMalloc)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(size_reg)
         return dest
@@ -2874,10 +2721,7 @@ module Citrine
       # Pointer(T).new(addr)
       if obj_str.starts_with?("Pointer") && node.name == "new" && node.args.size > 0
         addr_reg = compile_node(node.args[0], allocator, instructions, fn)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (addr_reg.to_u32 << 8) |
-                    NativeId::PointerNew.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, addr_reg, NativeId::PointerNew)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(addr_reg)
         return dest
@@ -2886,10 +2730,7 @@ module Citrine
       # Box(T).box(val)
       if obj_str.starts_with?("Box") && node.name == "box" && node.args.size > 0
         val_reg = compile_node(node.args[0], allocator, instructions, fn)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (val_reg.to_u32 << 8) |
-                    NativeId::BoxNew.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, val_reg, NativeId::BoxNew)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(val_reg)
         return dest
@@ -2898,10 +2739,7 @@ module Citrine
       # Box(T).unbox(ptr)
       if obj_str.starts_with?("Box") && node.name == "unbox" && node.args.size > 0
         ptr_reg = compile_node(node.args[0], allocator, instructions, fn)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (ptr_reg.to_u32 << 8) |
-                    NativeId::BoxUnbox.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, ptr_reg, NativeId::BoxUnbox)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(ptr_reg)
         return dest
@@ -2919,20 +2757,14 @@ module Citrine
         ctx_reg = allocator.alloc_temp
         c_idx = add_constant(ConstValue.new(ConstType::String, int_val: s_idx, str_val: ctx_val))
         instructions << Instruction.encode_ab_imm(Opcode::LoadConst, ctx_reg, c_idx.to_u16)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (ctx_reg.to_u32 << 8) |
-                    NativeId::ContextSet.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, ctx_reg, NativeId::ContextSet)
         instructions << Instruction.new(instr_val)
 
         # Compile body of block inside context
         compile_node(block.body, allocator, instructions, fn)
 
         # Auto-rewind/clear context arena on block exit
-        clear_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (ctx_reg.to_u32 << 8) |
-                    NativeId::ContextClear.value.to_u32
+        clear_val = Instruction.call_native_raw(dest, ctx_reg, NativeId::ContextClear)
         instructions << Instruction.new(clear_val)
         allocator.free_temp(ctx_reg)
         return dest
@@ -2950,10 +2782,7 @@ module Citrine
         ctx_reg = allocator.alloc_temp
         c_idx = add_constant(ConstValue.new(ConstType::String, int_val: s_idx, str_val: ctx_val))
         instructions << Instruction.encode_ab_imm(Opcode::LoadConst, ctx_reg, c_idx.to_u16)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (ctx_reg.to_u32 << 8) |
-                    NativeId::ContextClear.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, ctx_reg, NativeId::ContextClear)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(ctx_reg)
         return dest
@@ -2963,10 +2792,7 @@ module Citrine
       if ((node.name == "stats" || node.name == "heap_bytes") && obj_str.ends_with?("Memory")) || node.name == "memory_stats"
         zero_reg = allocator.alloc_temp
         instructions << Instruction.encode_ab_imm(Opcode::LoadInt, zero_reg, 0_u16)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (zero_reg.to_u32 << 8) |
-                    NativeId::MemoryStats.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, zero_reg, NativeId::MemoryStats)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(zero_reg)
         return dest
@@ -2984,10 +2810,7 @@ module Citrine
         ctx_reg = allocator.alloc_temp
         c_idx = add_constant(ConstValue.new(ConstType::String, int_val: s_idx, str_val: ctx_val))
         instructions << Instruction.encode_ab_imm(Opcode::LoadConst, ctx_reg, c_idx.to_u16)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (ctx_reg.to_u32 << 8) |
-                    NativeId::ContextSet.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, ctx_reg, NativeId::ContextSet)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(ctx_reg)
         return dest
@@ -2999,10 +2822,7 @@ module Citrine
         ptr_reg = compile_node(ptr_target, allocator, instructions, fn)
         seq_base = allocator.alloc_contiguous(1)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, ptr_reg, 0_u8)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (seq_base.to_u32 << 8) |
-                    NativeId::PointerFree.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::PointerFree)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(ptr_reg)
         allocator.free_temp(seq_base)
@@ -3013,10 +2833,7 @@ module Citrine
       if (obj_str == "GC" || obj_str.ends_with?("::GC")) && node.name == "collect"
         zero_reg = allocator.alloc_temp
         instructions << Instruction.encode_ab_imm(Opcode::LoadInt, zero_reg, 0_u16)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (zero_reg.to_u32 << 8) |
-                    NativeId::GCCycle.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, zero_reg, NativeId::GCCycle)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(zero_reg)
         return dest
@@ -3061,10 +2878,7 @@ module Citrine
         pat_reg = compile_node(node.args[0], allocator, instructions, fn)
         seq_base = allocator.alloc_contiguous(1)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, pat_reg, 0_u8)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (seq_base.to_u32 << 8) |
-                    NativeId::RegexNew.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::RegexNew)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(pat_reg)
         allocator.free_temp(seq_base)
@@ -3078,10 +2892,7 @@ module Citrine
         seq_base = allocator.alloc_contiguous(2)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, left_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, right_reg, 0_u8)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (seq_base.to_u32 << 8) |
-                    NativeId::RegexMatch.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::RegexMatch)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(left_reg)
         allocator.free_temp(right_reg)
@@ -3098,10 +2909,7 @@ module Citrine
         seq_base = allocator.alloc_contiguous(2)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, str_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, obj_reg, 0_u8)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (match_pos.to_u32 << 16) |
-                    (seq_base.to_u32 << 8) |
-                    NativeId::RegexMatch.value.to_u32
+        instr_val = Instruction.call_native_raw(match_pos, seq_base, NativeId::RegexMatch)
         instructions << Instruction.new(instr_val)
         zero_reg = allocator.alloc_temp
         instructions << Instruction.encode_ab_imm(Opcode::LoadInt, zero_reg, 0_u16)
@@ -3126,10 +2934,7 @@ module Citrine
         str_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
         seq_base = allocator.alloc_contiguous(1)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, str_reg, 0_u8)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (seq_base.to_u32 << 8) |
-                    s_op.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, seq_base, s_op)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(str_reg)
         allocator.free_temp(seq_base)
@@ -3158,10 +2963,7 @@ module Citrine
         seq_base = allocator.alloc_contiguous(2)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, str_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, arg_reg, 0_u8)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (dest.to_u32 << 16) |
-                    (seq_base.to_u32 << 8) |
-                    s_op.value.to_u32
+        instr_val = Instruction.call_native_raw(dest, seq_base, s_op)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(str_reg)
         allocator.free_temp(arg_reg)
@@ -3179,10 +2981,7 @@ module Citrine
           c_idx = add_constant(ConstValue.new(ConstType::String, int_val: s_idx, str_val: panic_str))
           p_reg = allocator.alloc_temp
           instructions << Instruction.encode_ab_imm(Opcode::LoadConst, p_reg, c_idx.to_u16)
-          instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                      (dest.to_u32 << 16) |
-                      (p_reg.to_u32 << 8) |
-                      NativeId::Panic.value.to_u32
+          instr_val = Instruction.call_native_raw(dest, p_reg, NativeId::Panic)
           instructions << Instruction.new(instr_val)
           allocator.free_temp(p_reg)
           return dest
@@ -3198,10 +2997,7 @@ module Citrine
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, cid_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, cnt_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 2).to_u8, is_struct_reg, 0_u8)
-        obj_val = (Opcode::CallNative.value.to_u32 << 24) |
-                  (dest.to_u32 << 16) |
-                  (seq_base.to_u32 << 8) |
-                  NativeId::ObjectNew.value.to_u32
+        obj_val = Instruction.call_native_raw(dest, seq_base, NativeId::ObjectNew)
         instructions << Instruction.new(obj_val)
         allocator.free_temp(cid_reg)
         allocator.free_temp(cnt_reg)
@@ -3386,10 +3182,7 @@ module Citrine
           instructions << Instruction.encode_abc(Opcode::Move, seq_base, addr_reg, 0_u8)
           instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, idx_reg, 0_u8)
           instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 2).to_u8, val_reg, 0_u8)
-          instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                      (dest.to_u32 << 16) |
-                      (seq_base.to_u32 << 8) |
-                      NativeId::PointerSet.value.to_u32
+          instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::PointerSet)
           instructions << Instruction.new(instr_val)
           allocator.free_temp(addr_reg)
           allocator.free_temp(idx_reg)
@@ -3405,10 +3198,7 @@ module Citrine
           seq_base = allocator.alloc_contiguous(2)
           instructions << Instruction.encode_abc(Opcode::Move, seq_base, addr_reg, 0_u8)
           instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, idx_reg, 0_u8)
-          instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                      (dest.to_u32 << 16) |
-                      (seq_base.to_u32 << 8) |
-                      NativeId::PointerGet.value.to_u32
+          instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::PointerGet)
           instructions << Instruction.new(instr_val)
           allocator.free_temp(addr_reg)
           allocator.free_temp(idx_reg)
@@ -3628,10 +3418,7 @@ module Citrine
         seq_base = allocator.alloc_contiguous(2)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, cur_reg, 0_u8)
         instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, next_reg, 0_u8)
-        instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                    (res_reg.to_u32 << 16) |
-                    (seq_base.to_u32 << 8) |
-                    NativeId::StringConcat.value.to_u32
+        instr_val = Instruction.call_native_raw(res_reg, seq_base, NativeId::StringConcat)
         instructions << Instruction.new(instr_val)
         allocator.free_temp(cur_reg)
         allocator.free_temp(next_reg)
@@ -3739,10 +3526,7 @@ module Citrine
       seq_base = allocator.alloc_contiguous(2)
       instructions << Instruction.encode_abc(Opcode::Move, seq_base, val_reg, 0_u8)
       instructions << Instruction.encode_ab_imm(Opcode::LoadInt, (seq_base + 1).to_u8, hint)
-      instr_val = (Opcode::CallNative.value.to_u32 << 24) |
-                  (dest.to_u32 << 16) |
-                  (seq_base.to_u32 << 8) |
-                  NativeId::ToString.value.to_u32
+      instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::ToString)
       instructions << Instruction.new(instr_val)
       allocator.free_temp(val_reg)
       allocator.free_temp(seq_base)
@@ -4131,7 +3915,7 @@ module Citrine
 
       # Header
       io.write(MAGIC.to_slice)
-      io.write_bytes(1_u16, IO::ByteFormat::LittleEndian) # Version 1
+      io.write_bytes(2_u16, IO::ByteFormat::LittleEndian) # Version 2
       io.write_bytes(@functions.size.to_u32, IO::ByteFormat::LittleEndian)
       io.write_bytes(@constants.size.to_u32, IO::ByteFormat::LittleEndian)
       io.write_bytes(@strings.size.to_u32, IO::ByteFormat::LittleEndian)

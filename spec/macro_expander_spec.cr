@@ -17,7 +17,7 @@ describe "Citrine Macro Expander" do
     bytes = compiler.compile(program)
 
     bytes.size.should be > 16
-    bytes[0..3].should eq(Bytes[0x43, 0x42, 0x43, 0x31]) # CBC1
+    bytes[0..3].should eq(Bytes[0x43, 0x42, 0x43, 0x32]) # CBC2
   end
 
   it "expands citrine_ecs! into component ID constants" do

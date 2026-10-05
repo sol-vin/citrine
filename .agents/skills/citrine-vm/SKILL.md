@@ -1,106 +1,107 @@
 ---
 name: citrine-vm
-description: Authoritative guide for Citrine Virtual Machine architecture, bytecode instruction set, opcode encoding, register allocation, direct-threaded C runtime, and MIPS R5900 JIT emitter on PlayStation 2. Use when writing compiler passes, adding VM instructions, inspecting bytecode (.cbc), implementing native calls, or debugging EE execution.
+description: Authoritative guide for Citrine Virtual Machine architecture, Citrine-32 instruction set, opcode encoding, register allocation, direct-threaded C runtime, and MIPS R5900 JIT emitter on PlayStation 2. Use when writing compiler passes, adding VM instructions, inspecting bytecode (.cbc), implementing native calls, or debugging EE execution.
 license: MIT
 metadata:
   author: Citrine Project
-  version: "1.0.0"
+  version: "2.0.0"
   domain: virtual-machines
-  triggers: Citrine VM, Bytecode, Opcode, NativeId, CBC, RegisterAllocator, ElfBuilder, MipsEmitter, direct-threaded, virtual registers
+  triggers: Citrine VM, Citrine-32, Bytecode, Opcode, NativeId, CBC, CBC2, RegisterAllocator, ElfBuilder, MipsEmitter, direct-threaded, virtual registers, peephole fusion
   role: specialist
   scope: implementation
   output-format: code
   related-skills: ps2-dev, pcsx2-cli, r2-ps2-debug, cpp-pro
 ---
 
-# Citrine Virtual Machine Architecture & Bytecode Specification
+# Citrine Virtual Machine Architecture & Bytecode Specification (Citrine-32 ISA)
 
-Specialist guide for the Citrine Virtual Machine (Citrine VM), targeting the Sony PlayStation 2 Emotion Engine (EE MIPS R5900 @ 294 MHz).
+Specialist guide for the Citrine Virtual Machine (Citrine-32 ISA), targeting the Sony PlayStation 2 Emotion Engine (EE MIPS R5900 @ 294.912 MHz).
 
 ## Core Architecture Overview
 
-Citrine VM executes fixed-width 32-bit instructions using a flat 256-register file (`$r0`..`$r255`) per call frame.
+Citrine-32 compresses all VM semantics into **exactly 32 primary opcodes** (`0x00` through `0x1F`, 5-bit opcode field in bits `[31:27]` with 3-bit sub-opcodes in `[26:24]`), preserving 100% of language capabilities, AST transformations, and PS2 hardware subsystem emulation.
 
 ```text
 +--------------------------------------------------------------------------+
-|                     Citrine Virtual Machine Architecture                 |
+|                     Citrine-32 Virtual Machine Architecture              |
 |  - 32-bit Little-Endian Fixed-Width Instruction Words                    |
-|  - Flat 256 Virtual Registers per Frame ($r0..$r255)                     |
-|  - Direct-Threaded C Engine (GCC computed gotos: &&DO_OP)                |
+|  - 5-bit Primary Opcode [31:27] -> zero-mask extraction: instr >> 27     |
+|  - 3-bit Sub-Opcode [26:24] providing 256 unique instruction variants   |
+|  - Flat 256 Virtual Registers per Frame ($r0..$r255, 16-byte aligned)    |
+|  - 128-byte Primary Dispatch Table (locks into 2 L1 D-Cache lines)       |
+|  - Direct-Threaded C Engine (GCC computed gotos: &&do_op)                |
 |  - Direct MIPS R5900 JIT / Machine Code Emitter (Citrine::ElfBuilder)    |
-|  - Fixed 256-level Activation Frame Call Stack (zero dynamic stack GC)   |
+|  - Peephole Fusions: BranchCmp, LoopDecBr, FusedMadd                     |
+|  - Zero-Stack Tail Calls & 24-bit Unconditional Jump Reach (32 MB)       |
 +--------------------------------------------------------------------------+
 ```
 
 ## Instruction Formats (32-bit)
 
-Instructions use three encodings, always 4-byte aligned:
+Instructions use four encodings, always 4-byte aligned:
 
 ```text
-1. ABC Format (3-Register Arithmetic & Logic):
- 31       24 23       16 15        8 7         0
-+-----------+-----------+-----------+-----------+
-|  Opcode   |  Dst Reg  |   Reg A   |   Reg B   |
-+-----------+-----------+-----------+-----------+
+1. Format ABC (Register-to-Register Arithmetic, Logic, Vectors):
+ 31     27 26   24 23       16 15        8 7         0
++---------+-------+-----------+-----------+-----------+
+| Primary | SubOp |  Dst Reg  |   Reg A   |   Reg B   |
++---------+-------+-----------+-----------+-----------+
 
-2. AB_IMM Format (Immediate Loading & Native Calls):
- 31       24 23       16 15                    0
-+-----------+-----------+-----------------------+
-|  Opcode   |  Dst Reg  |    Immediate UInt16   |
-+-----------+-----------+-----------------------+
+2. Format AB_IMM (Immediate Loading, Calls, Fibers, Channels):
+ 31     27 26   24 23       16 15                    0
++---------+-------+-----------+-----------------------+
+| Primary | SubOp |  Dst Reg  |    Immediate UInt16   |
++---------+-------+-----------+-----------------------+
 
-3. BRANCH Format (Relative Conditional & Unconditional Jumps):
- 31       24 23       16 15                    0
-+-----------+-----------+-----------------------+
-|  Opcode   | Cond Reg  |    Signed Int16 PC    |
-+-----------+-----------+-----------------------+
+3. Format BRANCH_CMP (Fused Compare-and-Branch):
+ 31     27 26   24 23       16 15        8 7         0
++---------+-------+-----------+-----------+-----------+
+| Primary | SubOp |  Dst Reg  |   Reg A   |  Offset8  |
++---------+-------+-----------+-----------+-----------+
+
+4. Format JUMP24 (Unconditional 24-bit Relative Jump):
+ 31     27 26   24 23                                0
++---------+-------+-----------------------------------+
+| Primary | SubOp |         Signed 24-bit Offset      |
++---------+-------+-----------------------------------+
 ```
 
-## Opcode Table (Citrine::Opcode)
+## The 32 Primary Opcodes (Citrine::Opcode)
 
-| Opcode | Hex | Format | Semantics | MIPS R5900 Translation |
+| Primary Opcode | Hex | Sub-Opcodes (`0..7`) | Semantics | MIPS R5900 Translation |
 |---|---|---|---|---|
-| `Nop` | 0x00 | ABC | No operation | `nop` |
-| `Move` | 0x01 | ABC | `R[dst] = R[a]` | `move $dst, $a` |
-| `LoadNil` | 0x02 | ABC | `R[dst] = Nil` | `move $dst, $zero` |
-| `LoadBool` | 0x03 | ABC | `R[dst] = (b != 0)` | `ori $dst, $zero, b` |
-| `LoadInt` | 0x04 | AB_IMM | `R[dst] = imm16` | `addiu $dst, $zero, imm16` |
-| `LoadConst`| 0x05 | AB_IMM | `R[dst] = ConstPool[imm]`| Load address from `.rodata` |
-| `Add` | 0x0A | ABC | `R[dst] = R[a] + R[b]` | `addu $dst, $a, $b` (or StringConcat) |
-| `Sub` | 0x0B | ABC | `R[dst] = R[a] - R[b]` | `subu $dst, $a, $b` |
-| `Mul` | 0x0C | ABC | `R[dst] = R[a] * R[b]` | `mult $a, $b; mflo $dst` |
-| `Div` | 0x0D | ABC | `R[dst] = R[a] / R[b]` | `div $a, $b; mflo $dst` |
-| `Mod` | 0x0E | ABC | `R[dst] = R[a] % R[b]` | `div $a, $b; mfhi $dst` |
-| `Neg` | 0x0F | ABC | `R[dst] = -R[a]` | `subu $dst, $zero, $a` |
-| `BitAnd` | 0x10 | ABC | `R[dst] = R[a] & R[b]` | `and $dst, $a, $b` |
-| `BitOr` | 0x11 | ABC | `R[dst] = R[a] \| R[b]`| `or $dst, $a, $b` |
-| `BitXor` | 0x12 | ABC | `R[dst] = R[a] ^ R[b]` | `xor $dst, $a, $b` |
-| `ShiftLeft`| 0x13 | ABC | `R[dst] = R[a] << R[b]`| `sllv $dst, $a, $b` |
-| `ShiftRight`| 0x1B | ABC | `R[dst] = R[a] >> R[b]`| `srav $dst, $a, $b` |
-| `BitNot` | 0x1C | ABC | `R[dst] = ~R[a]` | `nor $dst, $a, $zero` |
-| `Vec2New` | 0x14 | ABC | `R[dst] = Vector2(R[a], R[b])` | Allocates Vec2 primitive |
-| `Vec2GetX`| 0x15 | ABC | `R[dst] = R[a].x` | Float load from slot |
-| `Vec2GetY`| 0x16 | ABC | `R[dst] = R[a].y` | Float load from slot |
-| `Vec2SetX`| 0x17 | ABC | `R[dst].x = R[a]` | Float store to slot |
-| `Vec2SetY`| 0x18 | ABC | `R[dst].y = R[a]` | Float store to slot |
-| `Vec2Add` | 0x19 | ABC | `R[dst] = R[a] + R[b]` | `PADDW $dst, $a, $b` (128-bit MMI SIMD) |
-| `ColorNew`| 0x1A | ABC | `R[dst] = RGBA(R[a..a+3])`| `PPAC5 $dst, $a` (128-bit RGBA 5:5:5:1 pack) |
-| `Eq` | 0x1E | ABC | `R[dst] = (R[a] == R[b])`| Content comparison |
-| `Ne` | 0x1F | ABC | `R[dst] = (R[a] != R[b])`| Content comparison |
-| `Lt` | 0x20 | ABC | `R[dst] = (R[a] < R[b])` | `slt $dst, $a, $b` |
-| `Le` | 0x21 | ABC | `R[dst] = (R[a] <= R[b])`| `slt $dst, $b, $a; xori $dst, 1` |
-| `Gt` | 0x22 | ABC | `R[dst] = (R[a] > R[b])` | `slt $dst, $b, $a` |
-| `Ge` | 0x23 | ABC | `R[dst] = (R[a] >= R[b])`| `slt $dst, $a, $b; xori $dst, 1` |
-| `Jump` | 0x28 | BRANCH | `PC += 1 + offset` | `j / b label; nop` |
-| `JumpIfTrue`| 0x29 | BRANCH | If `R[cond]`, jump | `bne $cond, $zero, label; nop` |
-| `JumpIfFalse`| 0x2A | BRANCH | If `!R[cond]`, jump | `beq $cond, $zero, label; nop` |
-| `Call` | 0x32 | AB_IMM | Call function `imm` | `jal target; nop` |
-| `Return` | 0x33 | ABC | Return `R[src]` to caller| `move $v0, $src; jr $ra; nop` |
-| `CallNative`| 0x34 | AB_IMM | Call native service `imm`| Invoke host / hardware driver |
-| `SpawnFiber`| 0x3C | AB_IMM | Allocate new fiber | Coroutine context initialization |
-| `Yield` | 0x3D | ABC | Suspend current fiber | Switch to scheduler |
-| `ResumeFiber`| 0x3E | ABC | Resume fiber `R[a]` | Switch execution to fiber |
-| `Halt` | 0x46 | ABC | Park EE CPU / stop VM | Terminate execution |
+| `OP_SYS` | `0x00` | `0:NOP`, `1:HALT`, `2:BREAK`, `3:SYNC`, `4:FLUSH_I`, `5:FLUSH_D`, `6:WD_RESET`, `7:PROF_MARK` | System control & hardware sync | `nop`, `sync.l`, `break` |
+| `OP_MOVE` | `0x01` | `0:MOVE32`, `1:MOVE64`, `2:MOVE128`, `3:CMOVZ`, `4:CMOVN`, `5:SWAP` | Register copy & conditional moves | `move $dst, $a`, `movz`, `movn` |
+| `OP_LOAD_CONST` | `0x02` | `0..7`: Constant pool tag | Load constant from pool at `imm16` | Pointer load from `.rodata` |
+| `OP_LOAD_IMM` | `0x03` | `0:NIL`, `1:BOOL`, `2:INT16`, `3:UINT16`, `4:UPPER16`, `5:ZERO`, `6:MINUS1` | Load immediate values | `ori $dst, $zero, imm16` |
+| `OP_LOAD_MEM` | `0x04` | `0:LB`, `1:LBU`, `2:LH`, `3:LHU`, `4:LW`, `5:LWC1`, `6:LD`, `7:LQ` | Memory loads (including 128-bit Quadword) | `lb`, `lh`, `lw`, `lwc1`, `ld`, `lq` |
+| `OP_STORE_MEM` | `0x05` | `0:SB`, `1:SH`, `2:SW`, `3:SWC1`, `4:SD`, `5:SQ` | Memory stores | `sb`, `sh`, `sw`, `swc1`, `sd`, `sq` |
+| `OP_ADD` | `0x06` | `0:I32`, `1:U32`, `2:SAT`, `3:STR_CONCAT`, `4:IMM8` | Integer addition & string concatenation | `addu $dst, $a, $b` |
+| `OP_SUB` | `0x07` | `0:I32`, `1:U32`, `2:SAT`, `3:NEG`, `4:IMM8` | Integer subtraction & negation | `subu $dst, $a, $b` |
+| `OP_MUL` | `0x08` | `0:LO`, `1:HI`, `2:UHI`, `3:SAT`, `4:IMM8` | Integer multiplication | `mult $a, $b; mflo $dst` |
+| `OP_DIV_MOD` | `0x09` | `0:DIV_S32`, `1:MOD_S32`, `2:DIV_U32`, `3:MOD_U32` | Division and modulo (guarded) | `div $a, $b; mflo/mfhi $dst` |
+| `OP_BITWISE` | `0x0A` | `0:AND`, `1:OR`, `2:XOR`, `3:NOR`, `4:AND_NOT`, `5:XNOR` | Bitwise logical operations | `and`, `or`, `xor`, `nor` |
+| `OP_SHIFT` | `0x0B` | `0:SLL`, `1:SRL`, `2:SRA`, `3:ROTL`, `4:ROTR`, `5:CLZ` | Bit shifts, rotates, count leading zeros | `sllv`, `srlv`, `srav` |
+| `OP_COMPARE` | `0x0C` | `0:EQ`, `1:NE`, `2:LT`, `3:LE`, `4:GT`, `5:GE`, `6:STR_EQ`, `7:PTR_EQ` | Register relational comparisons | `slt $dst, $a, $b` |
+| `OP_TEST` | `0x0D` | `0:NIL`, `1:NOT_NIL`, `2:ZERO`, `3:NOT_ZERO`, `4:TRUTHY`, `5:FALSY`, `6:TAG`, `7:BIT` | Fast boolean & type testing | Zero & tag tests |
+| `OP_FLOAT_ALU` | `0x0E` | `0:ADD`, `1:SUB`, `2:MUL`, `3:DIV`, `4:NEG`, `5:ABS`, `6:SQRT`, `7:CVT` | Single-precision float operations | `add.s`, `sub.s`, `mul.s`, `div.s` |
+| `OP_JUMP` | `0x0F` | `0:REL24`, `1:REL16`, `2:REG`, `3:TABLE` | 24-bit relative jump (32 MB reach) | `j / b label; nop` |
+| `OP_BRANCH_Z` | `0x10` | `0:TRUTHY`, `1:FALSY`, `2:ZERO`, `3:NONZERO`, `4:POS`, `5:NEG` | Branch on register zero / truthiness | `beq`, `bne`, `bgtz`, `bltz` |
+| `OP_BRANCH_CMP`| `0x11` | `0:BEQ`, `1:BNE`, `2:BLT`, `3:BLE`, `4:BGT`, `5:BGE` | **Fused Compare-and-Branch** | Fused `beq`, `bne`, `slt + beq` |
+| `OP_CALL` | `0x12` | `0:DIRECT`, `1:INDIRECT`, `2:TAIL_DIRECT`, `3:TAIL_INDIRECT` | Function call & tail-call elimination | `jal target; nop` |
+| `OP_RETURN` | `0x13` | `0:VAL`, `1:NIL`, `2:VOID`, `3:MULTI` | Return value from frame | `jr $ra; nop` |
+| `OP_CALL_NATIVE`| `0x14`| `0:KERNEL`, `1:GS`, `2:AUDIO`, `3:PAD`, `4:VIDEO`, `5:HUD`, `6:IO`, `7:USER` | Native hardware subsystem trampoline | Domain-partitioned C driver |
+| `OP_VEC2_MATH` | `0x15` | `0:NEW`, `1:ADD`, `2:SUB`, `3:MUL`, `4:DIV`, `5:SCALE`, `6:DOT`, `7:CROSS` | Vector2 arithmetic & products | `PADDW` (128-bit MMI SIMD) |
+| `OP_VEC2_PROP` | `0x16` | `0:GET_X`, `1:GET_Y`, `2:SET_X`, `3:SET_Y`, `4:LEN`, `5:LENSQ`, `6:NORM`, `7:LERP`| Vector2 property access & normalization | Float slot extraction |
+| `OP_COLOR_OP` | `0x17` | `0:RGBA32`, `1:RGBA16`, `2:UNPACK`, `3:LERP`, `4:MODULATE`, `5:PREMUL` | Packed RGBA color constructors & blend | `PPAC5` (128-bit RGBA pack) |
+| `OP_SIMD_MMI` | `0x18` | `0:PADDB`, `1:PADDW`, `2:PSUBW`, `3:PMULTH`, `4:PMAXW`, `5:PMINW`, `6:PEXTW`, `7:PPACW` | Emotion Engine MMI SIMD instructions | `paddw`, `psubw`, `pmaxw`, `pminw` |
+| `OP_COLLECTION` | `0x19` | `0:AGET`, `1:ASET`, `2:ALEN`, `3:APUSH`, `4:APOP`, `5:FGET`, `6:FSET`, `7:HGET` | Array indexing, field get/set | Array & object operations |
+| `OP_FIBER_OP` | `0x1A` | `0:SPAWN`, `1:YIELD`, `2:RESUME`, `3:STATUS`, `4:KILL`, `5:ID`, `6:SLEEP` | Concurrency fibers | Scheduler context switch |
+| `OP_CHANNEL_OP` | `0x1B` | `0:CREATE`, `1:SEND`, `2:RECV`, `3:TRY_RECV`, `4:COUNT`, `5:CAP`, `6:CLOSE` | CSP channels | Channel ring buffer |
+| `OP_PS2_HW` | `0x1C` | `0:GIF`, `1:VIF1`, `2:WAIT`, `3:VSYNC`, `4:SWAP`, `5:KEYON`, `6:PAD` | PS2 hardware registers & DMA | Direct GIF / GS DMA |
+| `OP_INLINE_ASM` | `0x1D` | `0:MFC0`, `1:MTC0`, `2:VU0`, `3:SPRAM`, `4:PERF_START`, `5:PERF_STOP` | Privileged COP0/COP2 registers & timers | `mfc0`, `mtc0`, perf counters |
+| `OP_LOOP_DEC_BR`| `0x1E` | `0:DECBR_NZ`, `1:DECBR_GEZ`, `2:INCBR_LT` | **Fused Loop Decrement/Increment & Branch** | Fused counter loop branch |
+| `OP_FUSED_MADD` | `0x1F` | `0:MADD_I32`, `1:MSUB_I32`, `2:MADD_F32`, `3:MSUB_F32`, `4:DOT_VEC2` | **Fused Multiply-Accumulate** | `madd`, `msub`, `madd.s` |
 
 ---
 
@@ -125,7 +126,7 @@ Instructions use three encodings, always 4-byte aligned:
 # Compile Crystal code to Citrine Bytecode (.cbc)
 citrine compile src/main.cr -o build/game.cbc
 
-# Inspect instructions and symbols
+# Inspect instructions and symbols using Citrine-32 dot-notation disassembly
 citrine disasm build/game.cbc
 ```
 
@@ -133,19 +134,4 @@ citrine disasm build/game.cbc
 
 - **Branch Delay Slot Preservation**: Every branch emitted by `Citrine::Compiler::MipsEmitter` (`bne`, `beq`, `j`, `jal`) must be followed by a valid instruction or `nop` (`0x00000000`). Never emit a branch inside a delay slot.
 - **128-bit Quadword Alignment**: When emitting vector load/store instructions (`lq`/`sq`), verify that the target memory pointer is 16-byte aligned.
-
-## Rapid Feature Verification Workflow
-
-When testing new language syntax, standard library features, or compiler intrinsics:
-1. **Create Scratch Test**: Write an isolated test script in `examples/scratch/test_<feature>.cr` (e.g. testing `arr[idx]`, string interpolation `"#{var}"`, or math).
-2. **Compile Verification**:
-   ```powershell
-   .\bin\citrine.exe compile examples\scratch\test_<feature>.cr
-   ```
-   Inspect bytecode size, SPRAM register frame, and compiler diagnostics.
-3. **Execution Verification**:
-   ```powershell
-   .\bin\citrine.exe run examples\scratch\test_<feature>.cr
-   ```
-4. **Clean Teardown**: Remove temporary scratch artifacts after verification.
-
+- **Zero-Mask Opcode Extraction**: Always decode primary opcode using `raw >> 27` (5 bits). Sub-opcode is extracted with `(raw >> 24) & 0x07`.

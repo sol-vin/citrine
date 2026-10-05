@@ -66,7 +66,7 @@ describe "Citrine Concurrency Subsystem" do
       cbc = compiler.compile(program)
 
       cbc.size.should be > 18
-      cbc[0, 4].should eq(Bytes[67, 66, 67, 49]) # "CBC1"
+      cbc[0, 4].should eq(Bytes[67, 66, 67, 50]) # "CBC2"
 
       # Functions table must have at least 2 functions: __fiber_0 and __main__
       compiler.functions.size.should be >= 2

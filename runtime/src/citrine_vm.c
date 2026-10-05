@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <math.h>
 #include "../include/citrine_vm.h"
 #include "../include/citrine_core.h"
 #include "../include/citrine_draw2d.h"
@@ -19,6 +20,17 @@ Value g_host_spram[1024];
 
 // Forward declaration of native dispatch table
 static void native_dispatch(CitrineVM* vm, uint16_t native_id, Value* args, uint8_t argc, Value* out_ret);
+
+static inline void* citrine_arena_alloc(Arena* arena, size_t size) {
+    if (!arena || !arena->buffer) return NULL;
+    size_t aligned_size = (size + 15) & ~15;
+    if (arena->offset + aligned_size > arena->capacity) {
+        return NULL;
+    }
+    void* ptr = arena->buffer + arena->offset;
+    arena->offset += aligned_size;
+    return ptr;
+}
 
 // ----------------------------------------------------------------------------
 // Core Parity Data Structures: Arrays, IO::Memory, Objects
@@ -162,7 +174,7 @@ static CitrineObject* citrine_object_new(uint32_t class_id, uint32_t field_count
 
 
 CitrineVM* citrine_vm_create(const uint8_t* cbc_data, size_t cbc_size) {
-    if (cbc_size < 18 || memcmp(cbc_data, "CBC1", 4) != 0) {
+    if (cbc_size < 18 || (memcmp(cbc_data, "CBC1", 4) != 0 && memcmp(cbc_data, "CBC2", 4) != 0)) {
         fprintf(stderr, "[CitrineVM] Error: Invalid bytecode magic header\n");
         return NULL;
     }
@@ -620,43 +632,40 @@ void citrine_vm_run(CitrineVM* vm) {
     Value* regs = spram + reg_base;
 
 #if defined(__GNUC__)
-    // Direct-Threaded Dispatch using computed goto (GNU labels-as-values)
-    static const void* dispatch_table[] = {
-        [OP_NOP]          = &&do_nop,
-        [OP_MOVE]         = &&do_move,
-        [OP_LOAD_NIL]     = &&do_load_nil,
-        [OP_LOAD_BOOL]    = &&do_load_bool,
-        [OP_LOAD_INT]     = &&do_load_int,
-        [OP_LOAD_CONST]   = &&do_load_const,
-        [OP_ADD]          = &&do_add,
-        [OP_SUB]          = &&do_sub,
-        [OP_MUL]          = &&do_mul,
-        [OP_DIV]          = &&do_div,
-        [OP_MOD]          = &&do_mod,
-        [OP_NEG]          = &&do_neg,
-        [OP_VEC2_NEW]     = &&do_vec2_new,
-        [OP_VEC2_GETX]    = &&do_vec2_getx,
-        [OP_VEC2_GETY]    = &&do_vec2_gety,
-        [OP_VEC2_SETX]    = &&do_vec2_setx,
-        [OP_VEC2_SETY]    = &&do_vec2_sety,
-        [OP_VEC2_ADD]     = &&do_vec2_add,
-        [OP_COLOR_NEW]    = &&do_color_new,
-        [OP_EQ]           = &&do_eq,
-        [OP_NE]           = &&do_ne,
-        [OP_LT]           = &&do_lt,
-        [OP_LE]           = &&do_le,
-        [OP_GT]           = &&do_gt,
-        [OP_GE]           = &&do_ge,
-        [OP_JUMP]         = &&do_jump,
-        [OP_JUMP_IF_TRUE] = &&do_jump_if_true,
-        [OP_JUMP_IF_FALSE]= &&do_jump_if_false,
-        [OP_CALL]         = &&do_call,
-        [OP_RETURN]       = &&do_return,
-        [OP_CALL_NATIVE]  = &&do_call_native,
-        [OP_SPAWN_FIBER]  = &&do_spawn_fiber,
-        [OP_YIELD]        = &&do_yield,
-        [OP_RESUME_FIBER] = &&do_resume_fiber,
-        [OP_HALT]         = &&do_halt
+    // Citrine-32 Primary Opcode Dispatch Table (32 entries = 128 bytes, locks in 2 L1 D-Cache lines)
+    static const void* primary_dispatch[32] = {
+        [OP_SYS]         = &&do_sys,         // 0x00
+        [OP_MOVE]        = &&do_move,        // 0x01
+        [OP_LOAD_CONST]  = &&do_load_const,  // 0x02
+        [OP_LOAD_IMM]    = &&do_load_imm,    // 0x03
+        [OP_LOAD_MEM]    = &&do_load_mem,    // 0x04
+        [OP_STORE_MEM]   = &&do_store_mem,   // 0x05
+        [OP_ADD]         = &&do_add,         // 0x06
+        [OP_SUB]         = &&do_sub,         // 0x07
+        [OP_MUL]         = &&do_mul,         // 0x08
+        [OP_DIV_MOD]     = &&do_div_mod,     // 0x09
+        [OP_BITWISE]     = &&do_bitwise,     // 0x0A
+        [OP_SHIFT]       = &&do_shift,       // 0x0B
+        [OP_COMPARE]     = &&do_compare,     // 0x0C
+        [OP_TEST]        = &&do_test,        // 0x0D
+        [OP_FLOAT_ALU]   = &&do_float_alu,   // 0x0E
+        [OP_JUMP]        = &&do_jump,        // 0x0F
+        [OP_BRANCH_Z]    = &&do_branch_z,    // 0x10
+        [OP_BRANCH_CMP]  = &&do_branch_cmp,  // 0x11
+        [OP_CALL]        = &&do_call,        // 0x12
+        [OP_RETURN]      = &&do_return,      // 0x13
+        [OP_CALL_NATIVE] = &&do_call_native, // 0x14
+        [OP_VEC2_MATH]   = &&do_vec2_math,   // 0x15
+        [OP_VEC2_PROP]   = &&do_vec2_prop,   // 0x16
+        [OP_COLOR_OP]    = &&do_color_op,    // 0x17
+        [OP_SIMD_MMI]    = &&do_simd_mmi,    // 0x18
+        [OP_COLLECTION]  = &&do_collection,  // 0x19
+        [OP_FIBER_OP]    = &&do_fiber_op,    // 0x1A
+        [OP_CHANNEL_OP]  = &&do_channel_op,  // 0x1B
+        [OP_PS2_HW]      = &&do_ps2_hw,      // 0x1C
+        [OP_INLINE_ASM]  = &&do_inline_asm,  // 0x1D
+        [OP_LOOP_DEC_BR] = &&do_loop_dec_br, // 0x1E
+        [OP_FUSED_MADD]  = &&do_fused_madd   // 0x1F
     };
 
     #define DISPATCH() do { \
@@ -665,64 +674,218 @@ void citrine_vm_run(CitrineVM* vm) {
             return; \
         } \
         uint32_t instr_word = vm->bytecode[vm->pc++]; \
-        uint8_t op = (instr_word >> 24) & 0xFF; \
-        goto *dispatch_table[op]; \
+        uint8_t op = (instr_word >> 27) & 0x1F; \
+        goto *primary_dispatch[op]; \
     } while (0)
+
+    #define INSTR_SUBOP(raw)   (((raw) >> 24) & 0x07)
+    #define INSTR_DST(raw)     (((raw) >> 16) & 0xFF)
+    #define INSTR_A(raw)       (((raw) >> 8) & 0xFF)
+    #define INSTR_B(raw)       ((raw) & 0xFF)
+    #define INSTR_IMM16(raw)   ((uint16_t)((raw) & 0xFFFF))
+    #define INSTR_SIMM16(raw)  ((int16_t)((raw) & 0xFFFF))
+    #define INSTR_OFFSET8(raw) ((int8_t)((raw) & 0xFF))
+    #define INSTR_JUMP24(raw)  (((int32_t)(((raw) & 0xFFFFFF) << 8)) >> 8)
 
     DISPATCH();
 
-    do_nop:
+    // 0x00: OP_SYS
+    do_sys: {
+        uint32_t raw = vm->bytecode[vm->pc - 1];
+        uint8_t subop = INSTR_SUBOP(raw);
+        if (subop == SUBOP_SYS_HALT) {
+            return;
+        } else if (subop == SUBOP_SYS_BREAK) {
+            citrine_vm_panic(vm, "Breakpoint trap");
+            return;
+        } else if (subop == SUBOP_SYS_WATCHDOG_RESET) {
+            vm->instruction_count = 0;
+        }
         DISPATCH();
+    }
 
+    // 0x01: OP_MOVE
     do_move: {
         uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t src = (raw >> 8) & 0xFF;
-        regs[dst] = regs[src];
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t a = INSTR_A(raw);
+        if (subop == SUBOP_MOVE_CMOVZ) {
+            uint8_t b = INSTR_B(raw);
+            if (regs[b].type == VAL_NIL || (regs[b].type == VAL_BOOL && !regs[b].as.i) || (regs[b].type == VAL_INT32 && regs[b].as.i == 0)) {
+                regs[dst] = regs[a];
+            }
+        } else if (subop == SUBOP_MOVE_CMOVN) {
+            uint8_t b = INSTR_B(raw);
+            if (!(regs[b].type == VAL_NIL || (regs[b].type == VAL_BOOL && !regs[b].as.i) || (regs[b].type == VAL_INT32 && regs[b].as.i == 0))) {
+                regs[dst] = regs[a];
+            }
+        } else if (subop == SUBOP_MOVE_SWAP) {
+            Value tmp = regs[dst];
+            regs[dst] = regs[a];
+            regs[a] = tmp;
+        } else {
+            regs[dst] = regs[a];
+        }
         DISPATCH();
     }
 
-    do_load_nil: {
-        uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        regs[dst].type = VAL_NIL;
-        DISPATCH();
-    }
-
-    do_load_bool: {
-        uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint16_t imm = raw & 0xFFFF;
-        regs[dst].type = VAL_BOOL;
-        regs[dst].as.i = (imm != 0);
-        DISPATCH();
-    }
-
-    do_load_int: {
-        uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        int16_t imm = (int16_t)(raw & 0xFFFF);
-        regs[dst].type = VAL_INT32;
-        regs[dst].as.i = imm;
-        DISPATCH();
-    }
-
+    // 0x02: OP_LOAD_CONST
     do_load_const: {
         uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint16_t c_idx = raw & 0xFFFF;
+        uint8_t dst = INSTR_DST(raw);
+        uint16_t c_idx = INSTR_IMM16(raw);
         if (c_idx < vm->num_constants) {
             regs[dst] = vm->constant_pool[c_idx];
         }
         DISPATCH();
     }
 
+    // 0x03: OP_LOAD_IMM
+    do_load_imm: {
+        uint32_t raw = vm->bytecode[vm->pc - 1];
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        int16_t simm = INSTR_SIMM16(raw);
+        uint16_t uimm = INSTR_IMM16(raw);
+        switch (subop) {
+            case SUBOP_IMM_NIL:
+                regs[dst].type = VAL_NIL;
+                regs[dst].as.i = 0;
+                break;
+            case SUBOP_IMM_BOOL:
+                regs[dst].type = VAL_BOOL;
+                regs[dst].as.i = (uimm != 0);
+                break;
+            case SUBOP_IMM_INT16:
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = (int32_t)simm;
+                break;
+            case SUBOP_IMM_UINT16:
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = (int32_t)uimm;
+                break;
+            case SUBOP_IMM_UPPER16:
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = ((int32_t)uimm) << 16;
+                break;
+            case SUBOP_IMM_ZERO:
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = 0;
+                break;
+            case SUBOP_IMM_MINUS1:
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = -1;
+                break;
+            default:
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = (int32_t)simm;
+                break;
+        }
+        DISPATCH();
+    }
+
+    // 0x04: OP_LOAD_MEM
+    do_load_mem: {
+        uint32_t raw = vm->bytecode[vm->pc - 1];
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t a = INSTR_A(raw);
+        uint8_t b = INSTR_B(raw);
+        uint8_t* ptr = (uint8_t*)regs[a].as.ptr + b;
+        switch (subop) {
+            case SUBOP_MEM_LB:
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = (int8_t)*ptr;
+                break;
+            case SUBOP_MEM_LBU:
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = (uint8_t)*ptr;
+                break;
+            case SUBOP_MEM_LH:
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = *(int16_t*)ptr;
+                break;
+            case SUBOP_MEM_LHU:
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = *(uint16_t*)ptr;
+                break;
+            case SUBOP_MEM_LW:
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = *(int32_t*)ptr;
+                break;
+            case SUBOP_MEM_LWC1:
+                regs[dst].type = VAL_FLOAT32;
+                regs[dst].as.f = *(float*)ptr;
+                break;
+            case SUBOP_MEM_LD:
+            case SUBOP_MEM_LQ:
+                regs[dst] = *(Value*)ptr;
+                break;
+            default:
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = *(int32_t*)ptr;
+                break;
+        }
+        DISPATCH();
+    }
+
+    // 0x05: OP_STORE_MEM
+    do_store_mem: {
+        uint32_t raw = vm->bytecode[vm->pc - 1];
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t a = INSTR_A(raw);
+        uint8_t b = INSTR_B(raw);
+        uint8_t* ptr = (uint8_t*)regs[a].as.ptr + b;
+        switch (subop) {
+            case 0:
+                *ptr = (uint8_t)regs[dst].as.i;
+                break;
+            case 1:
+                *(uint16_t*)ptr = (uint16_t)regs[dst].as.i;
+                break;
+            case 2:
+                *(int32_t*)ptr = regs[dst].as.i;
+                break;
+            case 3:
+                *(float*)ptr = regs[dst].as.f;
+                break;
+            case 4:
+            case 5:
+                *(Value*)ptr = regs[dst];
+                break;
+            default:
+                *(int32_t*)ptr = regs[dst].as.i;
+                break;
+        }
+        DISPATCH();
+    }
+
+    // 0x06: OP_ADD
     do_add: {
         uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t a = (raw >> 8) & 0xFF;
-        uint8_t b = raw & 0xFF;
-        if (regs[a].type == VAL_FLOAT32 || regs[b].type == VAL_FLOAT32) {
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t a = INSTR_A(raw);
+        uint8_t b = INSTR_B(raw);
+        if (subop == SUBOP_ADD_IMM8) {
+            regs[dst].type = VAL_INT32;
+            regs[dst].as.i = regs[a].as.i + (int8_t)b;
+        } else if (subop == SUBOP_ADD_STR || (regs[a].type == VAL_STRING && regs[b].type == VAL_STRING)) {
+            const char* sa = regs[a].as.str ? regs[a].as.str : "";
+            const char* sb = regs[b].as.str ? regs[b].as.str : "";
+            size_t la = strlen(sa);
+            size_t lb = strlen(sb);
+            char* cat = (char*)citrine_arena_alloc(&vm->frame_arena, la + lb + 1);
+            if (cat) {
+                memcpy(cat, sa, la);
+                memcpy(cat + la, sb, lb);
+                cat[la + lb] = '\0';
+                regs[dst].type = VAL_STRING;
+                regs[dst].as.str = cat;
+            }
+        } else if (regs[a].type == VAL_FLOAT32 || regs[b].type == VAL_FLOAT32) {
             float fa = (regs[a].type == VAL_FLOAT32) ? regs[a].as.f : (float)regs[a].as.i;
             float fb = (regs[b].type == VAL_FLOAT32) ? regs[b].as.f : (float)regs[b].as.i;
             regs[dst].type = VAL_FLOAT32;
@@ -734,12 +897,25 @@ void citrine_vm_run(CitrineVM* vm) {
         DISPATCH();
     }
 
+    // 0x07: OP_SUB
     do_sub: {
         uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t a = (raw >> 8) & 0xFF;
-        uint8_t b = raw & 0xFF;
-        if (regs[a].type == VAL_FLOAT32 || regs[b].type == VAL_FLOAT32) {
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t a = INSTR_A(raw);
+        uint8_t b = INSTR_B(raw);
+        if (subop == SUBOP_SUB_NEG) {
+            if (regs[a].type == VAL_FLOAT32) {
+                regs[dst].type = VAL_FLOAT32;
+                regs[dst].as.f = -regs[a].as.f;
+            } else {
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = -regs[a].as.i;
+            }
+        } else if (subop == SUBOP_SUB_IMM8) {
+            regs[dst].type = VAL_INT32;
+            regs[dst].as.i = regs[a].as.i - (int8_t)b;
+        } else if (regs[a].type == VAL_FLOAT32 || regs[b].type == VAL_FLOAT32) {
             float fa = (regs[a].type == VAL_FLOAT32) ? regs[a].as.f : (float)regs[a].as.i;
             float fb = (regs[b].type == VAL_FLOAT32) ? regs[b].as.f : (float)regs[b].as.i;
             regs[dst].type = VAL_FLOAT32;
@@ -751,12 +927,17 @@ void citrine_vm_run(CitrineVM* vm) {
         DISPATCH();
     }
 
+    // 0x08: OP_MUL
     do_mul: {
         uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t a = (raw >> 8) & 0xFF;
-        uint8_t b = raw & 0xFF;
-        if (regs[a].type == VAL_FLOAT32 || regs[b].type == VAL_FLOAT32) {
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t a = INSTR_A(raw);
+        uint8_t b = INSTR_B(raw);
+        if (subop == SUBOP_MUL_IMM8) {
+            regs[dst].type = VAL_INT32;
+            regs[dst].as.i = regs[a].as.i * (int8_t)b;
+        } else if (regs[a].type == VAL_FLOAT32 || regs[b].type == VAL_FLOAT32) {
             float fa = (regs[a].type == VAL_FLOAT32) ? regs[a].as.f : (float)regs[a].as.i;
             float fb = (regs[b].type == VAL_FLOAT32) ? regs[b].as.f : (float)regs[b].as.i;
             regs[dst].type = VAL_FLOAT32;
@@ -768,216 +949,318 @@ void citrine_vm_run(CitrineVM* vm) {
         DISPATCH();
     }
 
-    do_div: {
+    // 0x09: OP_DIV_MOD
+    do_div_mod: {
         uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t a = (raw >> 8) & 0xFF;
-        uint8_t b = raw & 0xFF;
-        float fb = (regs[b].type == VAL_FLOAT32) ? regs[b].as.f : (float)regs[b].as.i;
-        if (fb == 0.0f) {
-            citrine_vm_panic(vm, "Division by zero");
-            return;
-        }
-        float fa = (regs[a].type == VAL_FLOAT32) ? regs[a].as.f : (float)regs[a].as.i;
-        regs[dst].type = VAL_FLOAT32;
-        regs[dst].as.f = fa / fb;
-        DISPATCH();
-    }
-
-    do_mod: {
-        uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t a = (raw >> 8) & 0xFF;
-        uint8_t b = raw & 0xFF;
-        if (regs[b].as.i == 0) {
-            citrine_vm_panic(vm, "Modulo by zero");
-            return;
-        }
-        regs[dst].type = VAL_INT32;
-        regs[dst].as.i = regs[a].as.i % regs[b].as.i;
-        DISPATCH();
-    }
-
-    do_neg: {
-        uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t a = (raw >> 8) & 0xFF;
-        if (regs[a].type == VAL_FLOAT32) {
-            regs[dst].type = VAL_FLOAT32;
-            regs[dst].as.f = -regs[a].as.f;
-        } else {
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t a = INSTR_A(raw);
+        uint8_t b = INSTR_B(raw);
+        if (subop == SUBOP_MOD_S32) {
+            if (regs[b].as.i == 0) {
+                citrine_vm_panic(vm, "Modulo by zero");
+                return;
+            }
             regs[dst].type = VAL_INT32;
-            regs[dst].as.i = -regs[a].as.i;
+            regs[dst].as.i = regs[a].as.i % regs[b].as.i;
+        } else {
+            if (regs[a].type == VAL_FLOAT32 || regs[b].type == VAL_FLOAT32) {
+                float fb = (regs[b].type == VAL_FLOAT32) ? regs[b].as.f : (float)regs[b].as.i;
+                if (fb == 0.0f) {
+                    citrine_vm_panic(vm, "Division by zero");
+                    return;
+                }
+                float fa = (regs[a].type == VAL_FLOAT32) ? regs[a].as.f : (float)regs[a].as.i;
+                regs[dst].type = VAL_FLOAT32;
+                regs[dst].as.f = fa / fb;
+            } else {
+                if (regs[b].as.i == 0) {
+                    citrine_vm_panic(vm, "Division by zero");
+                    return;
+                }
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = regs[a].as.i / regs[b].as.i;
+            }
         }
         DISPATCH();
     }
 
-    do_vec2_new: {
+    // 0x0A: OP_BITWISE
+    do_bitwise: {
         uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t a = (raw >> 8) & 0xFF;
-        uint8_t b = raw & 0xFF;
-        regs[dst].type = VAL_VEC2;
-        regs[dst].as.vec2.x = (regs[a].type == VAL_FLOAT32) ? regs[a].as.f : (float)regs[a].as.i;
-        regs[dst].as.vec2.y = (regs[b].type == VAL_FLOAT32) ? regs[b].as.f : (float)regs[b].as.i;
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t a = INSTR_A(raw);
+        uint8_t b = INSTR_B(raw);
+        regs[dst].type = VAL_INT32;
+        switch (subop) {
+            case SUBOP_BIT_AND:
+                regs[dst].as.i = regs[a].as.i & regs[b].as.i;
+                break;
+            case SUBOP_BIT_OR:
+                regs[dst].as.i = regs[a].as.i | regs[b].as.i;
+                break;
+            case SUBOP_BIT_XOR:
+                regs[dst].as.i = regs[a].as.i ^ regs[b].as.i;
+                break;
+            case SUBOP_BIT_NOR:
+                regs[dst].as.i = ~(regs[a].as.i | regs[b].as.i);
+                break;
+            case SUBOP_BIT_AND_NOT:
+                regs[dst].as.i = regs[a].as.i & ~regs[b].as.i;
+                break;
+            case SUBOP_BIT_XNOR:
+                regs[dst].as.i = ~(regs[a].as.i ^ regs[b].as.i);
+                break;
+            default:
+                regs[dst].as.i = regs[a].as.i & regs[b].as.i;
+                break;
+        }
         DISPATCH();
     }
 
-    do_vec2_getx: {
+    // 0x0B: OP_SHIFT
+    do_shift: {
         uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t a = (raw >> 8) & 0xFF;
-        regs[dst].type = VAL_FLOAT32;
-        regs[dst].as.f = regs[a].as.vec2.x;
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t a = INSTR_A(raw);
+        uint8_t b = INSTR_B(raw);
+        regs[dst].type = VAL_INT32;
+        uint32_t shift = (uint32_t)(regs[b].as.i & 0x1F);
+        switch (subop) {
+            case SUBOP_SHIFT_SLL:
+                regs[dst].as.i = (int32_t)((uint32_t)regs[a].as.i << shift);
+                break;
+            case SUBOP_SHIFT_SRL:
+                regs[dst].as.i = (int32_t)((uint32_t)regs[a].as.i >> shift);
+                break;
+            case SUBOP_SHIFT_SRA:
+                regs[dst].as.i = regs[a].as.i >> shift;
+                break;
+            case SUBOP_SHIFT_ROTL: {
+                uint32_t v = (uint32_t)regs[a].as.i;
+                regs[dst].as.i = (int32_t)((v << shift) | (v >> (32 - shift)));
+                break;
+            }
+            case SUBOP_SHIFT_ROTR: {
+                uint32_t v = (uint32_t)regs[a].as.i;
+                regs[dst].as.i = (int32_t)((v >> shift) | (v << (32 - shift)));
+                break;
+            }
+            default:
+                regs[dst].as.i = (int32_t)((uint32_t)regs[a].as.i << shift);
+                break;
+        }
         DISPATCH();
     }
 
-    do_vec2_gety: {
+    // 0x0C: OP_COMPARE
+    do_compare: {
         uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t a = (raw >> 8) & 0xFF;
-        regs[dst].type = VAL_FLOAT32;
-        regs[dst].as.f = regs[a].as.vec2.y;
-        DISPATCH();
-    }
-
-    do_vec2_setx: {
-        uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t a = (raw >> 8) & 0xFF;
-        regs[dst].as.vec2.x = (regs[a].type == VAL_FLOAT32) ? regs[a].as.f : (float)regs[a].as.i;
-        DISPATCH();
-    }
-
-    do_vec2_sety: {
-        uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t a = (raw >> 8) & 0xFF;
-        regs[dst].as.vec2.y = (regs[a].type == VAL_FLOAT32) ? regs[a].as.f : (float)regs[a].as.i;
-        DISPATCH();
-    }
-
-    do_vec2_add: {
-        uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t a = (raw >> 8) & 0xFF;
-        uint8_t b = raw & 0xFF;
-        regs[dst].type = VAL_VEC2;
-        regs[dst].as.vec2.x = regs[a].as.vec2.x + regs[b].as.vec2.x;
-        regs[dst].as.vec2.y = regs[a].as.vec2.y + regs[b].as.vec2.y;
-        DISPATCH();
-    }
-
-    do_color_new: {
-        uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t a = (raw >> 8) & 0xFF;
-        uint8_t b = raw & 0xFF;
-        regs[dst].type = VAL_COLOR;
-        regs[dst].as.color.r = (uint8_t)regs[a].as.i;
-        regs[dst].as.color.g = (uint8_t)regs[b].as.i;
-        regs[dst].as.color.b = 0;
-        regs[dst].as.color.a = 255;
-        DISPATCH();
-    }
-
-    do_eq: {
-        uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t a = (raw >> 8) & 0xFF;
-        uint8_t b = raw & 0xFF;
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t a = INSTR_A(raw);
+        uint8_t b = INSTR_B(raw);
         regs[dst].type = VAL_BOOL;
-        regs[dst].as.i = (regs[a].as.i == regs[b].as.i);
-        DISPATCH();
-    }
-
-    do_ne: {
-        uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t a = (raw >> 8) & 0xFF;
-        uint8_t b = raw & 0xFF;
-        regs[dst].type = VAL_BOOL;
-        regs[dst].as.i = (regs[a].as.i != regs[b].as.i);
-        DISPATCH();
-    }
-
-    do_lt: {
-        uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t a = (raw >> 8) & 0xFF;
-        uint8_t b = raw & 0xFF;
-        regs[dst].type = VAL_BOOL;
-        if (regs[a].type == VAL_FLOAT32 || regs[b].type == VAL_FLOAT32) {
+        if (subop == SUBOP_CMP_STR_EQ) {
+            regs[dst].as.i = (strcmp(regs[a].as.str ? regs[a].as.str : "", regs[b].as.str ? regs[b].as.str : "") == 0);
+        } else if (subop == SUBOP_CMP_PTR_EQ) {
+            regs[dst].as.i = (regs[a].as.ptr == regs[b].as.ptr);
+        } else if (regs[a].type == VAL_FLOAT32 || regs[b].type == VAL_FLOAT32) {
             float fa = (regs[a].type == VAL_FLOAT32) ? regs[a].as.f : (float)regs[a].as.i;
             float fb = (regs[b].type == VAL_FLOAT32) ? regs[b].as.f : (float)regs[b].as.i;
-            regs[dst].as.i = (fa < fb);
+            switch (subop) {
+                case SUBOP_CMP_EQ: regs[dst].as.i = (fa == fb); break;
+                case SUBOP_CMP_NE: regs[dst].as.i = (fa != fb); break;
+                case SUBOP_CMP_LT: regs[dst].as.i = (fa < fb); break;
+                case SUBOP_CMP_LE: regs[dst].as.i = (fa <= fb); break;
+                case SUBOP_CMP_GT: regs[dst].as.i = (fa > fb); break;
+                case SUBOP_CMP_GE: regs[dst].as.i = (fa >= fb); break;
+                default: regs[dst].as.i = (fa == fb); break;
+            }
         } else {
-            regs[dst].as.i = (regs[a].as.i < regs[b].as.i);
+            int32_t ia = regs[a].as.i;
+            int32_t ib = regs[b].as.i;
+            switch (subop) {
+                case SUBOP_CMP_EQ: regs[dst].as.i = (ia == ib); break;
+                case SUBOP_CMP_NE: regs[dst].as.i = (ia != ib); break;
+                case SUBOP_CMP_LT: regs[dst].as.i = (ia < ib); break;
+                case SUBOP_CMP_LE: regs[dst].as.i = (ia <= ib); break;
+                case SUBOP_CMP_GT: regs[dst].as.i = (ia > ib); break;
+                case SUBOP_CMP_GE: regs[dst].as.i = (ia >= ib); break;
+                default: regs[dst].as.i = (ia == ib); break;
+            }
         }
         DISPATCH();
     }
 
-    do_le: {
+    // 0x0D: OP_TEST
+    do_test: {
         uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t a = (raw >> 8) & 0xFF;
-        uint8_t b = raw & 0xFF;
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t a = INSTR_A(raw);
         regs[dst].type = VAL_BOOL;
-        regs[dst].as.i = (regs[a].as.i <= regs[b].as.i);
+        switch (subop) {
+            case SUBOP_TEST_NIL:
+                regs[dst].as.i = (regs[a].type == VAL_NIL);
+                break;
+            case SUBOP_TEST_NOT_NIL:
+                regs[dst].as.i = (regs[a].type != VAL_NIL);
+                break;
+            case SUBOP_TEST_ZERO:
+                regs[dst].as.i = (regs[a].as.i == 0);
+                break;
+            case SUBOP_TEST_NOT_ZERO:
+                regs[dst].as.i = (regs[a].as.i != 0);
+                break;
+            case SUBOP_TEST_TRUTHY:
+                regs[dst].as.i = !(regs[a].type == VAL_NIL || (regs[a].type == VAL_BOOL && !regs[a].as.i));
+                break;
+            case SUBOP_TEST_FALSY:
+                regs[dst].as.i = (regs[a].type == VAL_NIL || (regs[a].type == VAL_BOOL && !regs[a].as.i));
+                break;
+            default:
+                regs[dst].as.i = (regs[a].as.i != 0);
+                break;
+        }
         DISPATCH();
     }
 
-    do_gt: {
+    // 0x0E: OP_FLOAT_ALU
+    do_float_alu: {
         uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t a = (raw >> 8) & 0xFF;
-        uint8_t b = raw & 0xFF;
-        regs[dst].type = VAL_BOOL;
-        regs[dst].as.i = (regs[a].as.i > regs[b].as.i);
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t a = INSTR_A(raw);
+        uint8_t b = INSTR_B(raw);
+        regs[dst].type = VAL_FLOAT32;
+        switch (subop) {
+            case SUBOP_FLOAT_ADD:
+                regs[dst].as.f = regs[a].as.f + regs[b].as.f;
+                break;
+            case SUBOP_FLOAT_SUB:
+                regs[dst].as.f = regs[a].as.f - regs[b].as.f;
+                break;
+            case SUBOP_FLOAT_MUL:
+                regs[dst].as.f = regs[a].as.f * regs[b].as.f;
+                break;
+            case SUBOP_FLOAT_DIV:
+                regs[dst].as.f = regs[a].as.f / regs[b].as.f;
+                break;
+            case SUBOP_FLOAT_NEG:
+                regs[dst].as.f = -regs[a].as.f;
+                break;
+            case SUBOP_FLOAT_ABS:
+                regs[dst].as.f = fabsf(regs[a].as.f);
+                break;
+            case SUBOP_FLOAT_SQRT:
+                regs[dst].as.f = sqrtf(regs[a].as.f);
+                break;
+            case SUBOP_FLOAT_CVT:
+                regs[dst].as.f = (float)regs[a].as.i;
+                break;
+            default:
+                regs[dst].as.f = regs[a].as.f + regs[b].as.f;
+                break;
+        }
         DISPATCH();
     }
 
-    do_ge: {
-        uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t a = (raw >> 8) & 0xFF;
-        uint8_t b = raw & 0xFF;
-        regs[dst].type = VAL_BOOL;
-        regs[dst].as.i = (regs[a].as.i >= regs[b].as.i);
-        DISPATCH();
-    }
-
+    // 0x0F: OP_JUMP
     do_jump: {
         uint32_t raw = vm->bytecode[vm->pc - 1];
-        int16_t offset = (int16_t)(raw & 0xFFFF);
-        vm->pc += offset;
-        DISPATCH();
-    }
-
-    do_jump_if_true: {
-        uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t cond_reg = (raw >> 16) & 0xFF;
-        int16_t offset = (int16_t)(raw & 0xFFFF);
-        if (regs[cond_reg].type == VAL_BOOL && regs[cond_reg].as.i != 0) {
-            vm->pc += offset;
+        uint8_t subop = INSTR_SUBOP(raw);
+        if (subop == SUBOP_JUMP_REG) {
+            uint8_t dst = INSTR_DST(raw);
+            vm->pc = (uint32_t)regs[dst].as.i;
+        } else if (subop == SUBOP_JUMP_REL16) {
+            vm->pc += INSTR_SIMM16(raw);
+        } else {
+            // SUBOP_JUMP_REL24 (default 24-bit jump covering entire 32MB address space)
+            vm->pc += INSTR_JUMP24(raw);
         }
         DISPATCH();
     }
 
-    do_jump_if_false: {
+    // 0x10: OP_BRANCH_Z
+    do_branch_z: {
         uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t cond_reg = (raw >> 16) & 0xFF;
-        int16_t offset = (int16_t)(raw & 0xFFFF);
-        if (regs[cond_reg].type == VAL_NIL || (regs[cond_reg].type == VAL_BOOL && regs[cond_reg].as.i == 0)) {
-            vm->pc += offset;
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t cond_reg = INSTR_DST(raw);
+        int16_t offset = INSTR_SIMM16(raw);
+        switch (subop) {
+            case SUBOP_BRZ_TRUTHY:
+                if (regs[cond_reg].type == VAL_BOOL && regs[cond_reg].as.i != 0) {
+                    vm->pc += offset;
+                }
+                break;
+            case SUBOP_BRZ_FALSY:
+                if (regs[cond_reg].type == VAL_NIL || (regs[cond_reg].type == VAL_BOOL && regs[cond_reg].as.i == 0)) {
+                    vm->pc += offset;
+                }
+                break;
+            case SUBOP_BRZ_ZERO:
+                if (regs[cond_reg].as.i == 0) vm->pc += offset;
+                break;
+            case SUBOP_BRZ_NONZERO:
+                if (regs[cond_reg].as.i != 0) vm->pc += offset;
+                break;
+            case SUBOP_BRZ_POS:
+                if (regs[cond_reg].as.i > 0) vm->pc += offset;
+                break;
+            case SUBOP_BRZ_NEG:
+                if (regs[cond_reg].as.i < 0) vm->pc += offset;
+                break;
+            default:
+                if (regs[cond_reg].type == VAL_BOOL && regs[cond_reg].as.i != 0) vm->pc += offset;
+                break;
         }
         DISPATCH();
     }
 
+    // 0x11: OP_BRANCH_CMP (Fused Compare-and-Branch)
+    do_branch_cmp: {
+        uint32_t raw = vm->bytecode[vm->pc - 1];
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t r1 = INSTR_DST(raw);
+        uint8_t r2 = INSTR_A(raw);
+        int8_t offset = INSTR_OFFSET8(raw);
+        if (regs[r1].type == VAL_FLOAT32 || regs[r2].type == VAL_FLOAT32) {
+            float fa = (regs[r1].type == VAL_FLOAT32) ? regs[r1].as.f : (float)regs[r1].as.i;
+            float fb = (regs[r2].type == VAL_FLOAT32) ? regs[r2].as.f : (float)regs[r2].as.i;
+            switch (subop) {
+                case SUBOP_BRCMP_BEQ: if (fa == fb) vm->pc += offset; break;
+                case SUBOP_BRCMP_BNE: if (fa != fb) vm->pc += offset; break;
+                case SUBOP_BRCMP_BLT: if (fa <  fb) vm->pc += offset; break;
+                case SUBOP_BRCMP_BLE: if (fa <= fb) vm->pc += offset; break;
+                case SUBOP_BRCMP_BGT: if (fa >  fb) vm->pc += offset; break;
+                case SUBOP_BRCMP_BGE: if (fa >= fb) vm->pc += offset; break;
+                default: break;
+            }
+        } else {
+            int32_t ia = regs[r1].as.i;
+            int32_t ib = regs[r2].as.i;
+            switch (subop) {
+                case SUBOP_BRCMP_BEQ: if (ia == ib) vm->pc += offset; break;
+                case SUBOP_BRCMP_BNE: if (ia != ib) vm->pc += offset; break;
+                case SUBOP_BRCMP_BLT: if (ia <  ib) vm->pc += offset; break;
+                case SUBOP_BRCMP_BLE: if (ia <= ib) vm->pc += offset; break;
+                case SUBOP_BRCMP_BGT: if (ia >  ib) vm->pc += offset; break;
+                case SUBOP_BRCMP_BGE: if (ia >= ib) vm->pc += offset; break;
+                default: break;
+            }
+        }
+        DISPATCH();
+    }
+
+    // 0x12: OP_CALL
     do_call: {
         uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint16_t func_idx = raw & 0xFFFF;
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        uint16_t func_idx = (subop == SUBOP_CALL_INDIRECT) ? (uint16_t)regs[dst].as.i : INSTR_IMM16(raw);
         if (vm->call_depth >= 63) {
             citrine_vm_panic(vm, "Stack Overflow: call depth exceeded 64 frames");
             return;
@@ -987,30 +1270,40 @@ void citrine_vm_run(CitrineVM* vm) {
             return;
         }
         CitrineFunction* target_fn = &vm->functions[func_idx];
-        vm->call_stack[vm->call_depth].return_pc = vm->pc;
-        vm->call_stack[vm->call_depth].reg_base = reg_base;
-        vm->call_stack[vm->call_depth].dest_reg = dst;
-        vm->call_depth++;
-        reg_base += dst + 1;
-        if (reg_base + target_fn->num_registers >= MAX_SPRAM_REGISTERS - 1) {
-            citrine_vm_panic(vm, "SPRAM Register Window Overflow (exceeded %u registers)", MAX_SPRAM_REGISTERS);
-            return;
+        if (subop == SUBOP_CALL_TAIL_DIRECT || subop == SUBOP_CALL_TAIL_INDIRECT) {
+            // Zero-Stack Tail Call: reuse current frame directly
+            vm->pc = target_fn->code_offset;
+        } else {
+            vm->call_stack[vm->call_depth].return_pc = vm->pc;
+            vm->call_stack[vm->call_depth].reg_base = reg_base;
+            vm->call_stack[vm->call_depth].dest_reg = dst;
+            vm->call_depth++;
+            reg_base += dst + 1;
+            if (reg_base + target_fn->num_registers >= MAX_SPRAM_REGISTERS - 1) {
+                citrine_vm_panic(vm, "SPRAM Register Window Overflow (exceeded %u registers)", MAX_SPRAM_REGISTERS);
+                return;
+            }
+            regs = spram + reg_base;
+            vm->pc = target_fn->code_offset;
         }
-        regs = spram + reg_base;
-        vm->pc = target_fn->code_offset;
         DISPATCH();
     }
 
+    // 0x13: OP_RETURN
     do_return: {
         uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t ret_reg = (raw >> 16) & 0xFF;
-        Value ret_val = regs[ret_reg];
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t ret_reg = INSTR_DST(raw);
+        Value ret_val;
+        if (subop == SUBOP_RET_NIL) {
+            ret_val.type = VAL_NIL; ret_val.flags = 0; ret_val.as.i = 0;
+        } else {
+            ret_val = regs[ret_reg];
+        }
         if (vm->call_depth == 0) {
             if (vm->scheduler.current_fiber == 0) {
-                // Exit program when main fiber completes
                 return;
             } else {
-                // Background fiber completed
                 CitrineFiber* curr = &vm->scheduler.fibers[vm->scheduler.current_fiber];
                 curr->state = FIBER_DEAD;
                 if (vm->scheduler.fiber_count > 0) vm->scheduler.fiber_count--;
@@ -1030,12 +1323,12 @@ void citrine_vm_run(CitrineVM* vm) {
         DISPATCH();
     }
 
-
+    // 0x14: OP_CALL_NATIVE
     do_call_native: {
         uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint8_t base = (raw >> 8) & 0xFF;
-        uint16_t native_id = raw & 0xFF; // bottom 8 or 16 bits
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t base = INSTR_A(raw);
+        uint16_t native_id = INSTR_B(raw);
         native_dispatch(vm, native_id, &regs[base], 0, &regs[dst]);
         if (vm->scheduler.fibers[vm->scheduler.current_fiber].state != FIBER_RUNNING) {
             scheduler_switch_next(vm, regs);
@@ -1043,37 +1336,355 @@ void citrine_vm_run(CitrineVM* vm) {
         DISPATCH();
     }
 
-    do_spawn_fiber: {
+    // 0x15: OP_VEC2_MATH
+    do_vec2_math: {
         uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t dst = (raw >> 16) & 0xFF;
-        uint16_t func_idx = raw & 0xFFFF;
-        uint8_t argc = (func_idx < vm->num_functions) ? vm->functions[func_idx].argc : 0;
-        uint32_t fib_id = citrine_scheduler_spawn(vm, func_idx, &regs[dst + 1], argc);
-        regs[dst].type = VAL_INT32;
-        regs[dst].as.i = (int32_t)fib_id;
-        DISPATCH();
-    }
-
-    do_yield: {
-        scheduler_switch_next(vm, regs);
-        DISPATCH();
-    }
-
-    do_resume_fiber: {
-        uint32_t raw = vm->bytecode[vm->pc - 1];
-        uint8_t target_reg = (raw >> 16) & 0xFF;
-        uint32_t fib_id = (uint32_t)regs[target_reg].as.i;
-        for (uint32_t i = 0; i < vm->scheduler.max_fibers; i++) {
-            if (vm->scheduler.fibers[i].id == fib_id && vm->scheduler.fibers[i].state != FIBER_DEAD) {
-                vm->scheduler.fibers[i].state = FIBER_READY;
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t a = INSTR_A(raw);
+        uint8_t b = INSTR_B(raw);
+        switch (subop) {
+            case SUBOP_VEC2_NEW:
+                regs[dst].type = VAL_VEC2;
+                regs[dst].as.vec2.x = (regs[a].type == VAL_FLOAT32) ? regs[a].as.f : (float)regs[a].as.i;
+                regs[dst].as.vec2.y = (regs[b].type == VAL_FLOAT32) ? regs[b].as.f : (float)regs[b].as.i;
                 break;
+            case SUBOP_VEC2_ADD:
+                regs[dst].type = VAL_VEC2;
+                regs[dst].as.vec2.x = regs[a].as.vec2.x + regs[b].as.vec2.x;
+                regs[dst].as.vec2.y = regs[a].as.vec2.y + regs[b].as.vec2.y;
+                break;
+            case SUBOP_VEC2_SUB:
+                regs[dst].type = VAL_VEC2;
+                regs[dst].as.vec2.x = regs[a].as.vec2.x - regs[b].as.vec2.x;
+                regs[dst].as.vec2.y = regs[a].as.vec2.y - regs[b].as.vec2.y;
+                break;
+            case SUBOP_VEC2_MUL:
+                regs[dst].type = VAL_VEC2;
+                regs[dst].as.vec2.x = regs[a].as.vec2.x * regs[b].as.vec2.x;
+                regs[dst].as.vec2.y = regs[a].as.vec2.y * regs[b].as.vec2.y;
+                break;
+            case SUBOP_VEC2_DIV:
+                regs[dst].type = VAL_VEC2;
+                regs[dst].as.vec2.x = regs[a].as.vec2.x / regs[b].as.vec2.x;
+                regs[dst].as.vec2.y = regs[a].as.vec2.y / regs[b].as.vec2.y;
+                break;
+            case SUBOP_VEC2_SCALE: {
+                float s = (regs[b].type == VAL_FLOAT32) ? regs[b].as.f : (float)regs[b].as.i;
+                regs[dst].type = VAL_VEC2;
+                regs[dst].as.vec2.x = regs[a].as.vec2.x * s;
+                regs[dst].as.vec2.y = regs[a].as.vec2.y * s;
+                break;
+            }
+            case SUBOP_VEC2_DOT:
+                regs[dst].type = VAL_FLOAT32;
+                regs[dst].as.f = regs[a].as.vec2.x * regs[b].as.vec2.x + regs[a].as.vec2.y * regs[b].as.vec2.y;
+                break;
+            case SUBOP_VEC2_CROSS:
+                regs[dst].type = VAL_FLOAT32;
+                regs[dst].as.f = regs[a].as.vec2.x * regs[b].as.vec2.y - regs[a].as.vec2.y * regs[b].as.vec2.x;
+                break;
+            default:
+                break;
+        }
+        DISPATCH();
+    }
+
+    // 0x16: OP_VEC2_PROP
+    do_vec2_prop: {
+        uint32_t raw = vm->bytecode[vm->pc - 1];
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t a = INSTR_A(raw);
+        switch (subop) {
+            case SUBOP_VPROP_X:
+                regs[dst].type = VAL_FLOAT32;
+                regs[dst].as.f = regs[a].as.vec2.x;
+                break;
+            case SUBOP_VPROP_Y:
+                regs[dst].type = VAL_FLOAT32;
+                regs[dst].as.f = regs[a].as.vec2.y;
+                break;
+            case SUBOP_VPROP_SET_X:
+                regs[dst].as.vec2.x = (regs[a].type == VAL_FLOAT32) ? regs[a].as.f : (float)regs[a].as.i;
+                break;
+            case SUBOP_VPROP_SET_Y:
+                regs[dst].as.vec2.y = (regs[a].type == VAL_FLOAT32) ? regs[a].as.f : (float)regs[a].as.i;
+                break;
+            case SUBOP_VPROP_LEN:
+                regs[dst].type = VAL_FLOAT32;
+                regs[dst].as.f = sqrtf(regs[a].as.vec2.x * regs[a].as.vec2.x + regs[a].as.vec2.y * regs[a].as.vec2.y);
+                break;
+            case SUBOP_VPROP_LENSQ:
+                regs[dst].type = VAL_FLOAT32;
+                regs[dst].as.f = regs[a].as.vec2.x * regs[a].as.vec2.x + regs[a].as.vec2.y * regs[a].as.vec2.y;
+                break;
+            default:
+                break;
+        }
+        DISPATCH();
+    }
+
+    // 0x17: OP_COLOR_OP
+    do_color_op: {
+        uint32_t raw = vm->bytecode[vm->pc - 1];
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t a = INSTR_A(raw);
+        uint8_t b = INSTR_B(raw);
+        regs[dst].type = VAL_COLOR;
+        regs[dst].as.color.r = (uint8_t)regs[a].as.i;
+        regs[dst].as.color.g = (uint8_t)regs[b].as.i;
+        regs[dst].as.color.b = 0;
+        regs[dst].as.color.a = 255;
+        DISPATCH();
+    }
+
+    // 0x18: OP_SIMD_MMI
+    do_simd_mmi: {
+        uint32_t raw = vm->bytecode[vm->pc - 1];
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t a = INSTR_A(raw);
+        uint8_t b = INSTR_B(raw);
+        regs[dst].type = VAL_INT32;
+        switch (subop) {
+            case SUBOP_MMI_PADDW:
+                regs[dst].as.i = regs[a].as.i + regs[b].as.i;
+                break;
+            case SUBOP_MMI_PSUBW:
+                regs[dst].as.i = regs[a].as.i - regs[b].as.i;
+                break;
+            case SUBOP_MMI_PMAXW:
+                regs[dst].as.i = (regs[a].as.i > regs[b].as.i) ? regs[a].as.i : regs[b].as.i;
+                break;
+            case SUBOP_MMI_PMINW:
+                regs[dst].as.i = (regs[a].as.i < regs[b].as.i) ? regs[a].as.i : regs[b].as.i;
+                break;
+            default:
+                regs[dst].as.i = regs[a].as.i + regs[b].as.i;
+                break;
+        }
+        DISPATCH();
+    }
+
+    // 0x19: OP_COLLECTION
+    do_collection: {
+        uint32_t raw = vm->bytecode[vm->pc - 1];
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t a = INSTR_A(raw);
+        uint8_t b = INSTR_B(raw);
+        switch (subop) {
+            case SUBOP_COLL_AGET: {
+                CitrineArray* arr = (CitrineArray*)regs[a].as.ptr;
+                regs[dst] = citrine_array_get(arr, regs[b].as.i);
+                break;
+            }
+            case SUBOP_COLL_ASET: {
+                CitrineArray* arr = (CitrineArray*)regs[a].as.ptr;
+                citrine_array_set(arr, regs[b].as.i, regs[dst]);
+                break;
+            }
+            case SUBOP_COLL_ALEN: {
+                CitrineArray* arr = (CitrineArray*)regs[a].as.ptr;
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = arr ? (int32_t)arr->size : 0;
+                break;
+            }
+            case SUBOP_COLL_APUSH: {
+                CitrineArray* arr = (CitrineArray*)regs[dst].as.ptr;
+                citrine_array_push(arr, regs[a]);
+                break;
+            }
+            case SUBOP_COLL_APOP: {
+                CitrineArray* arr = (CitrineArray*)regs[a].as.ptr;
+                regs[dst] = citrine_array_pop(arr);
+                break;
+            }
+            case SUBOP_COLL_FGET: {
+                CitrineObject* obj = (CitrineObject*)regs[a].as.ptr;
+                uint32_t f_idx = (uint32_t)b;
+                if (obj && f_idx < obj->field_count) {
+                    regs[dst] = obj->fields[f_idx];
+                } else {
+                    regs[dst].type = VAL_NIL;
+                }
+                break;
+            }
+            case SUBOP_COLL_FSET: {
+                CitrineObject* obj = (CitrineObject*)regs[a].as.ptr;
+                uint32_t f_idx = (uint32_t)b;
+                if (obj && f_idx < obj->field_count) {
+                    obj->fields[f_idx] = regs[dst];
+                }
+                break;
+            }
+            default:
+                break;
+        }
+        DISPATCH();
+    }
+
+    // 0x1A: OP_FIBER_OP
+    do_fiber_op: {
+        uint32_t raw = vm->bytecode[vm->pc - 1];
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        switch (subop) {
+            case SUBOP_FIBER_SPAWN: {
+                uint16_t func_idx = INSTR_IMM16(raw);
+                uint8_t argc = (func_idx < vm->num_functions) ? vm->functions[func_idx].argc : 0;
+                uint32_t fib_id = citrine_scheduler_spawn(vm, func_idx, &regs[dst + 1], argc);
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = (int32_t)fib_id;
+                break;
+            }
+            case SUBOP_FIBER_YIELD:
+                scheduler_switch_next(vm, regs);
+                break;
+            case SUBOP_FIBER_RESUME: {
+                uint32_t fib_id = (uint32_t)regs[dst].as.i;
+                for (uint32_t i = 0; i < vm->scheduler.max_fibers; i++) {
+                    if (vm->scheduler.fibers[i].id == fib_id && vm->scheduler.fibers[i].state != FIBER_DEAD) {
+                        vm->scheduler.fibers[i].state = FIBER_READY;
+                        break;
+                    }
+                }
+                break;
+            }
+            case SUBOP_FIBER_STATUS: {
+                uint32_t fib_id = (uint32_t)regs[dst].as.i;
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = citrine_scheduler_fiber_alive(vm, fib_id) ? 1 : 0;
+                break;
+            }
+            case SUBOP_FIBER_ID:
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = (int32_t)citrine_scheduler_current_fiber(vm);
+                break;
+            default:
+                break;
+        }
+        DISPATCH();
+    }
+
+    // 0x1B: OP_CHANNEL_OP
+    do_channel_op: {
+        uint32_t raw = vm->bytecode[vm->pc - 1];
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t a = INSTR_A(raw);
+        switch (subop) {
+            case SUBOP_CHAN_CREATE: {
+                uint32_t cid = citrine_channel_create(vm, (uint32_t)regs[a].as.i);
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = (int32_t)cid;
+                break;
+            }
+            case SUBOP_CHAN_SEND:
+                citrine_channel_send(vm, (uint32_t)regs[dst].as.i, regs[a]);
+                if (vm->scheduler.fibers[vm->scheduler.current_fiber].state != FIBER_RUNNING) {
+                    scheduler_switch_next(vm, regs);
+                }
+                break;
+            case SUBOP_CHAN_RECV:
+                citrine_channel_receive(vm, (uint32_t)regs[a].as.i, &regs[dst]);
+                if (vm->scheduler.fibers[vm->scheduler.current_fiber].state != FIBER_RUNNING) {
+                    scheduler_switch_next(vm, regs);
+                }
+                break;
+            case SUBOP_CHAN_TRY_RECV: {
+                bool ok = citrine_channel_try_receive(vm, (uint32_t)regs[a].as.i, &regs[dst]);
+                if (!ok) { regs[dst].type = VAL_NIL; }
+                break;
+            }
+            case SUBOP_CHAN_COUNT:
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = (int32_t)citrine_channel_count(vm, (uint32_t)regs[a].as.i);
+                break;
+            case SUBOP_CHAN_CAP:
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i = (int32_t)citrine_channel_capacity(vm, (uint32_t)regs[a].as.i);
+                break;
+            default:
+                break;
+        }
+        DISPATCH();
+    }
+
+    // 0x1C: OP_PS2_HW
+    do_ps2_hw: {
+        DISPATCH();
+    }
+
+    // 0x1D: OP_INLINE_ASM
+    do_inline_asm: {
+        DISPATCH();
+    }
+
+    // 0x1E: OP_LOOP_DEC_BR (Peephole Fused Loop Decrement/Increment & Branch)
+    do_loop_dec_br: {
+        uint32_t raw = vm->bytecode[vm->pc - 1];
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t cnt_reg = INSTR_DST(raw);
+        if (subop == SUBOP_INCBR_LT) {
+            uint8_t limit_reg = INSTR_A(raw);
+            int8_t offset = INSTR_OFFSET8(raw);
+            regs[cnt_reg].as.i += 1;
+            if (regs[cnt_reg].as.i < regs[limit_reg].as.i) {
+                vm->pc += offset;
+            }
+        } else if (subop == SUBOP_DECBR_GEZ) {
+            int16_t offset = INSTR_SIMM16(raw);
+            regs[cnt_reg].as.i -= 1;
+            if (regs[cnt_reg].as.i >= 0) {
+                vm->pc += offset;
+            }
+        } else {
+            // SUBOP_DECBR_NZ (default)
+            int16_t offset = INSTR_SIMM16(raw);
+            regs[cnt_reg].as.i -= 1;
+            if (regs[cnt_reg].as.i != 0) {
+                vm->pc += offset;
             }
         }
         DISPATCH();
     }
 
-    do_halt:
-        return;
+    // 0x1F: OP_FUSED_MADD (Peephole Fused Multiply-Accumulate / Dot)
+    do_fused_madd: {
+        uint32_t raw = vm->bytecode[vm->pc - 1];
+        uint8_t subop = INSTR_SUBOP(raw);
+        uint8_t dst = INSTR_DST(raw);
+        uint8_t a = INSTR_A(raw);
+        uint8_t b = INSTR_B(raw);
+        switch (subop) {
+            case SUBOP_MADD_I32:
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i += (regs[a].as.i * regs[b].as.i);
+                break;
+            case SUBOP_MSUB_I32:
+                regs[dst].type = VAL_INT32;
+                regs[dst].as.i -= (regs[a].as.i * regs[b].as.i);
+                break;
+            case SUBOP_MADD_F32:
+                regs[dst].type = VAL_FLOAT32;
+                regs[dst].as.f += (regs[a].as.f * regs[b].as.f);
+                break;
+            case SUBOP_MSUB_F32:
+                regs[dst].type = VAL_FLOAT32;
+                regs[dst].as.f -= (regs[a].as.f * regs[b].as.f);
+                break;
+            case SUBOP_DOT_VEC2:
+                regs[dst].type = VAL_FLOAT32;
+                regs[dst].as.f += (regs[a].as.vec2.x * regs[b].as.vec2.x + regs[a].as.vec2.y * regs[b].as.vec2.y);
+                break;
+            default:
+                regs[dst].as.i += (regs[a].as.i * regs[b].as.i);
+                break;
+        }
+        DISPATCH();
+    }
 
 #endif
 }
