@@ -490,9 +490,28 @@ module Citrine
       def self.emit_digit_quad_updater(emitter : MipsEmitter, digit_table_addr : UInt32)
         return if digit_table_addr == 0_u32
         emitter.label("update_digit_quads")
-        # a0 = digit (0..9)
+        # a0 = digit (0..9) or >= 10 for blank slot
         # a1 = base_pos ((y << 4 << 16) | (x << 4))
         # a2 = dst_quad_ptr (uncached address of first quad)
+
+        emitter.ori(T1, ZERO, 10)
+        emitter.sltu(T2, A0, T1)
+        emitter.bnez(T2, "udq_valid_digit")
+        emitter.nop
+
+        # Blank slot: zero out all 13 quads
+        emitter.ori(T5, ZERO, 13)
+        emitter.label("udq_blank_loop")
+        emitter.sw(ZERO, 32, A2)
+        emitter.sw(ZERO, 48, A2)
+        emitter.addiu(A2, A2, 64)
+        emitter.addiu(T5, T5, -1)
+        emitter.bnez(T5, "udq_blank_loop")
+        emitter.nop
+        emitter.jr(RA)
+        emitter.nop
+
+        emitter.label("udq_valid_digit")
         # src_ptr = digit_table_addr + digit * 104
         emitter.sll(T1, A0, 6) # d * 64
         emitter.sll(T2, A0, 5) # d * 32

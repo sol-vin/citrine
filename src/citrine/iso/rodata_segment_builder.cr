@@ -35,6 +35,9 @@ module Citrine
       property scrub_min_x : UInt16
       property scrub_max_x : UInt16
       property scrub_y2 : UInt16
+      property frame_text_present : Bool
+      property frame_digit_offsets : Array(UInt32)
+      property frame_digit_positions : Array(UInt32)
 
       def initialize(
         @data = Bytes.empty,
@@ -62,7 +65,10 @@ module Citrine
         @scrub_quad_offset = 0_u32,
         @scrub_min_x = 62_u16,
         @scrub_max_x = 578_u16,
-        @scrub_y2 = 214_u16
+        @scrub_y2 = 214_u16,
+        @frame_text_present = false,
+        @frame_digit_offsets = [] of UInt32,
+        @frame_digit_positions = [] of UInt32
       )
       end
     end
@@ -207,6 +213,10 @@ module Citrine
         sec_tens_pos = 0_u32
         sec_ones_pos = 0_u32
 
+        frame_text_present = false
+        frame_digit_offsets = [] of UInt32
+        frame_digit_positions = [] of UInt32
+
         scrubber_present = false
         scrub_quad_offset = 0_u32
         scrub_min_x = 62_u16
@@ -247,7 +257,52 @@ module Citrine
               body_pos += 128_u32
             when Citrine::GS::DrawCommand::Type::Text
               scale = cmd.x2 >= 20 ? 2 : 1
-              if md = cmd.text.match(/(\d\d):(\d\d)/)
+              if md = cmd.text.match(/Frame:\s*(\d{5})/i)
+                frame_text_present = true
+                frame_pkt_offset = 16_u32 + cmd_body_start
+                char_w = 5 * scale
+                spacing = 2 * scale
+                match_start = md.begin(1).not_nil!
+                cum_quads = 0_u32
+                cx = cmd.x1
+                cy = cmd.y1
+
+                cmd.text.each_char_with_index do |ch, ci|
+                  if ch == '\n'
+                    cx = cmd.x1
+                    cy += 8 * scale
+                    next
+                  end
+
+                  char_quads = 0_u32
+                  if ch != ' '
+                    glyph = GifPacketBuilder::FONT_5X7[ch.upcase]? || GifPacketBuilder::FONT_5X7['?']
+                    7.times do |row|
+                      in_run = false
+                      5.times do |col|
+                        pixel = ((glyph[col] >> row) & 1) == 1
+                        if pixel && !in_run
+                          in_run = true
+                        elsif !pixel && in_run
+                          in_run = false
+                          char_quads += 1
+                        end
+                      end
+                      char_quads += 1 if in_run
+                    end
+                  end
+
+                  pos_fixed = ((cy.to_u32 << 4) << 16) | (cx.to_u32 << 4)
+
+                  if ci >= match_start && ci < match_start + 5
+                    frame_digit_offsets << (frame_pkt_offset + cum_quads * 64_u32)
+                    frame_digit_positions << pos_fixed
+                  end
+
+                  cum_quads += char_quads
+                  cx += char_w + spacing
+                end
+              elsif md = cmd.text.match(/(\d\d):(\d\d)/)
                 time_text_present = true
                 time_pkt_offset = 16_u32 + cmd_body_start
                 char_w = 5 * scale
@@ -258,6 +313,12 @@ module Citrine
                 cy = cmd.y1
 
                 cmd.text.each_char_with_index do |ch, ci|
+                  if ch == '\n'
+                    cx = cmd.x1
+                    cy += 8 * scale
+                    next
+                  end
+
                   char_quads = 0_u32
                   if ch != ' '
                     glyph = GifPacketBuilder::FONT_5X7[ch.upcase]? || GifPacketBuilder::FONT_5X7['?']
@@ -306,7 +367,7 @@ module Citrine
         end
 
         # 7. Digit Quad Table (1040 bytes)
-        if time_text_present
+        if time_text_present || frame_text_present
           curr_addr = (curr_addr + 15_u32) & ~15_u32
           digit_table_addr = curr_addr
           DigitQuadTable::DATA.each do |w|
@@ -341,7 +402,10 @@ module Citrine
           scrub_quad_offset: scrub_quad_offset,
           scrub_min_x: scrub_min_x,
           scrub_max_x: scrub_max_x,
-          scrub_y2: scrub_y2
+          scrub_y2: scrub_y2,
+          frame_text_present: frame_text_present,
+          frame_digit_offsets: frame_digit_offsets,
+          frame_digit_positions: frame_digit_positions
         )
       end
     end

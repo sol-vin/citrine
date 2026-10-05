@@ -313,6 +313,119 @@ module Citrine
 
             emitter.lui(T0, 0x7000)
           end
+
+          # Live Dynamic Frame Counter Digits in uncached GIF packet RAM
+          if @rodata.frame_text_present && @rodata.frame_digit_offsets.size >= 5
+            emitter.lui(T0, 0x7000)
+            emitter.lw(T5, 4, T0) # T5 = real hardware frame counter from 0x70000004!
+
+            # S6 = uncached GIF packet base (0x20000000 | T7)
+            emitter.lui(S6, 0x2000)
+            emitter.or_(S6, T7, S6)
+
+            # Decompose T5 into 5 decimal digits: S1..S5
+            # S1 = T5 / 10000, rem = T5 % 10000
+            emitter.li(T1, 10000)
+            emitter.divu(T5, T1)
+            emitter.mflo(S1)
+            emitter.mfhi(T2)
+
+            # S2 = rem / 1000, rem = rem % 1000
+            emitter.li(T1, 1000)
+            emitter.divu(T2, T1)
+            emitter.mflo(S2)
+            emitter.mfhi(T3)
+
+            # S3 = rem / 100, rem = rem % 100
+            emitter.ori(T1, ZERO, 100)
+            emitter.divu(T3, T1)
+            emitter.mflo(S3)
+            emitter.mfhi(T4)
+
+            # S4 = rem / 10, S5 = rem % 10
+            emitter.ori(T1, ZERO, 10)
+            emitter.divu(T4, T1)
+            emitter.mflo(S4)
+            emitter.mfhi(S5)
+
+            # Blank leading zeroes:
+            # S1: if S1 == 0 -> S1 = 10 (blank)
+            emitter.bnez(S1, "fr_d1_keep")
+            emitter.nop
+            emitter.ori(S1, ZERO, 10)
+
+            # S2: if S1 was blank and S2 == 0 -> S2 = 10
+            emitter.bnez(S2, "fr_d2_keep")
+            emitter.nop
+            emitter.ori(S2, ZERO, 10)
+
+            # S3: if S2 was blank and S3 == 0 -> S3 = 10
+            emitter.bnez(S3, "fr_d3_keep")
+            emitter.nop
+            emitter.ori(S3, ZERO, 10)
+
+            # S4: if S3 was blank and S4 == 0 -> S4 = 10
+            emitter.bnez(S4, "fr_d4_keep")
+            emitter.nop
+            emitter.ori(S4, ZERO, 10)
+
+            emitter.jump("fr_digits_ready")
+            emitter.nop
+
+            emitter.label("fr_d1_keep")
+            emitter.jump("fr_digits_ready")
+            emitter.nop
+
+            emitter.label("fr_d2_keep")
+            emitter.jump("fr_digits_ready")
+            emitter.nop
+
+            emitter.label("fr_d3_keep")
+            emitter.jump("fr_digits_ready")
+            emitter.nop
+
+            emitter.label("fr_d4_keep")
+            # S4 is kept
+
+            emitter.label("fr_digits_ready")
+
+            # Digit 0: 10,000s
+            emitter.move(A0, S1)
+            emitter.li(A1, @rodata.frame_digit_positions[0])
+            emitter.li(T1, @rodata.frame_digit_offsets[0])
+            emitter.addu(A2, S6, T1)
+            emitter.call("update_digit_quads")
+
+            # Digit 1: 1,000s
+            emitter.move(A0, S2)
+            emitter.li(A1, @rodata.frame_digit_positions[1])
+            emitter.li(T1, @rodata.frame_digit_offsets[1])
+            emitter.addu(A2, S6, T1)
+            emitter.call("update_digit_quads")
+
+            # Digit 2: 100s
+            emitter.move(A0, S3)
+            emitter.li(A1, @rodata.frame_digit_positions[2])
+            emitter.li(T1, @rodata.frame_digit_offsets[2])
+            emitter.addu(A2, S6, T1)
+            emitter.call("update_digit_quads")
+
+            # Digit 3: 10s
+            emitter.move(A0, S4)
+            emitter.li(A1, @rodata.frame_digit_positions[3])
+            emitter.li(T1, @rodata.frame_digit_offsets[3])
+            emitter.addu(A2, S6, T1)
+            emitter.call("update_digit_quads")
+
+            # Digit 4: 1s
+            emitter.move(A0, S5)
+            emitter.li(A1, @rodata.frame_digit_positions[4])
+            emitter.li(T1, @rodata.frame_digit_offsets[4])
+            emitter.addu(A2, S6, T1)
+            emitter.call("update_digit_quads")
+
+            emitter.lui(T0, 0x7000)
+          end
         end
 
           emitter.dma02_kick_reg(T7, T6)

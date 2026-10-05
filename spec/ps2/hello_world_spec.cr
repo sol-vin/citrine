@@ -37,4 +37,16 @@ describe "Citrine PS2 Example 01: Hello World & Live Telemetry" do
     result.should_preserve_spram
     result.should_have_output("[CITRINE] PS2 EE Engine Initialized")
   end
+
+  it "detects and configures 5 dynamic frame digits in RodataSegmentBuilder" do
+    tc = Citrine::Spec::Ps2TestCase.new("01_hello_world_rodata_spec")
+    tc.target("examples/01_hello_world/main.cr")
+    bytes, _ = tc.compile
+
+    profile = Citrine::ISO::PhaseExtractor.extract(bytes)
+    rodata = Citrine::ISO::RodataSegmentBuilder.build(profile)
+    rodata.frame_text_present.should be_true
+    rodata.frame_digit_offsets.size.should eq(5)
+    rodata.digit_table_addr.should be > 0_u32
+  end
 end

@@ -730,6 +730,11 @@ end
             when 24 # DrawText
               t_val = (regs[base_r] & 0xFFFFFFFF_i64).to_u32
               text = (t_val < constants.size) ? (constants[t_val]?.try(&.str_val) || "") : ""
+              if md = text.match(/Frame:\s*(\d+)/i)
+                num = md[1].to_i
+                padded = "Frame: %05d" % num
+                text = text.sub(md[0], padded)
+              end
               x = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
               y = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
               size = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_i32!

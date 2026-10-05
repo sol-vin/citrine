@@ -45,6 +45,8 @@ module Citrine
             raw_val = inst.imm16.to_i32
             val = raw_val >= 0x8000 ? raw_val - 0x10000 : raw_val
             known_ints[inst.dst] = val
+          when LoadImmSubOp::UInt16.value
+            known_ints[inst.dst] = inst.imm16.to_i32
           when LoadImmSubOp::Zero.value, LoadImmSubOp::Nil.value
             known_ints[inst.dst] = 0
           when LoadImmSubOp::MinusOne.value
@@ -176,9 +178,18 @@ module Citrine
         inst2 = result[i + 1]
 
         # Track known integer constants for loop decrement checks
-        if inst1.opcode == Opcode::LoadImm && inst1.subop == LoadImmSubOp::Int16.value
-          raw_val = inst1.imm16.to_i32
-          known_ints[inst1.dst] = raw_val >= 0x8000 ? raw_val - 0x10000 : raw_val
+        if inst1.opcode == Opcode::LoadImm
+          case inst1.subop
+          when LoadImmSubOp::Int16.value
+            raw_val = inst1.imm16.to_i32
+            known_ints[inst1.dst] = raw_val >= 0x8000 ? raw_val - 0x10000 : raw_val
+          when LoadImmSubOp::UInt16.value
+            known_ints[inst1.dst] = inst1.imm16.to_i32
+          when LoadImmSubOp::Zero.value, LoadImmSubOp::Nil.value
+            known_ints[inst1.dst] = 0
+          when LoadImmSubOp::MinusOne.value
+            known_ints[inst1.dst] = -1
+          end
         end
 
         # Do not fuse if instruction 2 is an explicit jump target
