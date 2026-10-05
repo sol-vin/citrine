@@ -202,8 +202,12 @@ module Citrine
           curr_addr += msg.bytesize.to_u32
         end
 
-        out_mem.write("Citrine PS2 Virtual Machine runtime v0.1.0\0".to_slice)
-        out_mem.write("Emotion Engine R5900 / Graphic Synthesizer\0".to_slice)
+        s1 = "Citrine PS2 Virtual Machine runtime v0.1.0\0"
+        s2 = "Emotion Engine R5900 / Graphic Synthesizer\0"
+        out_mem.write(s1.to_slice)
+        curr_addr += s1.bytesize.to_u32
+        out_mem.write(s2.to_slice)
+        curr_addr += s2.bytesize.to_u32
 
         # 6. Scan phase 0 commands to discover dynamic time text and scrubber rect
         digit_table_addr = 0_u32
@@ -376,12 +380,13 @@ module Citrine
 
         # 7. Digit Quad Table (1040 bytes)
         if time_text_present || frame_text_present
-          curr_addr = (curr_addr + 15_u32) & ~15_u32
-          digit_table_addr = curr_addr
+          pad = (16 - (out_mem.size % 16)) % 16
+          pad.times { out_mem.write_byte(0_u8) }
+          digit_table_addr = RODATA_VADDR + out_mem.size.to_u32
           DigitQuadTable::DATA.each do |w|
             out_mem.write_bytes(w, IO::ByteFormat::LittleEndian)
           end
-          curr_addr += (DigitQuadTable::DATA.size * 4).to_u32
+          curr_addr = RODATA_VADDR + out_mem.size.to_u32
         end
 
         RodataResult.new(

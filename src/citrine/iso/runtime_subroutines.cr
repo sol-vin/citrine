@@ -502,6 +502,7 @@ module Citrine
         # Blank slot: zero out all 13 quads
         emitter.ori(T5, ZERO, 13)
         emitter.label("udq_blank_loop")
+        emitter.sw(ZERO, 16, A2) # RGBAQ = 0 (alpha = 0, transparent)
         emitter.sw(ZERO, 32, A2)
         emitter.sw(ZERO, 48, A2)
         emitter.addiu(A2, A2, 64)
@@ -525,18 +526,22 @@ module Citrine
         emitter.label("udq_loop")
         emitter.lw(T1, 0, T4) # XYZ3_delta
         emitter.lw(T2, 4, T4) # XYZ2_delta
-        emitter.beqz(T1, "udq_empty")
+        emitter.beqz(T2, "udq_empty") # XYZ2_delta is non-zero for any active quad
         emitter.nop
         emitter.sllv(T1, T1, A3) # Scale delta: << 1 for scale=2, << 0 for scale=1
         emitter.sllv(T2, T2, A3)
         emitter.addu(T1, T1, A1) # XYZ3 = base_pos + delta
         emitter.addu(T2, T2, A1) # XYZ2 = base_pos + delta
+        emitter.lui(T3, 0x80FF) # RGBA: Alpha=0x80, Blue=0xFF
+        emitter.ori(T3, T3, 0xFFFF) # Green=0xFF, Red=0xFF
+        emitter.sw(T3, 16, A2)  # Store RGBA at quad + 16 (opaque white)
         emitter.sw(T1, 32, A2)  # Store XYZ3 at quad + 32
         emitter.sw(T2, 48, A2)  # Store XYZ2 at quad + 48
         emitter.jump("udq_next")
         emitter.nop
 
         emitter.label("udq_empty")
+        emitter.sw(ZERO, 16, A2) # RGBAQ = 0 (alpha = 0, transparent)
         emitter.sw(ZERO, 32, A2) # Empty quad: XYZ3 = 0
         emitter.sw(ZERO, 48, A2) # Empty quad: XYZ2 = 0
 
