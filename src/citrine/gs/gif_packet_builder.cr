@@ -323,6 +323,12 @@ module Citrine
         spacing = 2 * scale
 
         text.each_char do |ch|
+          if ch == '\n'
+            cx = start_x
+            cy += 8 * scale
+            next
+          end
+
           if ch == ' '
             cx += char_w + spacing
             next

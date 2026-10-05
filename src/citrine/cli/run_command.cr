@@ -44,7 +44,7 @@ module Citrine
           puts ""
           puts "Examples:"
           puts "  citrine run"
-          puts "  citrine run examples/01_hello_pad/main.cr"
+          puts "  citrine run examples/01_hello_world/main.cr"
           puts "  citrine run examples/05_hello_world/main.cr --batch"
           puts "  citrine run examples/08_controller_tester/main.cr"
           exit(1)

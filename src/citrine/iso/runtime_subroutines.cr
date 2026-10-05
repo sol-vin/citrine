@@ -162,7 +162,7 @@ module Citrine
             emitter.nop
           when "Citrine_ActionPressed" # A0 = action_id
             emitter.lui(T0, 0x7000)
-            # Cross on Port 0: actions 1, 4, 7, 21
+            # Cross on Port 0: actions 1, 4, 7, 11, 21, 27
             emitter.ori(T1, ZERO, 1)
             emitter.beq(A0, T1, "act_p_cross_p0")
             emitter.nop
@@ -172,19 +172,37 @@ module Citrine
             emitter.ori(T1, ZERO, 7)
             emitter.beq(A0, T1, "act_p_cross_p0")
             emitter.nop
+            emitter.ori(T1, ZERO, 11)
+            emitter.beq(A0, T1, "act_p_cross_p0")
+            emitter.nop
             emitter.ori(T1, ZERO, 21)
             emitter.beq(A0, T1, "act_p_cross_p0")
             emitter.nop
-            # R1 on Port 0: action 2
+            emitter.ori(T1, ZERO, 27)
+            emitter.beq(A0, T1, "act_p_cross_p0")
+            emitter.nop
+            # R1 on Port 0: actions 2, 19
             emitter.ori(T1, ZERO, 2)
             emitter.beq(A0, T1, "act_p_r1_p0")
             emitter.nop
-            # Triangle on Port 0: action 3
+            emitter.ori(T1, ZERO, 19)
+            emitter.beq(A0, T1, "act_p_r1_p0")
+            emitter.nop
+            # Triangle on Port 0: actions 3, 13
             emitter.ori(T1, ZERO, 3)
             emitter.beq(A0, T1, "act_p_tri_p0")
             emitter.nop
-            # Square on Port 0: action 5
+            emitter.ori(T1, ZERO, 13)
+            emitter.beq(A0, T1, "act_p_tri_p0")
+            emitter.nop
+            # Square on Port 0: actions 5, 12, 22
             emitter.ori(T1, ZERO, 5)
+            emitter.beq(A0, T1, "act_p_sq_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 12)
+            emitter.beq(A0, T1, "act_p_sq_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 22)
             emitter.beq(A0, T1, "act_p_sq_p0")
             emitter.nop
             # Cross on Port 1: action 8
@@ -231,6 +249,7 @@ module Citrine
             emitter.nop
           when "Citrine_ActionDown" # A0 = action_id
             emitter.lui(T0, 0x7000)
+            # Cross on Port 0: actions 1, 4, 7, 11, 21, 27
             emitter.ori(T1, ZERO, 1)
             emitter.beq(A0, T1, "act_d_cross_p0")
             emitter.nop
@@ -240,18 +259,40 @@ module Citrine
             emitter.ori(T1, ZERO, 7)
             emitter.beq(A0, T1, "act_d_cross_p0")
             emitter.nop
+            emitter.ori(T1, ZERO, 11)
+            emitter.beq(A0, T1, "act_d_cross_p0")
+            emitter.nop
             emitter.ori(T1, ZERO, 21)
             emitter.beq(A0, T1, "act_d_cross_p0")
             emitter.nop
+            emitter.ori(T1, ZERO, 27)
+            emitter.beq(A0, T1, "act_d_cross_p0")
+            emitter.nop
+            # R1 on Port 0: actions 2, 19
             emitter.ori(T1, ZERO, 2)
             emitter.beq(A0, T1, "act_d_r1_p0")
             emitter.nop
+            emitter.ori(T1, ZERO, 19)
+            emitter.beq(A0, T1, "act_d_r1_p0")
+            emitter.nop
+            # Triangle on Port 0: actions 3, 13
             emitter.ori(T1, ZERO, 3)
             emitter.beq(A0, T1, "act_d_tri_p0")
             emitter.nop
+            emitter.ori(T1, ZERO, 13)
+            emitter.beq(A0, T1, "act_d_tri_p0")
+            emitter.nop
+            # Square on Port 0: actions 5, 12, 22
             emitter.ori(T1, ZERO, 5)
             emitter.beq(A0, T1, "act_d_sq_p0")
             emitter.nop
+            emitter.ori(T1, ZERO, 12)
+            emitter.beq(A0, T1, "act_d_sq_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 22)
+            emitter.beq(A0, T1, "act_d_sq_p0")
+            emitter.nop
+            # Cross on Port 1: action 8
             emitter.ori(T1, ZERO, 8)
             emitter.beq(A0, T1, "act_d_cross_p1")
             emitter.nop
@@ -295,6 +336,7 @@ module Citrine
             emitter.nop
           when "Citrine_ActionReleased" # A0 = action_id
             emitter.lui(T0, 0x7000)
+            # Cross on Port 0: actions 1, 4, 7, 11, 21, 27
             emitter.ori(T1, ZERO, 1)
             emitter.beq(A0, T1, "act_r_cross_p0")
             emitter.nop
@@ -304,18 +346,40 @@ module Citrine
             emitter.ori(T1, ZERO, 7)
             emitter.beq(A0, T1, "act_r_cross_p0")
             emitter.nop
+            emitter.ori(T1, ZERO, 11)
+            emitter.beq(A0, T1, "act_r_cross_p0")
+            emitter.nop
             emitter.ori(T1, ZERO, 21)
             emitter.beq(A0, T1, "act_r_cross_p0")
             emitter.nop
+            emitter.ori(T1, ZERO, 27)
+            emitter.beq(A0, T1, "act_r_cross_p0")
+            emitter.nop
+            # R1 on Port 0: actions 2, 19
             emitter.ori(T1, ZERO, 2)
             emitter.beq(A0, T1, "act_r_r1_p0")
             emitter.nop
+            emitter.ori(T1, ZERO, 19)
+            emitter.beq(A0, T1, "act_r_r1_p0")
+            emitter.nop
+            # Triangle on Port 0: actions 3, 13
             emitter.ori(T1, ZERO, 3)
             emitter.beq(A0, T1, "act_r_tri_p0")
             emitter.nop
+            emitter.ori(T1, ZERO, 13)
+            emitter.beq(A0, T1, "act_r_tri_p0")
+            emitter.nop
+            # Square on Port 0: actions 5, 12, 22
             emitter.ori(T1, ZERO, 5)
             emitter.beq(A0, T1, "act_r_sq_p0")
             emitter.nop
+            emitter.ori(T1, ZERO, 12)
+            emitter.beq(A0, T1, "act_r_sq_p0")
+            emitter.nop
+            emitter.ori(T1, ZERO, 22)
+            emitter.beq(A0, T1, "act_r_sq_p0")
+            emitter.nop
+            # Cross on Port 1: action 8
             emitter.ori(T1, ZERO, 8)
             emitter.beq(A0, T1, "act_r_cross_p1")
             emitter.nop

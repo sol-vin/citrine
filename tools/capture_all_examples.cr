@@ -12,7 +12,7 @@ require "file_utils"
 ARTIFACT_DIR = "C:/Users/Ian/.gemini/antigravity/brain/800ae8f6-80d0-4428-93ad-3dc0043d07e3"
 
 EXAMPLES = [
-  {"01_hello_pad", "examples/01_hello_pad/main.cr", "example_01_hello_pad.png"},
+  {"01_hello_world", "examples/01_hello_world/main.cr", "example_01_hello_world.png"},
   {"02_shapes_and_text", "examples/02_shapes_and_text/main.cr", "example_02_shapes_and_text.png"},
   {"03_entity_fibers", "examples/03_entity_fibers/main.cr", "example_03_entity_fibers.png"},
   {"04_safety_and_panic", "examples/04_safety_and_panic/main.cr", "example_04_safety_and_panic.png"},

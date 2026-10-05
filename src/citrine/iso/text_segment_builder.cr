@@ -897,11 +897,25 @@ module Citrine
           emitter.lw(T6, 44, T0)
           emitter.or_(T5, T5, T6)
           emitter.andi(T7, T5, 0x1000)
-          emitter.beqz(T7, "chk_r1_advance")
+          emitter.beqz(T7, "chk_sq_retreat")
           emitter.nop
           emitter.sw(ZERO, 8, T0)
           emitter.ori(T2, ZERO, 0)
           emitter.jump("apply_phase_update")
+
+          emitter.label("chk_sq_retreat")
+          # Check Square (0x8000): retreat / cycle backward
+          emitter.andi(T7, T5, 0x8000)
+          emitter.beqz(T7, "chk_r1_advance")
+          emitter.nop
+          emitter.lw(T2, 8, T0)
+          emitter.beqz(T2, "sq_wrap_max")
+          emitter.nop
+          emitter.addiu(T2, T2, -1)
+          emitter.jump("phase_in_range")
+          emitter.label("sq_wrap_max")
+          emitter.ori(T2, ZERO, phases.size - 1)
+          emitter.jump("phase_in_range")
 
           emitter.label("chk_r1_advance")
           # Check R1 (0x0800): stress test (phase 2) if available

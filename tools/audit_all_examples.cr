@@ -1,7 +1,7 @@
 require "../src/citrine/spec/ps2_spec"
 
 examples = [
-  "examples/01_hello_pad/main.cr",
+  "examples/01_hello_world/main.cr",
   "examples/02_shapes_and_text/main.cr",
   "examples/03_entity_fibers/main.cr",
   "examples/04_safety_and_panic/main.cr",

@@ -21,6 +21,7 @@
 !/docs/BYTECODE_SPEC.md
 /scratch/
 /tmp/
+*.raw
 
 # OS / Editor files
 .DS_Store

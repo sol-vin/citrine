@@ -247,9 +247,9 @@ module Citrine
     #
     # #### Citrine PlayStation 2 Toolkit Commands:
     # ```bash
-    # citrine run examples/01_hello_pad/main.cr
+    # citrine run examples/01_hello_world/main.cr
     # citrine iso examples/05_hello_world/main.cr
-    # citrine debug examples/01_hello_pad/game.cbc
+    # citrine debug examples/01_hello_world/game.cbc
     # citrine ui
     # ```
     def self.topic_01_quick_start : Nil; end

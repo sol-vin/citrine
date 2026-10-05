@@ -52,9 +52,9 @@ describe "Citrine PS2 Virtual Controller & Button Testing Suite" do
     result.should_have_output("[CITRINE] Button Square pressed!")
   end
 
-  it "boots Example 01: Hello Pad and cycles background via virtual Cross button injection" do
-    tc = Citrine::Spec::Ps2TestCase.new("01_hello_pad_virtual_input")
-    tc.target("examples/01_hello_pad/main.cr")
+  it "boots Example 08: Controller Tester and verifies virtual Cross button injection" do
+    tc = Citrine::Spec::Ps2TestCase.new("08_controller_virtual_input")
+    tc.target("examples/08_controller_tester/main.cr")
 
     # Inject Cross button at frames 10-15
     tc.inject_input(frame: 10, button: Citrine::PadButton::Cross, duration: 5)

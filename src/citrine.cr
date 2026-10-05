@@ -108,7 +108,7 @@ module Citrine
     Examples:
       citrine ui
       citrine new my_game
-      citrine run examples/01_hello_pad/main.cr --watch
+      citrine run examples/01_hello_world/main.cr --watch
       citrine test spec/ps2/
       citrine import video cutscene.mp4 --fps 15 --dvd-track
       citrine debug build/game.cbc

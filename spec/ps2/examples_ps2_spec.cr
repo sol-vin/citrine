@@ -2,9 +2,9 @@ require "../spec_helper"
 require "../../src/citrine/spec/ps2_spec"
 
 describe "Citrine PS2 Examples Runner Suite" do
-  it "boots and verifies Example 01: Hello Pad" do
-    tc = Citrine::Spec::Ps2TestCase.new("01_hello_pad")
-    tc.target("examples/01_hello_pad/main.cr")
+  it "boots and verifies Example 01: Hello World" do
+    tc = Citrine::Spec::Ps2TestCase.new("01_hello_world")
+    tc.target("examples/01_hello_world/main.cr")
     bytes, sm = tc.compile
     bytes.size.should be > 18
     tc.max_registers.should be <= 1024

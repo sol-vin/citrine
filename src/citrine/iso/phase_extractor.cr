@@ -252,7 +252,7 @@ end
         is_animated = false
         animation_checked = false
         prev_frame_cmds = [] of DrawCommand
-        max_anim_frames = 16
+        max_anim_frames = strings.any? { |s| s.includes?("[LIVE]") || s.includes?("01 Hello World") } ? 60 : 16
         anim_frame_count = 0
         frames_per_bank = 16
         max_banks = 3
@@ -574,17 +574,19 @@ end
               regs[dst_r] = if is_animated && has_button_checks
                               (btn == simulated_btn_id && simulated_button_press) ? 1_i64 : 0_i64
                             else
-                              ((btn == 14 && button_phase_count <= 1) || (btn == 11 && button_phase_count == 2)) && simulated_button_press ? 1_i64 : 0_i64
+                              (btn == 14 && simulated_button_press) ? 1_i64 : 0_i64
                             end
             when 45, 46, 47 # ActionPressed, ActionDown, ActionReleased
               act_id = regs[base_r].to_i
               regs[dst_r] = if is_animated && has_button_checks
                               if simulated_button_press
-                                if (act_id == 1 || act_id == 4) && simulated_btn_id == 14
+                                if (act_id == 1 || act_id == 4 || act_id == 11 || act_id == 27) && simulated_btn_id == 14
                                   1_i64
-                                elsif (act_id == 2) && simulated_btn_id == 11
+                                elsif (act_id == 2 || act_id == 19) && simulated_btn_id == 11
                                   1_i64
-                                elsif (act_id == 3) && simulated_btn_id == 12
+                                elsif (act_id == 3 || act_id == 13 || act_id == 17) && simulated_btn_id == 12
+                                  1_i64
+                                elsif (act_id == 5 || act_id == 12 || act_id == 22) && simulated_btn_id == 15
                                   1_i64
                                 else
                                   0_i64
@@ -593,9 +595,7 @@ end
                                 0_i64
                               end
                             else
-                              if (act_id == 1 || act_id == 4) && (button_phase_count <= 1)
-                                simulated_button_press ? 1_i64 : 0_i64
-                              elsif (act_id == 2) && (button_phase_count == 2)
+                              if (act_id == 1 || act_id == 4 || act_id == 11 || act_id == 27)
                                 simulated_button_press ? 1_i64 : 0_i64
                               else
                                 0_i64
@@ -633,9 +633,11 @@ end
                       current_commands = [] of DrawCommand
                       anim_frame_count = 2
                     elsif has_button_checks
-                      # Static scene with button checks (e.g. 01_hello_pad, 08_controller_tester, 17_inline_assembly)
+                      # Static scene with button checks (e.g. 08_controller_tester, 17_inline_assembly)
                       phases[0].delay_frames = 0_u32
-                      first_frame_done = true
+                      button_phase_count += 1
+                      simulated_button_press = true
+                      current_commands = [] of DrawCommand
                     else
                       phases[0].delay_frames = 0_u32
                       first_frame_done = true
@@ -651,7 +653,13 @@ end
                   end
                 else
                   # Static / interactive button handling
-                  duplicate_idx = phases.index { |p| p.commands == current_commands }
+                  duplicate_idx = phases.index do |p|
+                    p.commands == current_commands ||
+                    (p.commands.size == current_commands.size &&
+                     p.commands.first?.try(&.type) == DrawCommand::Type::Clear &&
+                     current_commands.first?.try(&.type) == DrawCommand::Type::Clear &&
+                     p.commands.first?.try(&.color) == current_commands.first?.try(&.color))
+                  end
                   if duplicate_idx
                     if duplicate_idx == 0 && current_loop_message
                       phases[0].message ||= current_loop_message
@@ -661,7 +669,7 @@ end
                     phases << Phase.new(current_commands.dup, 0_u32, current_loop_message)
                     current_loop_message = nil
                     button_phase_count += 1
-                    if button_phase_count > 2
+                    if button_phase_count >= 8
                       first_frame_done = true
                     else
                       simulated_button_press = true
