@@ -224,6 +224,7 @@ module Citrine
             emitter.sw(T5, 0x80, T0)
 
             emitter.label("skip_elapsed_inc")
+          end
 
           if @rodata.scrubber_present
             # Update progress scrubber quad XYZ2 at uncached MADR + scrub_quad_offset + 48
@@ -426,7 +427,6 @@ module Citrine
 
             emitter.lui(T0, 0x7000)
           end
-        end
 
           emitter.dma02_kick_reg(T7, T6)
         else
@@ -981,6 +981,7 @@ module Citrine
         end
 
         emitter.label("btn_chk_done")
+        emitter.lui(T0, 0x7000)
 
         # -------------------------------------------------------------
         # 4. General Phase Sequencing

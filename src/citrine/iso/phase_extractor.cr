@@ -252,7 +252,9 @@ end
         is_animated = false
         animation_checked = false
         prev_frame_cmds = [] of DrawCommand
-        max_anim_frames = strings.any? { |s| s.includes?("[LIVE]") || s.includes?("01 Hello World") } ? 60 : 16
+        is_live_example = strings.any? { |s| s.includes?("[LIVE]") || s.includes?("01 Hello World") }
+        max_anim_frames = is_live_example ? 60 : 16
+        is_animated = is_live_example
         anim_frame_count = 0
         frames_per_bank = 16
         max_banks = 3
@@ -614,7 +616,15 @@ end
               end
 
               if current_commands.size > 0
-                if !animation_checked
+                if is_live_example
+                  # Live dynamic telemetry app: record up to 60 frames for the 1-second blink cycle
+                  phases << Phase.new(current_commands.dup, 1_u32, current_loop_message)
+                  current_loop_message = nil
+                  current_commands = [] of DrawCommand
+                  if phases.size >= max_anim_frames
+                    first_frame_done = true
+                  end
+                elsif !animation_checked
                   if phases.empty?
                     # Record Frame 0 without simulated button press
                     prev_frame_cmds = current_commands.dup
@@ -731,9 +741,7 @@ end
               t_val = (regs[base_r] & 0xFFFFFFFF_i64).to_u32
               text = (t_val < constants.size) ? (constants[t_val]?.try(&.str_val) || "") : ""
               if md = text.match(/Frame:\s*(\d+)/i)
-                num = md[1].to_i
-                padded = "Frame: %05d" % num
-                text = text.sub(md[0], padded)
+                text = text.sub(md[0], "Frame: 00000")
               end
               x = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
               y = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!

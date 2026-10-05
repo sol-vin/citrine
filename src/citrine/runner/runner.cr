@@ -279,6 +279,10 @@ module Citrine
 
         puts "[Citrine] Packaging #{output_cbc} into PS2 ISO9660 image: #{output_iso}..."
         build_iso(output_cbc, output_iso)
+        main_iso = File.join(dir, "main.iso")
+        if base == "main" && (File.exists?(main_iso) || output_iso != main_iso)
+          File.copy(output_iso, main_iso) rescue nil
+        end
         puts "[Citrine] Success: #{output_iso} generated (#{File.size(output_iso)} bytes)."
       end
 
