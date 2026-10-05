@@ -149,6 +149,10 @@ module Citrine
         emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x21_u32)
       end
 
+      def mult(rs : Int32, rt : Int32)
+        emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | 0x18_u32)
+      end
+
       def multu(rs : Int32, rt : Int32)
         emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | 0x19_u32)
       end

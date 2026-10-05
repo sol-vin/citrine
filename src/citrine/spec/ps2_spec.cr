@@ -4,6 +4,7 @@ require "../compiler/bytecode_compiler"
 require "../iso/iso_builder"
 require "../debugger/pcsx2_bridge"
 require "../debugger/crash_analyzer"
+require "../subsystems/controller"
 
 module Citrine
   module Spec

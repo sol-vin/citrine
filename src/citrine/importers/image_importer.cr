@@ -52,7 +52,9 @@ module Citrine
         # DIB Header
         _ = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian) # dib_size
         width = io.read_bytes(Int32, IO::ByteFormat::LittleEndian)
-        height = io.read_bytes(Int32, IO::ByteFormat::LittleEndian).abs
+        raw_height = io.read_bytes(Int32, IO::ByteFormat::LittleEndian)
+        top_down = raw_height < 0
+        height = raw_height.abs
         _ = io.read_bytes(UInt16, IO::ByteFormat::LittleEndian) # planes
         bpp = io.read_bytes(UInt16, IO::ByteFormat::LittleEndian)
 
@@ -63,24 +65,29 @@ module Citrine
         case bpp
         when 32
           # BGRA to RGBA
-          (width * height).times do |i|
-            b = io.read_byte || 0_u8
-            g = io.read_byte || 0_u8
-            r = io.read_byte || 0_u8
-            a = io.read_byte || 255_u8
-            pixel_data[i * 4] = r
-            pixel_data[i * 4 + 1] = g
-            pixel_data[i * 4 + 2] = b
-            pixel_data[i * 4 + 3] = a
-          end
-        when 24
-          row_padding = (4 - ((width * 3) % 4)) % 4
           height.times do |y|
+            dst_y = top_down ? y : (height - 1 - y)
             width.times do |x|
               b = io.read_byte || 0_u8
               g = io.read_byte || 0_u8
               r = io.read_byte || 0_u8
-              idx = (y * width + x) * 4
+              a = io.read_byte || 255_u8
+              idx = (dst_y * width + x) * 4
+              pixel_data[idx] = r
+              pixel_data[idx + 1] = g
+              pixel_data[idx + 2] = b
+              pixel_data[idx + 3] = a
+            end
+          end
+        when 24
+          row_padding = (4 - ((width * 3) % 4)) % 4
+          height.times do |y|
+            dst_y = top_down ? y : (height - 1 - y)
+            width.times do |x|
+              b = io.read_byte || 0_u8
+              g = io.read_byte || 0_u8
+              r = io.read_byte || 0_u8
+              idx = (dst_y * width + x) * 4
               pixel_data[idx] = r
               pixel_data[idx + 1] = g
               pixel_data[idx + 2] = b

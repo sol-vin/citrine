@@ -12,14 +12,47 @@ module Citrine
 
     record IsoFile, name : String, data : Bytes, sector : UInt32, size : UInt32
 
-    def self.build(output_path : String, cbc_bytes : Bytes, elf_bytes : Bytes? = nil, extra_files : Hash(String, Bytes) = {} of String => Bytes, input_schedule : Array(VirtualInput) = [] of VirtualInput, audio_tracks : Array(String) = [] of String, vag_bytes : Bytes? = nil)
+    def self.build(output_path : String, cbc_bytes : Bytes, elf_bytes : Bytes? = nil, extra_files : Hash(String, Bytes) = {} of String => Bytes, input_schedule : Array(VirtualInput) = [] of VirtualInput, audio_tracks : Array(String) = [] of String, vag_bytes : Bytes? = nil, vag_tracks : Array(Bytes) = [] of Bytes)
       builder = new
-      builder.build(output_path, cbc_bytes, elf_bytes, extra_files, input_schedule, audio_tracks, vag_bytes)
+      builder.build(output_path, cbc_bytes, elf_bytes, extra_files, input_schedule, audio_tracks, vag_bytes, vag_tracks)
     end
 
-    def build(output_path : String, cbc_bytes : Bytes, elf_bytes : Bytes? = nil, extra_files : Hash(String, Bytes) = {} of String => Bytes, input_schedule : Array(VirtualInput) = [] of VirtualInput, audio_tracks : Array(String) = [] of String, vag_bytes : Bytes? = nil)
-      vag_extra = vag_bytes || ((match = extra_files.find { |k, _| k.downcase.ends_with?(".vag") }) ? match[1] : nil)
-      elf_data = elf_bytes || ElfBuilder.build_default_runner_elf(cbc_bytes, input_schedule, vag_bytes: vag_extra)
+    def build(output_path : String, cbc_bytes : Bytes, elf_bytes : Bytes? = nil, extra_files : Hash(String, Bytes) = {} of String => Bytes, input_schedule : Array(VirtualInput) = [] of VirtualInput, audio_tracks : Array(String) = [] of String, vag_bytes : Bytes? = nil, vag_tracks : Array(Bytes) = [] of Bytes)
+      all_vag_tracks = if !vag_tracks.empty?
+                         vag_tracks
+                       else
+                         vag_entries = extra_files.select { |k, _| k.downcase.ends_with?(".vag") }.to_a.sort_by do |k, _|
+                           if md = k.match(/(\d+)/)
+                             md[1].to_i
+                           else
+                             999
+                           end
+                         end
+                         vag_entries.map(&.[1])
+                       end
+
+      vag_files = extra_files.select { |k, _| k.downcase.ends_with?(".vag") }.to_a.sort_by do |k, _|
+        if md = k.match(/(\d+)/)
+          md[1].to_i
+        else
+          999
+        end
+      end
+
+      if vag_files.empty? && !all_vag_tracks.empty?
+        all_vag_tracks.each_with_index do |tdata, idx|
+          tnum = sprintf("%02d", idx + 1)
+          vag_files << {"TRACK#{tnum}.VAG", tdata}
+        end
+      end
+
+      non_vag_files = extra_files.reject { |k, _| k == "S.IRX" || k == "S.IRX;1" || k.downcase.ends_with?(".vag") }.to_a
+
+      has_custom_sirx = extra_files.has_key?("S.IRX") || extra_files.has_key?("S.IRX;1")
+      use_streaming = !has_custom_sirx && (vag_files.size > 1 || all_vag_tracks.size > 1 || vag_files.any? { |_, d| d.size > 131072 } || all_vag_tracks.any? { |d| d.size > 131072 })
+
+      vag_extra = vag_bytes || all_vag_tracks.first?
+      elf_data = elf_bytes || ElfBuilder.build_default_runner_elf(cbc_bytes, input_schedule, vag_bytes: vag_extra, vag_tracks: all_vag_tracks)
 
       # Standard PS2 boot configuration
       system_cnf = "BOOT2 = cdrom0:\\CITRINE.ELF;1\r\nVER = 1.00\r\nVMODE = NTSC\r\n".to_slice
@@ -35,31 +68,85 @@ module Citrine
       # 20     : Root Directory Sector
       # 21+    : File contents
 
-      current_sector = 21_u32
+      if use_streaming
+        sec_cursor = 21_u32
+        sec_system_cnf = sec_cursor
+        sec_cursor += ((system_cnf.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
 
-      # 1. SYSTEM.CNF
-      files << IsoFile.new("SYSTEM.CNF;1", system_cnf, current_sector, system_cnf.size.to_u32)
-      current_sector += ((system_cnf.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
+        sec_elf = sec_cursor
+        sec_cursor += ((elf_data.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
 
-      # 2. CITRINE.ELF
-      files << IsoFile.new("CITRINE.ELF;1", elf_data, current_sector, elf_data.size.to_u32)
-      current_sector += ((elf_data.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
+        sec_cbc = sec_cursor
+        sec_cursor += ((cbc_bytes.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
 
-      # 3. GAME.CBC
-      files << IsoFile.new("GAME.CBC;1", cbc_bytes, current_sector, cbc_bytes.size.to_u32)
-      current_sector += ((cbc_bytes.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
+        dummy_sirx = SoundIrxBuilder.build_streaming([] of SoundIrxBuilder::TrackInfo)
+        s_irx_sec = ((dummy_sirx.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
+        sec_sirx = sec_cursor
+        sec_cursor += s_irx_sec
 
-      # 4. S.IRX (Hardware SPU2 Audio Driver)
-      s_irx_bytes = SoundIrxBuilder.build(vag_extra)
-      files << IsoFile.new("S.IRX;1", s_irx_bytes, current_sector, s_irx_bytes.size.to_u32)
-      current_sector += ((s_irx_bytes.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
+        non_vag_entries = non_vag_files.map do |fname, data|
+          sec = sec_cursor
+          sec_cursor += ((data.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
+          {fname, data, sec}
+        end
 
-      # 5. Extra assets
-      extra_files.each do |fname, data|
-        iso_name = fname.upcase.gsub(/[^A-Z0-9_\.]/, "_")
-        iso_name = "#{iso_name};1" unless iso_name.includes?(";")
-        files << IsoFile.new(iso_name, data, current_sector, data.size.to_u32)
-        current_sector += ((data.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
+        track_table = [] of SoundIrxBuilder::TrackInfo
+        vag_entries = vag_files.map do |fname, data|
+          track_lba = sec_cursor
+          bank_count = (data.size // 16384).to_u32
+          track_table << SoundIrxBuilder::TrackInfo.new(track_lba, bank_count)
+          sec_cursor += ((data.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
+          {fname, data, track_lba}
+        end
+
+        s_irx_bytes = SoundIrxBuilder.build_streaming(track_table)
+
+        files << IsoFile.new("SYSTEM.CNF;1", system_cnf, sec_system_cnf, system_cnf.size.to_u32)
+        files << IsoFile.new("CITRINE.ELF;1", elf_data, sec_elf, elf_data.size.to_u32)
+        files << IsoFile.new("GAME.CBC;1", cbc_bytes, sec_cbc, cbc_bytes.size.to_u32)
+        files << IsoFile.new("S.IRX;1", s_irx_bytes, sec_sirx, s_irx_bytes.size.to_u32)
+
+        non_vag_entries.each do |fname, data, sec|
+          iso_name = fname.upcase.gsub(/[^A-Z0-9_\.]/, "_")
+          iso_name = "#{iso_name};1" unless iso_name.includes?(";")
+          files << IsoFile.new(iso_name, data, sec, data.size.to_u32)
+        end
+
+        vag_entries.each do |fname, data, sec|
+          iso_name = fname.upcase.gsub(/[^A-Z0-9_\.]/, "_")
+          iso_name = "#{iso_name};1" unless iso_name.includes?(";")
+          files << IsoFile.new(iso_name, data, sec, data.size.to_u32)
+        end
+
+        current_sector = sec_cursor
+      else
+        current_sector = 21_u32
+
+        # 1. SYSTEM.CNF
+        files << IsoFile.new("SYSTEM.CNF;1", system_cnf, current_sector, system_cnf.size.to_u32)
+        current_sector += ((system_cnf.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
+
+        # 2. CITRINE.ELF
+        files << IsoFile.new("CITRINE.ELF;1", elf_data, current_sector, elf_data.size.to_u32)
+        current_sector += ((elf_data.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
+
+        # 3. GAME.CBC
+        files << IsoFile.new("GAME.CBC;1", cbc_bytes, current_sector, cbc_bytes.size.to_u32)
+        current_sector += ((cbc_bytes.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
+
+        # 4. S.IRX (Hardware SPU2 Audio Driver)
+        s_irx_bytes = extra_files["S.IRX"]? || extra_files["S.IRX;1"]? || SoundIrxBuilder.build(all_vag_tracks.empty? ? (vag_extra ? [vag_extra] : [] of Bytes) : all_vag_tracks)
+        files << IsoFile.new("S.IRX;1", s_irx_bytes, current_sector, s_irx_bytes.size.to_u32)
+        current_sector += ((s_irx_bytes.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
+
+        # 5. Extra assets
+        extra_files.each do |fname, data|
+          next if fname == "S.IRX" || fname == "S.IRX;1"
+          iso_name = fname.upcase.gsub(/[^A-Z0-9_\.]/, "_")
+          iso_name = "#{iso_name};1" unless iso_name.includes?(";")
+          files << IsoFile.new(iso_name, data, current_sector, data.size.to_u32)
+          current_sector += ((data.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
+        end
       end
 
       total_sectors = current_sector

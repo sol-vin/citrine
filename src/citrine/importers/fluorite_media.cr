@@ -31,7 +31,8 @@ module Citrine
       record AudioConfig,
         sample_rate : Int32 = 22050,
         channels : Int32 = 1,
-        loop_audio : Bool = false
+        loop_audio : Bool = false,
+        duration_seconds : Float64? = nil
 
       # CD-DA presets compliant with Red Book Compact Disc Digital Audio (44.1 kHz, 16-bit signed stereo Linear PCM)
       record CddaConfig,
@@ -164,6 +165,9 @@ module Citrine
             outp.audio_codec("pcm_s16le")
             outp.sample_rate(config.sample_rate)
             outp.channels(config.channels)
+            if dur = config.duration_seconds
+              outp.option("-t", dur.to_s)
+            end
           end
         end
 

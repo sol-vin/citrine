@@ -138,21 +138,29 @@ module Citrine
         Dir.children(src_dir).select { |f| f =~ /^track\d+\.raw$/i }.each do |f|
           File.delete(File.join(src_dir, f)) rescue nil
         end
-        # Delete old track01.vag so SPU2 track gets regenerated
-        File.delete(File.join(src_dir, "track01.vag")) rescue nil
+        # Delete old track*.vag so SPU2 tracks get regenerated
+        Dir.children(src_dir).select { |f| f =~ /^track\d+\.vag$/i }.each do |f|
+          File.delete(File.join(src_dir, f)) rescue nil
+        end
 
         Importers::FluoriteMedia.import_album(album_dir, src_dir) { |msg| puts "[Citrine Media] #{msg}" }
       end
 
-      # 3. Check if primary track VAG needs conversion (for SPU2 playback)
-      track01_vag = File.join(src_dir, "track01.vag")
-      first_audio = album_audio_files.sort.first?
-      if first_audio
-        first_path = File.join(album_dir, first_audio)
-        vag_stale = !File.exists?(track01_vag) || (File.info(first_path).modification_time > File.info(track01_vag).modification_time)
+      # 3. Check if album track VAGs need conversion (for SPU2 playback)
+      album_audio_files.sort.each_with_index do |audio_file, idx|
+        tnum = sprintf("%02d", idx + 1)
+        track_vag = File.join(src_dir, "track#{tnum}.vag")
+        audio_path = File.join(album_dir, audio_file)
+        vag_stale = !File.exists?(track_vag) ||
+                    (File.info(audio_path).modification_time > File.info(track_vag).modification_time) ||
+                    (File.size(track_vag) < 200_000 && File.size(audio_path) > 500_000)
         if vag_stale
-          puts "[Citrine Media] Auto-converting primary album track #{first_path} -> #{track01_vag} (SPU2 4-bit ADPCM)..."
-          Importers::FluoriteMedia.convert_audio(first_path, track01_vag, Importers::FluoriteMedia::AudioConfig.new(sample_rate: 22050, loop_audio: true))
+          puts "[Citrine Media] Auto-converting album track #{idx + 1} #{audio_path} -> #{track_vag} (SPU2 4-bit ADPCM)..."
+          Importers::FluoriteMedia.convert_audio(
+            audio_path,
+            track_vag,
+            Importers::FluoriteMedia::AudioConfig.new(sample_rate: 22050, loop_audio: true, duration_seconds: nil)
+          )
         end
       end
     end
@@ -185,13 +193,21 @@ module Citrine
         end
       end
 
-      vag_files = Dir.glob(File.join(src_dir, "*.vag").gsub('\\', '/'))
-      first_vag_data = vag_files.first? ? File.read(vag_files.first).to_slice : nil
+      vag_files = Dir.glob(File.join(src_dir, "*.vag").gsub('\\', '/')).sort_by do |p|
+        base = File.basename(p)
+        if md = base.match(/(\d+)/)
+          md[1].to_i
+        else
+          999
+        end
+      end
+      all_vag_data = vag_files.map { |f| File.read(f).to_slice }
+      first_vag_data = all_vag_data.first?
 
       elf_data = if @runner_elf_path != "runtime/bin/citrine_runner.elf" && File.exists?(@runner_elf_path)
                    File.read(@runner_elf_path).to_slice
                  else
-                   ElfBuilder.build_default_runner_elf(cbc_data, vag_bytes: first_vag_data)
+                   ElfBuilder.build_default_runner_elf(cbc_data, vag_bytes: first_vag_data, vag_tracks: all_vag_data)
                  end
 
       tracks = audio_tracks.dup
@@ -232,7 +248,7 @@ module Citrine
         extra_files[base] ||= File.read(vag_file).to_slice
       end
 
-      IsoBuilder.build(output_iso_path, cbc_data, elf_data, extra_files, audio_tracks: tracks, vag_bytes: first_vag_data)
+      IsoBuilder.build(output_iso_path, cbc_data, elf_data, extra_files, audio_tracks: tracks, vag_bytes: first_vag_data, vag_tracks: all_vag_data)
       output_iso_path
     end
 

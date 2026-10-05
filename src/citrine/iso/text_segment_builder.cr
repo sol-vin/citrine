@@ -62,30 +62,6 @@ module Citrine
           emitter.sw(T1, 12, T0)
         end
 
-        # DVD Screensaver state initialization
-        if @profile.is_dvd_screensaver
-          emitter.ori(T1, ZERO, 1)
-          emitter.sw(T1, 0x90, T0)      # logo_count = 1 at 0x70000090
-          emitter.sw(ZERO, 0x94, T0)    # debounce = 0   at 0x70000094
-          emitter.ori(T1, ZERO, 42)
-          emitter.sw(T1, 0x98, T0)      # rng_seed = 42  at 0x70000098
-
-          # Logo 0 at 0x70000100:
-          # pos_x = 240, pos_y = 200, vel_x = 7, vel_y = 6, text_color_idx = 3, bg_color_idx = 2
-          emitter.ori(T1, ZERO, 240)
-          emitter.sw(T1, 0x0100, T0)
-          emitter.ori(T1, ZERO, 200)
-          emitter.sw(T1, 0x0104, T0)
-          emitter.ori(T1, ZERO, 7)
-          emitter.sw(T1, 0x0108, T0)
-          emitter.ori(T1, ZERO, 6)
-          emitter.sw(T1, 0x010C, T0)
-          emitter.ori(T1, ZERO, 3)
-          emitter.sw(T1, 0x0110, T0)
-          emitter.ori(T1, ZERO, 2)
-          emitter.sw(T1, 0x0114, T0)
-        end
-
         # Initialize DualShock 2 Pad Driver & Sound Driver in IOP
         emitter.li(T9, PadRuntimePayload::INIT_ENTRY)
         emitter.jalr(T9)
@@ -100,9 +76,9 @@ module Citrine
           emitter.sw(T1, 0x70, T0)    # 0x70000070: master_vol = 240
           emitter.ori(T1, ZERO, 1)
           emitter.sw(T1, 0x74, T0)    # 0x70000074: is_looping = 1 (ON)
-          emitter.sw(ZERO, 0x78, T0)  # 0x70000078: track_idx = 0
-          emitter.ori(T1, ZERO, 13)
-          emitter.sw(T1, 0x7C, T0)    # 0x7000007C: total_tracks = 13
+          total_trk = Math.max(@profile.phases.size, @profile.num_tracks)
+          emitter.li(T1, total_trk)
+          emitter.sw(T1, 0x7C, T0)    # 0x7000007C: total_tracks = total_trk
           emitter.sw(ZERO, 0x80, T0)  # 0x70000080: elapsed_sec = 0
 
           # Start audio playback via SPU2 (cmd 1 = Play)
@@ -197,30 +173,44 @@ module Citrine
         emitter.addiu(T1, T1, 1)
         emitter.sw(T1, 4, T0)
 
-        # Debounce counter decrement for dynamic apps (DVD screensaver)
-        if @profile.is_dvd_screensaver
-          emitter.lw(T3, 0x94, T0)
-          emitter.beqz(T3, "dvd_debounce_ok")
-          emitter.nop
-          emitter.addiu(T3, T3, -1)
-          emitter.sw(T3, 0x94, T0)
-          emitter.label("dvd_debounce_ok")
-        end
-
         # Render Primary Phase Draw Packet
-        if @profile.is_dvd_screensaver
-          emitter.dma02_kick(@rodata.static_dvd_addr, @rodata.static_dvd_qwc)
-        elsif @rodata.phase_addrs.empty?
+        if @rodata.phase_addrs.empty?
           # No draw packets
-        elsif @rodata.phase_addrs.size == 1
-          emitter.dma02_kick(@rodata.phase_addrs[0], @rodata.phase_qwcs[0])
-        elsif @profile.is_animated && @rodata.phase_table_addr > 0
-          emitter.lw(T2, 8, T0) # phase index
-          emitter.sll(T3, T2, 3) # phase_index * 8
-          emitter.li(T8, @rodata.phase_table_addr)
-          emitter.addu(T8, T8, T3)
-          emitter.lw(T7, 0, T8) # MADR
-          emitter.lw(T6, 4, T8) # QWC
+        else
+          if @rodata.phase_table_addr > 0
+            emitter.lw(T2, 8, T0) # phase index
+            if @rodata.phase_addrs.size > 1
+              emitter.ori(T3, ZERO, @rodata.phase_addrs.size)
+              emitter.divu(T2, T3)
+              emitter.mfhi(T2) # T2 = phase_index % phases.size
+            end
+            # S7 = phase_table_addr + (phase_index * 128)
+            emitter.sll(T3, T2, 7) # T2 * 128
+            emitter.li(S7, @rodata.phase_table_addr)
+            emitter.addu(S7, S7, T3) # S7 = PhaseDescriptor*
+            emitter.lw(T7, 0, S7) # MADR
+            emitter.lw(T6, 4, S7) # QWC
+          elsif @rodata.phase_addrs.size == 1
+            emitter.li(T7, @rodata.phase_addrs[0])
+            emitter.ori(T6, ZERO, @rodata.phase_qwcs[0].to_i32)
+          else
+            # Multi-phase branch lookup fallback
+            emitter.lw(T2, 8, T0) # phase index
+            @rodata.phase_addrs.each_with_index do |addr, i|
+              if i < @rodata.phase_addrs.size - 1
+                emitter.ori(T3, ZERO, i)
+                emitter.bne(T2, T3, "check_phase_#{i + 1}")
+                emitter.nop
+              end
+              emitter.li(T7, addr)
+              emitter.ori(T6, ZERO, @rodata.phase_qwcs[i].to_i32)
+              if i < @rodata.phase_addrs.size - 1
+                emitter.jump("primary_phase_selected")
+                emitter.label("check_phase_#{i + 1}")
+              end
+            end
+            emitter.label("primary_phase_selected")
+          end
 
           if @profile.has_audio
             # Update elapsed frames if playing (0x7000003C == 1)
@@ -260,39 +250,314 @@ module Citrine
             emitter.sw(T5, 0x80, T0)
 
             emitter.label("skip_elapsed_inc")
+
+            # Auto-advance track if dur_frames > 0 and elapsed >= dur_frames
+            if (@profile.phases.size > 1 || @profile.num_tracks > 1) && @rodata.phase_table_addr > 0
+              emitter.lw(T6, 88, S7) # dur_frames from active phase descriptor
+              emitter.beqz(T6, "skip_track_auto_advance")
+              emitter.nop
+              emitter.lw(T5, 0x80, T0) # elapsed_frames
+              emitter.sltu(T1, T5, T6)
+              emitter.bnez(T1, "skip_track_auto_advance")
+              emitter.nop
+
+              # Track finished: check loop mode (0x70000074)
+              emitter.lw(T1, 0x74, T0)
+              emitter.beqz(T1, "track_auto_stop")
+              emitter.nop
+
+              # Auto-advance to Next Track
+              emitter.lw(T5, 0x78, T0) # track_idx
+              emitter.addiu(T5, T5, 1)
+              emitter.lw(T6, 0x7C, T0) # total_tracks
+              emitter.sltu(T1, T5, T6)
+              emitter.bnez(T1, "auto_adv_ok")
+              emitter.nop
+              emitter.move(T5, ZERO)
+              emitter.label("auto_adv_ok")
+              emitter.sw(T5, 0x78, T0)
+              emitter.ori(T6, ZERO, @profile.phases.size)
+              emitter.divu(T5, T6)
+              emitter.mfhi(T1)
+              emitter.sw(T1, 8, T0)
+              emitter.sw(ZERO, 0x80, T0) # reset elapsed_sec
+              emitter.ori(T6, ZERO, 1)
+              emitter.sw(T6, 60, T0)
+              emitter.andi(A0, T5, 0xFF)
+              emitter.ori(A0, A0, 0x0100) # cmd = 0x0100 | track_idx
+              emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+              emitter.jalr(T9)
+              emitter.nop
+              emitter.lui(T0, 0x7000)
+              emitter.jump("skip_track_auto_advance")
+
+              emitter.label("track_auto_stop")
+              emitter.sw(ZERO, 60, T0) # audio_status = 0 (stopped)
+              emitter.li(T9, PadRuntimePayload::SOUND_STOP_ENTRY)
+              emitter.jalr(T9)
+              emitter.nop
+              emitter.lui(T0, 0x7000)
+
+              emitter.label("skip_track_auto_advance")
+            end
           end
 
-          if @rodata.scrubber_present
-            # Update progress scrubber quad XYZ2 at uncached MADR + scrub_quad_offset + 48
-            emitter.lui(T4, 0x2000)
-            emitter.or_(T4, T7, T4)
-            emitter.li(T3, @rodata.scrub_quad_offset + 48_u32)
-            emitter.addu(T4, T4, T3)
-            emitter.lw(T1, 0, T4)
-            emitter.srl(T2, T1, 16)
-            emitter.ori(T3, ZERO, (@rodata.scrub_y2.to_i32 << 4))
-            emitter.bne(T2, T3, "skip_scrub_update")
+          if @rodata.phase_table_addr > 0
+            # S7 = PhaseDescriptor* (preserved across RPC calls)
+            emitter.lw(T7, 0, S7) # MADR
+            emitter.lw(T6, 4, S7) # QWC
+
+            # S6 = uncached GIF packet base (0x20000000 | T7)
+            emitter.lui(S6, 0x2000)
+            emitter.or_(S6, T7, S6)
+
+            # Check flags in S7 + 92
+            emitter.lw(T9, 92, S7) # flags
+
+            # -----------------------------------------------------------
+            # 1. Timeline Scrubber Fill Bar (Flag bit 0)
+            # -----------------------------------------------------------
+            emitter.andi(T1, T9, 1)
+            emitter.beqz(T1, "skip_scrub_and_knob")
             emitter.nop
-            # scrub_x = min_x + (elapsed_frames / 16), clamped to max_x
-            emitter.lw(T5, 0x80, T0)
-            emitter.srl(T2, T5, 4)
-            emitter.addiu(T2, T2, @rodata.scrub_min_x.to_i32)
-            emitter.ori(T3, ZERO, @rodata.scrub_max_x.to_i32)
-            emitter.sltu(T1, T3, T2)
+
+            emitter.lw(T3, 8, S7) # scrub_quad_offset
+            emitter.addu(T4, S6, T3)
+            emitter.addiu(T4, T4, 48) # quad + 48 is XYZ2
+            # Verify quad Y2 matches scrub_y2
+            emitter.lw(T1, 0, T4)
+            emitter.srl(T2, T1, 20)
+            emitter.lw(T3, 60, S7) # scrub_y2
+            emitter.bne(T2, T3, "skip_scrub_and_knob")
+            emitter.nop
+
+            # scrub_x = min_x + (elapsed_frames * total_w / dur_frames)
+            emitter.lw(T5, 0x80, T0) # elapsed_frames
+            emitter.lw(T8, 52, S7)   # scrub_min_x
+            emitter.lw(T3, 56, S7)   # scrub_max_x
+            emitter.subu(T2, T3, T8) # total_w
+            emitter.lw(T6, 88, S7)   # dur_frames
+            emitter.beqz(T6, "scrub_fallback")
+            emitter.nop
+            emitter.multu(T5, T2)
+            emitter.mflo(T1)
+            emitter.divu(T1, T6)
+            emitter.mflo(T2)         # scrub_w
+            emitter.addu(S1, T8, T2) # S1 = scrub_x
+            emitter.jump("scrub_clamp")
+            emitter.nop
+
+            emitter.label("scrub_fallback")
+            emitter.srl(S1, T5, 4)
+            emitter.addu(S1, S1, T8)
+
+            emitter.label("scrub_clamp")
+            emitter.sltu(T1, T3, S1)
             emitter.beqz(T1, "scrub_clamp_ok")
             emitter.nop
-            emitter.ori(T2, ZERO, @rodata.scrub_max_x.to_i32)
+            emitter.move(S1, T3)
             emitter.label("scrub_clamp_ok")
-            emitter.sll(T2, T2, 4)
-            emitter.lui(T3, (@rodata.scrub_y2.to_i32 << 4))
+
+            # Store updated XYZ2: (scrub_y2 << 20) | (scrub_x << 4)
+            emitter.sll(T2, S1, 4)
+            emitter.lw(T3, 60, S7) # scrub_y2
+            emitter.sll(T3, T3, 20)
             emitter.or_(T3, T3, T2)
             emitter.sw(T3, 0, T4)
-            emitter.label("skip_scrub_update")
-          end
 
-          # Live Dynamic Time Digits (MM:SS) in uncached GIF packet RAM
-          if @rodata.time_text_present
-            emitter.lui(T0, 0x7000)
+            # -----------------------------------------------------------
+            # 2. Playhead Knob (Flag bit 1)
+            # -----------------------------------------------------------
+            emitter.andi(T1, T9, 2)
+            emitter.beqz(T1, "skip_knob_update")
+            emitter.nop
+
+            emitter.lw(T3, 12, S7) # scrub_knob_offset
+            emitter.addu(T4, S6, T3)
+            # Verify knob quad Y2 matches knob_y2
+            emitter.lw(T1, 48, T4)
+            emitter.srl(T1, T1, 20)
+            emitter.lw(T3, 72, S7) # knob_y2
+            emitter.bne(T1, T3, "skip_knob_update")
+            emitter.nop
+
+            # Ensure knob quad is solid white (RGBAQ = 0x80FFFFFF)
+            emitter.lui(T3, 0x80FF)
+            emitter.ori(T3, T3, 0xFFFF)
+            emitter.sw(T3, 16, T4)
+
+            # knob_x1 = scrub_x - half_w, knob_x2 = scrub_x + half_w
+            emitter.lw(T8, 64, S7) # knob_half_w
+            emitter.subu(T1, S1, T8) # knob_x1
+            emitter.addu(T2, S1, T8) # knob_x2
+
+            emitter.sll(T1, T1, 4) # knob_x1 << 4
+            emitter.lw(T3, 68, S7) # knob_y1
+            emitter.sll(T3, T3, 20)
+            emitter.or_(T3, T3, T1) # XYZ3 = (knob_y1 << 20) | (knob_x1 << 4)
+            emitter.sw(T3, 32, T4) # quad + 32 is XYZ3
+
+            emitter.sll(T2, T2, 4) # knob_x2 << 4
+            emitter.lw(T3, 72, S7) # knob_y2
+            emitter.sll(T3, T3, 20)
+            emitter.or_(T3, T3, T2) # XYZ2 = (knob_y2 << 20) | (knob_x2 << 4)
+            emitter.sw(T3, 48, T4) # quad + 48 is XYZ2
+
+            emitter.label("skip_knob_update")
+            emitter.label("skip_scrub_and_knob")
+
+            # -----------------------------------------------------------
+            # 3. Volume Bar Meter (Flag bit 2)
+            # -----------------------------------------------------------
+            emitter.andi(T1, T9, 4)
+            emitter.beqz(T1, "skip_vol_update")
+            emitter.nop
+
+            emitter.lw(T3, 16, S7) # vol_meter_offset
+            emitter.addu(T4, S6, T3)
+            emitter.addiu(T4, T4, 48) # quad + 48 is XYZ2
+            # Verify Y2 matches vol_y2
+            emitter.lw(T1, 0, T4)
+            emitter.srl(T1, T1, 20)
+            emitter.lw(T3, 84, S7) # vol_y2
+            emitter.bne(T1, T3, "skip_vol_update")
+            emitter.nop
+
+            # vol_w = (master_vol * (vol_max_x - vol_min_x)) / 255
+            emitter.lw(T5, 0x70, T0) # master_vol from 0x70000070
+            emitter.lw(T8, 76, S7)   # vol_min_x
+            emitter.lw(T3, 80, S7)   # vol_max_x
+            emitter.subu(T2, T3, T8) # vol_max_x - vol_min_x
+            emitter.multu(T5, T2)
+            emitter.mflo(T1)
+            emitter.ori(T3, ZERO, 255)
+            emitter.divu(T1, T3)
+            emitter.mflo(T2)         # vol_w
+            emitter.addu(T2, T8, T2) # vol_x2 = vol_min_x + vol_w
+            emitter.lw(T3, 80, S7)   # vol_max_x
+            emitter.sltu(T1, T3, T2)
+            emitter.beqz(T1, "vol_clamp_ok")
+            emitter.nop
+            emitter.move(T2, T3)
+            emitter.label("vol_clamp_ok")
+
+            # Store updated XYZ2: (vol_y2 << 20) | (vol_x2 << 4)
+            emitter.sll(T2, T2, 4)
+            emitter.lw(T3, 84, S7) # vol_y2
+            emitter.sll(T3, T3, 20)
+            emitter.or_(T3, T3, T2)
+            emitter.sw(T3, 0, T4)
+
+            emitter.label("skip_vol_update")
+
+            # -----------------------------------------------------------
+            # 3.5. Optical Indicator / Crosshairs Spinner (Flag bit 5)
+            # -----------------------------------------------------------
+            emitter.andi(T1, T9, 32)
+            emitter.beqz(T1, "skip_spinner_update")
+            emitter.nop
+
+            # Check audio playing status (0x7000003C: 0=stopped, 1=playing, 2=paused)
+            emitter.lw(T1, 60, T0)
+            emitter.ori(T2, ZERO, 1)
+            emitter.beq(T1, T2, "spinner_do_spin")
+            emitter.nop
+            # If not stopped (i.e. paused), leave current rotation angle
+            emitter.bnez(T1, "skip_spinner_update")
+            emitter.nop
+            # If stopped (0), reset to step 0 (orthogonal cross)
+            emitter.move(T1, ZERO)
+            emitter.jump("spinner_calc_dxdy")
+            emitter.nop
+
+            emitter.label("spinner_do_spin")
+            # step = (frame_count >> 1) & 7 (smooth 30 FPS rotation)
+            emitter.lw(T1, 4, T0)
+            emitter.srl(T1, T1, 1)
+            emitter.andi(T1, T1, 7)
+
+            emitter.label("spinner_calc_dxdy")
+            # S6 points to uncached GIF packet: S6 + spinner_offset (+96)
+            emitter.lw(T3, 96, S7)   # spinner_offset
+            emitter.addu(T9, S6, T3) # T9 = line 1 GIF start
+            emitter.lw(T4, 100, S7)  # spinner_cx
+            emitter.lw(T5, 104, S7)  # spinner_cy
+            emitter.lw(T6, 108, S7)  # spinner_radius
+
+            # Lookup dx_factor, dy_factor from spinner_table_addr:
+            # table_addr + (step * 8)
+            emitter.sll(T2, T1, 3) # step * 8
+            emitter.li(T3, @rodata.spinner_table_addr)
+            emitter.addu(T3, T3, T2)
+            emitter.lw(T7, 0, T3)  # dx_factor (Int32)
+            emitter.lw(T8, 4, T3)  # dy_factor (Int32)
+
+            emitter.mult(T6, T7)   # r * dx_factor
+            emitter.mflo(A0)
+            emitter.sra(A0, A0, 8) # A0 = dx
+
+            emitter.mult(T6, T8)   # r * dy_factor
+            emitter.mflo(A1)
+            emitter.sra(A1, A1, 8) # A1 = dy
+
+            # Line 1: (cx - dx, cy - dy) to (cx + dx, cy + dy)
+            # XYZ3 (vertex 1) at T9 + 32
+            emitter.subu(T1, T4, A0) # x1 = cx - dx
+            emitter.subu(T2, T5, A1) # y1 = cy - dy
+            emitter.sll(T1, T1, 4)
+            emitter.sll(T2, T2, 20)
+            emitter.or_(T3, T2, T1)
+            emitter.sw(T3, 32, T9)   # Line 1 subline 1 XYZ3
+            emitter.addiu(T2, T2, 1 << 20) # y1 + 1 for subline 2
+            emitter.or_(T3, T2, T1)
+            emitter.sw(T3, 96, T9)   # Line 1 subline 2 XYZ3
+
+            # XYZ2 (vertex 2) at T9 + 48
+            emitter.addu(T1, T4, A0) # x2 = cx + dx
+            emitter.addu(T2, T5, A1) # y2 = cy + dy
+            emitter.sll(T1, T1, 4)
+            emitter.sll(T2, T2, 20)
+            emitter.or_(T3, T2, T1)
+            emitter.sw(T3, 48, T9)   # Line 1 subline 1 XYZ2
+            emitter.addiu(T2, T2, 1 << 20) # y2 + 1 for subline 2
+            emitter.or_(T3, T2, T1)
+            emitter.sw(T3, 112, T9)  # Line 1 subline 2 XYZ2
+
+            # Line 2: (cx + dy, cy - dx) to (cx - dy, cy + dx)
+            # XYZ3 (vertex 1) at T9 + 160
+            emitter.addu(T1, T4, A1) # x3 = cx + dy
+            emitter.subu(T2, T5, A0) # y3 = cy - dx
+            emitter.sll(T1, T1, 4)
+            emitter.sll(T2, T2, 20)
+            emitter.or_(T3, T2, T1)
+            emitter.sw(T3, 160, T9)  # Line 2 subline 1 XYZ3
+            emitter.addiu(T1, T1, 1 << 4) # x3 + 1 for subline 2
+            emitter.or_(T3, T2, T1)
+            emitter.sw(T3, 224, T9)  # Line 2 subline 2 XYZ3
+
+            # XYZ2 (vertex 2) at T9 + 176
+            emitter.subu(T1, T4, A1) # x4 = cx - dy
+            emitter.addu(T2, T5, A0) # y4 = cy + dx
+            emitter.sll(T1, T1, 4)
+            emitter.sll(T2, T2, 20)
+            emitter.or_(T3, T2, T1)
+            emitter.sw(T3, 176, T9)  # Line 2 subline 1 XYZ2
+            emitter.addiu(T1, T1, 1 << 4) # x4 + 1 for subline 2
+            emitter.or_(T3, T2, T1)
+            emitter.sw(T3, 240, T9)  # Line 2 subline 2 XYZ2
+
+            # Reload T9 with flags for remaining checks (such as time text)
+            emitter.lw(T9, 92, S7)
+
+            emitter.label("skip_spinner_update")
+
+            # -----------------------------------------------------------
+            # 4. Live Dynamic Time Digits (MM:SS) (Flag bit 3)
+            # -----------------------------------------------------------
+            emitter.andi(T1, T9, 8)
+            emitter.beqz(T1, "skip_time_update")
+            emitter.nop
+
             emitter.lw(T5, 0x80, T0) # elapsed_frames
 
             # total_sec = elapsed_frames / 60
@@ -316,40 +581,49 @@ module Citrine
             emitter.mflo(S4) # S4 = sec_tens
             emitter.mfhi(S5) # S5 = sec_ones
 
-            # S6 = uncached GIF packet base (0x20000000 | T7)
-            emitter.lui(S6, 0x2000)
-            emitter.or_(S6, T7, S6)
-            emitter.ori(A3, ZERO, @rodata.time_text_scale == 2 ? 1 : 0)
+            emitter.lw(A3, 92, S7) # flags
+            emitter.srl(A3, A3, 8)
+            emitter.andi(A3, A3, 0xFF) # time_text_scale
+            emitter.ori(T1, ZERO, 2)
+            emitter.beq(A3, T1, "scale_is_2")
+            emitter.nop
+            emitter.move(A3, ZERO)
+            emitter.jump("scale_set")
+            emitter.nop
+            emitter.label("scale_is_2")
+            emitter.ori(A3, ZERO, 1)
+            emitter.label("scale_set")
 
             # Digit 0: Minute tens
             emitter.move(A0, S2)
-            emitter.li(A1, @rodata.min_tens_pos)
-            emitter.li(T1, @rodata.min_tens_offset)
+            emitter.lw(A1, 36, S7) # min_tens_pos
+            emitter.lw(T1, 20, S7) # min_tens_offset
             emitter.addu(A2, S6, T1)
             emitter.call("update_digit_quads")
 
             # Digit 1: Minute ones
             emitter.move(A0, S3)
-            emitter.li(A1, @rodata.min_ones_pos)
-            emitter.li(T1, @rodata.min_ones_offset)
+            emitter.lw(A1, 40, S7) # min_ones_pos
+            emitter.lw(T1, 24, S7) # min_ones_offset
             emitter.addu(A2, S6, T1)
             emitter.call("update_digit_quads")
 
             # Digit 2: Second tens
             emitter.move(A0, S4)
-            emitter.li(A1, @rodata.sec_tens_pos)
-            emitter.li(T1, @rodata.sec_tens_offset)
+            emitter.lw(A1, 44, S7) # sec_tens_pos
+            emitter.lw(T1, 28, S7) # sec_tens_offset
             emitter.addu(A2, S6, T1)
             emitter.call("update_digit_quads")
 
             # Digit 3: Second ones
             emitter.move(A0, S5)
-            emitter.li(A1, @rodata.sec_ones_pos)
-            emitter.li(T1, @rodata.sec_ones_offset)
+            emitter.lw(A1, 48, S7) # sec_ones_pos
+            emitter.lw(T1, 32, S7) # sec_ones_offset
             emitter.addu(A2, S6, T1)
             emitter.call("update_digit_quads")
 
             emitter.lui(T0, 0x7000)
+            emitter.label("skip_time_update")
           end
 
           # Live Dynamic Frame Counter Digits in uncached GIF packet RAM
@@ -496,24 +770,14 @@ module Citrine
             emitter.lui(T0, 0x7000)
           end
 
-          emitter.dma02_kick_reg(T7, T6)
-        else
-          # Multi-phase branch lookup
-          emitter.lw(T2, 8, T0) # phase index
-          @rodata.phase_addrs.each_with_index do |addr, i|
-            if i < @rodata.phase_addrs.size - 1
-              emitter.ori(T3, ZERO, i)
-              emitter.bne(T2, T3, "check_phase_#{i + 1}")
-              emitter.nop
-            end
-            emitter.li(T7, addr)
-            emitter.ori(T6, ZERO, @rodata.phase_qwcs[i].to_i32)
-            if i < @rodata.phase_addrs.size - 1
-              emitter.jump("send_primary_dma")
-              emitter.label("check_phase_#{i + 1}")
-            end
+          if @rodata.phase_table_addr > 0
+            emitter.lw(T7, 0, S7) # MADR
+            emitter.lw(T6, 4, S7) # QWC
+          elsif @rodata.phase_addrs.size == 1
+            emitter.li(T7, @rodata.phase_addrs[0])
+            emitter.ori(T6, ZERO, @rodata.phase_qwcs[0].to_i32)
           end
-          emitter.label("send_primary_dma")
+
           emitter.dma02_kick_reg(T7, T6)
         end
 
@@ -950,10 +1214,18 @@ module Citrine
           emitter.move(T5, ZERO)
           emitter.label("next_trk_ok")
           emitter.sw(T5, 0x78, T0)
+          if @profile.phases.size > 1
+            emitter.ori(T6, ZERO, @profile.phases.size)
+            emitter.divu(T5, T6)
+            emitter.mfhi(T7)
+            emitter.sw(T7, 8, T0)
+          end
           emitter.sw(ZERO, 0x80, T0)  # reset elapsed_sec
-          emitter.ori(T5, ZERO, 1)
-          emitter.sw(T5, 60, T0)
-          emitter.li(A0, 1)           # restart audio playback
+          emitter.ori(T6, ZERO, 1)
+          emitter.sw(T6, 60, T0)      # audio_status = 1 (playing)
+          emitter.lw(A0, 0x78, T0)    # track_idx
+          emitter.andi(A0, A0, 0xFF)
+          emitter.ori(A0, A0, 0x0100) # cmd = 0x0100 | track_idx
           emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
           emitter.jalr(T9)
           emitter.nop
@@ -1009,10 +1281,18 @@ module Citrine
           emitter.label("prev_trk_dec")
           emitter.addiu(T5, T5, -1)
           emitter.sw(T5, 0x78, T0)
+          if @profile.phases.size > 1
+            emitter.ori(T6, ZERO, @profile.phases.size)
+            emitter.divu(T5, T6)
+            emitter.mfhi(T7)
+            emitter.sw(T7, 8, T0)
+          end
           emitter.sw(ZERO, 0x80, T0)  # reset elapsed_sec
-          emitter.ori(T5, ZERO, 1)
-          emitter.sw(T5, 60, T0)
-          emitter.li(A0, 1)           # restart audio playback
+          emitter.ori(T6, ZERO, 1)
+          emitter.sw(T6, 60, T0)      # audio_status = 1 (playing)
+          emitter.lw(A0, 0x78, T0)    # track_idx
+          emitter.andi(A0, A0, 0xFF)
+          emitter.ori(A0, A0, 0x0100) # cmd = 0x0100 | track_idx
           emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
           emitter.jalr(T9)
           emitter.nop
@@ -1055,365 +1335,7 @@ module Citrine
         # 4. General Phase Sequencing
         # -------------------------------------------------------------
         phases = @profile.phases
-        if @profile.is_dvd_screensaver
-          # --- DVD BUTTONS & LOGO MANAGEMENT ---
-          emitter.lw(T5, 24, T0) # T5 = pressed edges (0x70000018)
-          emitter.lw(T6, 44, T0) # port 1 pressed edges
-          emitter.or_(T5, T5, T6)
-          emitter.lw(T4, 0x90, T0) # T4 = logo_count    (0x70000090)
-          emitter.lw(T3, 0x94, T0) # T3 = debounce      (0x70000094)
-
-          # 1. Triangle (0x1000): reset to 1 logo
-          emitter.andi(T7, T5, 0x1000)
-          emitter.beqz(T7, "dvd_chk_r1")
-          emitter.nop
-          emitter.bnez(T3, "dvd_buttons_done")
-          emitter.nop
-          emitter.ori(T4, ZERO, 1)
-          emitter.sw(T4, 0x90, T0) # logo_count = 1
-          emitter.ori(T3, ZERO, 12)
-          emitter.sw(T3, 0x94, T0) # debounce = 12
-          emitter.j("dvd_buttons_done")
-          emitter.nop
-
-          emitter.label("dvd_chk_r1")
-          # 2. R1 (0x0800): stress test - spawn 10 logos
-          emitter.andi(T7, T5, 0x0800)
-          emitter.beqz(T7, "dvd_chk_cross")
-          emitter.nop
-          emitter.bnez(T3, "dvd_buttons_done")
-          emitter.nop
-          emitter.ori(S4, ZERO, 10)
-          emitter.j("dvd_spawn_batch")
-          emitter.nop
-
-          emitter.label("dvd_chk_cross")
-          # 3. Cross (0x4000): spawn 1 logo
-          emitter.andi(T7, T5, 0x4000)
-          emitter.beqz(T7, "dvd_buttons_done")
-          emitter.nop
-          emitter.bnez(T3, "dvd_buttons_done")
-          emitter.nop
-          emitter.ori(S4, ZERO, 1)
-
-          emitter.label("dvd_spawn_batch")
-          emitter.ori(T3, ZERO, 12)
-          emitter.sw(T3, 0x94, T0) # debounce = 12
-
-          emitter.label("dvd_spawn_one")
-          emitter.lui(T0, 0x7000)
-          emitter.lw(T4, 0x90, T0) # logo_count
-          emitter.sltiu(T7, T4, 16)
-          emitter.beqz(T7, "dvd_buttons_done")
-          emitter.nop
-
-          # Calculate slot address in SPRAM: 0x70000100 + (logo_count * 24)
-          emitter.sll(S1, T4, 4) # T4 * 16
-          emitter.sll(S2, T4, 3) # T4 * 8
-          emitter.addu(S1, S1, S2)
-          emitter.addiu(S1, S1, 0x0100)
-          emitter.addu(S0, T0, S1) # S0 = new logo SPRAM address
-
-          # rx = rng.next_int(40, 400)
-          emitter.ori(A0, ZERO, 40)
-          emitter.ori(A1, ZERO, 400)
-          emitter.call("rng_next_int")
-          emitter.sw(V0, 0, S0)
-
-          # ry = rng.next_int(40, 320)
-          emitter.ori(A0, ZERO, 40)
-          emitter.ori(A1, ZERO, 320)
-          emitter.call("rng_next_int")
-          emitter.sw(V0, 4, S0)
-
-          # dir_x: rng_next_int(0, 1) == 0 ? -3 : 3
-          emitter.ori(A0, ZERO, 0)
-          emitter.ori(A1, ZERO, 1)
-          emitter.call("rng_next_int")
-          emitter.ori(T6, ZERO, 3)
-          emitter.bnez(V0, "dvd_dir_x_set")
-          emitter.nop
-          emitter.subu(T6, ZERO, T6) # T6 = -3
-          emitter.label("dvd_dir_x_set")
-          emitter.sw(T6, 8, S0)
-
-          # dir_y: rng_next_int(0, 1) == 0 ? -2 : 2
-          emitter.ori(A0, ZERO, 0)
-          emitter.ori(A1, ZERO, 1)
-          emitter.call("rng_next_int")
-          emitter.ori(T6, ZERO, 2)
-          emitter.bnez(V0, "dvd_dir_y_set")
-          emitter.nop
-          emitter.subu(T6, ZERO, T6) # T6 = -2
-          emitter.label("dvd_dir_y_set")
-          emitter.sw(T6, 12, S0)
-
-          # rt_col = rng_next_int(0, 5)
-          emitter.ori(A0, ZERO, 0)
-          emitter.ori(A1, ZERO, 5)
-          emitter.call("rng_next_int")
-          emitter.move(S2, V0)
-          emitter.sw(S2, 16, S0) # text_color_idx
-
-          # bg_step = rng_next_int(1, 5) -> rbg_col = (rt_col + bg_step) % 6
-          emitter.ori(A0, ZERO, 1)
-          emitter.ori(A1, ZERO, 5)
-          emitter.call("rng_next_int")
-          emitter.addu(S2, S2, V0)
-          emitter.ori(T6, ZERO, 6)
-          emitter.divu(S2, T6)
-          emitter.mfhi(S2)
-          emitter.sw(S2, 20, S0) # bg_color_idx
-
-          # logo_count++
-          emitter.lui(T0, 0x7000)
-          emitter.lw(T4, 0x90, T0)
-          emitter.addiu(T4, T4, 1)
-          emitter.sw(T4, 0x90, T0)
-
-          emitter.addiu(S4, S4, -1)
-          emitter.bnez(S4, "dvd_spawn_one")
-          emitter.nop
-
-          emitter.label("dvd_buttons_done")
-
-          # --- DVD PHYSICS UPDATE FOR ALL LOGOS ---
-          emitter.lui(T0, 0x7000)
-          emitter.lw(S6, 0x90, T0) # S6 = logo_count
-          emitter.move(S7, ZERO)   # S7 = logo index (0 .. logo_count - 1)
-
-          emitter.label("dvd_physics_loop")
-          emitter.sll(S1, S7, 4)
-          emitter.sll(S2, S7, 3)
-          emitter.addu(S1, S1, S2)
-          emitter.addiu(S1, S1, 0x0100)
-          emitter.addu(S0, T0, S1) # S0 = current logo address
-
-          emitter.lw(T1, 0, S0)  # x
-          emitter.lw(T2, 8, S0)  # vx
-          emitter.addu(T1, T1, T2)
-
-          emitter.lw(T3, 4, S0)  # y
-          emitter.lw(T4, 12, S0) # vy
-          emitter.addu(T3, T3, T4)
-
-          emitter.move(S3, ZERO) # S3 = bounced = 0
-
-          # if x <= 10
-          emitter.ori(T6, ZERO, 10)
-          emitter.slt(T7, T6, T1) # 10 < x
-          emitter.bnez(T7, "dvd_chk_x_hi")
-          emitter.nop
-          emitter.ori(T1, ZERO, 10)
-          emitter.subu(T2, ZERO, T2)
-          emitter.ori(S3, ZERO, 1)
-
-          emitter.label("dvd_chk_x_hi")
-          # if x >= 430
-          emitter.ori(T6, ZERO, 430)
-          emitter.slt(T7, T1, T6) # x < 430
-          emitter.bnez(T7, "dvd_chk_y_lo")
-          emitter.nop
-          emitter.ori(T1, ZERO, 430)
-          emitter.subu(T2, ZERO, T2)
-          emitter.ori(S3, ZERO, 1)
-
-          emitter.label("dvd_chk_y_lo")
-          # if y <= 10
-          emitter.ori(T6, ZERO, 10)
-          emitter.slt(T7, T6, T3) # 10 < y
-          emitter.bnez(T7, "dvd_chk_y_hi")
-          emitter.nop
-          emitter.ori(T3, ZERO, 10)
-          emitter.subu(T4, ZERO, T4)
-          emitter.ori(S3, ZERO, 1)
-
-          emitter.label("dvd_chk_y_hi")
-          # if y >= 360
-          emitter.ori(T6, ZERO, 360)
-          emitter.slt(T7, T3, T6) # y < 360
-          emitter.bnez(T7, "dvd_physics_store")
-          emitter.nop
-          emitter.ori(T3, ZERO, 360)
-          emitter.subu(T4, ZERO, T4)
-          emitter.ori(S3, ZERO, 1)
-
-          emitter.label("dvd_physics_store")
-          emitter.sw(T1, 0, S0)
-          emitter.sw(T3, 4, S0)
-          emitter.sw(T2, 8, S0)
-          emitter.sw(T4, 12, S0)
-
-          emitter.beqz(S3, "dvd_physics_next")
-          emitter.nop
-
-          # On bounce: text_col = (text_col + step) % 6; bg_col = (text_col + bg_step) % 6
-          emitter.ori(A0, ZERO, 1)
-          emitter.ori(A1, ZERO, 5)
-          emitter.call("rng_next_int")
-          emitter.lui(T0, 0x7000)
-          emitter.lw(T5, 16, S0) # old text_color_idx
-          emitter.addu(T5, T5, V0)
-          emitter.ori(T6, ZERO, 6)
-          emitter.divu(T5, T6)
-          emitter.mfhi(T5)
-          emitter.sw(T5, 16, S0) # new text_color_idx
-
-          emitter.ori(A0, ZERO, 1)
-          emitter.ori(A1, ZERO, 5)
-          emitter.call("rng_next_int")
-          emitter.lui(T0, 0x7000)
-          emitter.lw(T5, 16, S0) # text_color_idx
-          emitter.addu(T5, T5, V0)
-          emitter.ori(T6, ZERO, 6)
-          emitter.divu(T5, T6)
-          emitter.mfhi(T5)
-          emitter.sw(T5, 20, S0) # new bg_color_idx
-
-          emitter.label("dvd_physics_next")
-          emitter.addiu(S7, S7, 1)
-          emitter.bne(S7, S6, "dvd_physics_loop")
-          emitter.nop
-
-          # --- DVD DYNAMIC GIF PACKET GENERATION ---
-          # Buffer pointer S0 in RAM at 0x20210010 (offset 16 bytes for GIFTag header)
-          emitter.lui(S0, 0x2021)
-          emitter.ori(S0, S0, 0x0010)
-
-          emitter.lui(T0, 0x7000)
-          emitter.lw(S6, 0x90, T0) # S6 = logo_count
-          emitter.move(S7, ZERO)   # S7 = logo index (0 .. logo_count - 1)
-
-          emitter.label("dvd_draw_logo_loop")
-          emitter.sll(S1, S7, 4)
-          emitter.sll(S2, S7, 3)
-          emitter.addu(S1, S1, S2)
-          emitter.addiu(S1, S1, 0x0100)
-          emitter.addu(A1, T0, S1) # A1 = logo struct address
-
-          emitter.lw(T1, 0, A1)  # px
-          emitter.lw(T2, 4, A1)  # py
-          emitter.lw(T3, 16, A1) # txt_col
-          emitter.lw(T4, 20, A1) # bg_col
-
-          # Load bg_rgba into S2
-          emitter.li(A2, @rodata.color_palette_addr)
-          emitter.sll(T5, T4, 3)
-          emitter.addu(T5, A2, T5)
-          emitter.ld(S2, 0, T5)
-
-          # Load txt_rgba into S3
-          emitter.sll(T5, T3, 3)
-          emitter.addu(T5, A2, T5)
-          emitter.ld(S3, 0, T5)
-
-          # Load black_rgba (at offset 56) into S4
-          emitter.ld(S4, 56, A2)
-
-          # 1. Outer rect: (px, py, px + 190, py + 44), color = bg_rgba (S2)
-          emitter.move(A0, T1)
-          emitter.move(A1, T2)
-          emitter.addiu(A2, T1, 190)
-          emitter.addiu(A3, T2, 44)
-          emitter.move(T4, S2)
-          emitter.call("emit_quad_s0")
-
-          # 2. Inner border: (px + 2, py + 2, px + 188, py + 42), color = black_rgba (S4)
-          emitter.addiu(A0, T1, 2)
-          emitter.addiu(A1, T2, 2)
-          emitter.addiu(A2, T1, 188)
-          emitter.addiu(A3, T2, 42)
-          emitter.move(T4, S4)
-          emitter.call("emit_quad_s0")
-
-          # 3. Inner rect: (px + 4, py + 4, px + 186, py + 40), color = bg_rgba (S2)
-          emitter.addiu(A0, T1, 4)
-          emitter.addiu(A1, T2, 4)
-          emitter.addiu(A2, T1, 186)
-          emitter.addiu(A3, T2, 40)
-          emitter.move(T4, S2)
-          emitter.call("emit_quad_s0")
-
-          # 4. Text Quads (111 quads)
-          # S1 = px + 16 (Origin X)
-          # FP = py + 12 (Origin Y)
-          emitter.addiu(S1, T1, 16)
-          emitter.addiu(FP, T2, 12)
-
-          # Store font_quad_addr in SPRAM at 0x7000009C
-          emitter.li(T5, @rodata.font_quad_addr)
-          emitter.lui(T0, 0x7000)
-          emitter.sw(T5, 0x9C, T0)
-
-          emitter.ori(S5, ZERO, @rodata.font_quad_count.to_i32) # loop counter
-
-          emitter.label("dvd_glyph_loop")
-          emitter.lui(T0, 0x7000)
-          emitter.lw(T5, 0x9C, T0)
-          emitter.lbu(T6, 0, T5) # dx1
-          emitter.lbu(T7, 1, T5) # dy1
-          emitter.lbu(T8, 2, T5) # dx2
-          emitter.lbu(T9, 3, T5) # dy2
-          emitter.addiu(T5, T5, 4)
-          emitter.sw(T5, 0x9C, T0)
-
-          emitter.addu(A0, S1, T6) # x1
-          emitter.addu(A1, FP, T7) # y1
-          emitter.addu(A2, S1, T8) # x2
-          emitter.addu(A3, FP, T9) # y2
-          emitter.move(T4, S3)     # txt_rgba
-
-          emitter.call("emit_quad_s0")
-
-          emitter.addiu(S5, S5, -1)
-          emitter.bnez(S5, "dvd_glyph_loop")
-          emitter.nop
-
-          # Next logo
-          emitter.lui(T0, 0x7000)
-          emitter.lw(S6, 0x90, T0)
-          emitter.addiu(S7, S7, 1)
-          emitter.bne(S7, S6, "dvd_draw_logo_loop")
-          emitter.nop
-
-          # --- WRITE GIFTAG AND KICK DMA CHANNEL 2 ---
-          # total_items = logo_count * (@rodata.font_quad_count + 3) * 4
-          emitter.lui(T0, 0x7000)
-          emitter.lw(T1, 0x90, T0)
-          emitter.ori(T2, ZERO, ((@rodata.font_quad_count.to_i32 + 3) * 4))
-          emitter.multu(T1, T2)
-          emitter.mflo(T1) # T1 = total_items
-
-          # GIFTag at 0x20210000:
-          emitter.lui(T0, 0x2021)
-          emitter.lui(T2, 0x1000)
-          emitter.dsll32(T2, T2, 0)     # bit 60 PRE = 1
-          emitter.ori(T3, ZERO, 0x8000) # bit 15 EOP = 1
-          emitter.or_(T2, T2, T3)
-          emitter.andi(T3, T1, 0x7FFF)
-          emitter.or_(T2, T2, T3)
-          emitter.sd(T2, 0, T0)
-          emitter.ori(T3, ZERO, 0x0E)
-          emitter.sd(T3, 8, T0)
-
-          # Kick DMA channel 2:
-          emitter.call("dma02_wait")
-          emitter.lui(T8, 0x1000)
-          emitter.ori(T8, T8, 0xa000)
-          emitter.lui(T7, 0x0021)
-          emitter.sw(T7, 0x10, T8) # D2_MADR = 0x00210000
-          emitter.addiu(T6, T1, 1) # D2_QWC = total_items + 1
-          emitter.sw(T6, 0x20, T8)
-          emitter.ori(T5, ZERO, 0x101)
-          emitter.sw(T5, 0x00, T8)
-          emitter.call("dma02_wait")
-
-          # Clear current buttons at 0x70000010:
-          emitter.lui(T0, 0x7000)
-          emitter.sw(ZERO, 16, T0)
-
-          emitter.jump("frame_loop")
-        elsif @profile.is_animated
+        if @profile.is_animated
           if @profile.has_audio
             emitter.lw(T5, 60, T0)
             emitter.beqz(T5, "skip_phase_advance")
@@ -1431,7 +1353,7 @@ module Citrine
           if @profile.has_audio
             emitter.label("skip_phase_advance")
           end
-        elsif phases.size > 1
+        elsif phases.size > 1 && !@profile.has_audio
           # Check Triangle (0x1000): reset to phase 0
           emitter.lw(T5, 24, T0)
           emitter.lw(T6, 44, T0)
@@ -1532,10 +1454,6 @@ module Citrine
         RuntimeSubroutines.emit_native_stubs(emitter)
         RuntimeSubroutines.emit_inline_asm(emitter, @profile.inline_asm_words)
         RuntimeSubroutines.emit_digit_quad_updater(emitter, @rodata.digit_table_addr)
-        if @profile.is_dvd_screensaver
-          RuntimeSubroutines.emit_rng_next_int(emitter)
-          RuntimeSubroutines.emit_quad_s0(emitter)
-        end
 
         # Pad .text to 16,384 bytes
         emitter.pad_to(TEXT_SIZE.to_i32)

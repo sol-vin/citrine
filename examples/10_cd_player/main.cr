@@ -131,6 +131,7 @@ Citrine.main_loop do
       Citrine.play_cdda_track(optical_track)
     end
   end
+  dur = TRACK_DURATIONS[track_idx]
 
   # 7. Volume: Up (DPAD Up) / Down (DPAD Down)
   if pad.button_pressed?(Button::Up)
@@ -214,20 +215,11 @@ Citrine.main_loop do
   Citrine.draw_rectangle(0, 0, 640, 36, Color::Blue)
   Citrine.draw_text("CITRINE PS2: CD-DA RED BOOK ALBUM PLAYER", 40, 8, 18, Color::White)
 
-  # Dynamic 60 FPS Spinning Activity Indicator (Proves live EE execution)
-  spin_step = (frame_pulse // 4) % 4
-  spin_x = 590
-  spin_y = 18
-  case spin_step
-  when 0
-    Citrine.draw_line(spin_x - 10, spin_y, spin_x + 10, spin_y, Color::Yellow)
-  when 1
-    Citrine.draw_line(spin_x - 7, spin_y - 7, spin_x + 7, spin_y + 7, Color::Yellow)
-  when 2
-    Citrine.draw_line(spin_x, spin_y - 10, spin_x, spin_y + 10, Color::Yellow)
-  else
-    Citrine.draw_line(spin_x - 7, spin_y + 7, spin_x + 7, spin_y - 7, Color::Yellow)
-  end
+  # Dynamic CD Optical Indicator
+  Citrine.draw_circle(590, 18, 10, Color.new(24_u8, 28_u8, 48_u8, 255_u8))
+  Citrine.draw_circle(590, 18, 4, Color::Yellow)
+  Citrine.draw_line(578, 18, 602, 18, Color::Cyan)
+  Citrine.draw_line(590, 6, 590, 30, Color::Cyan)
 
   # Album Cover Card (128x128)
   Citrine.draw_rectangle(62, 52, 134, 134, Color::DarkGray)
@@ -254,7 +246,7 @@ Citrine.main_loop do
   scrub_w = (dur > 0.0_f32) ? ((elapsed_sec / dur) * 516.0_f32).to_i : 0
   scrub_w = scrub_w.clamp(0, 516)
   Citrine.draw_rectangle(62, 204, scrub_w, 10, Color::Cyan)
-  Citrine.draw_circle(62 + scrub_w, 209, 6, Color::White)
+  Citrine.draw_rectangle(62 + scrub_w - 3, 200, 6, 18, Color::White)
 
   # Volume Bar Meter
   Citrine.draw_text("VOL:", 62, 226, 11, Color::LightGray)
@@ -262,11 +254,11 @@ Citrine.main_loop do
   vol_w = (master_vol * 120) // 255
   Citrine.draw_rectangle(100, 228, vol_w, 8, Color::Yellow)
 
-  # Animated Spectrum Equalizer Simulation (28 bars)
+  # Spectrum Equalizer (Visual profile per track)
   eq_x = 62
   while eq_x < 578
     eq_active = is_playing || status_mode == 3 || status_mode == 4
-    eq_h = eq_active ? (8 + ((frame_pulse * 4 + eq_x * 2) % 48)) : 6
+    eq_h = eq_active ? (12 + ((eq_x * 11 + track_idx * 17) % 40)) : 6
     eq_col = eq_active ? Color::Green : Color::DarkGray
     Citrine.draw_rectangle(eq_x, 345 - eq_h, 14, eq_h, eq_col)
     eq_x += 18

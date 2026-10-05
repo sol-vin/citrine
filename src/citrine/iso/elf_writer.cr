@@ -173,7 +173,7 @@ module Citrine
         io.write_bytes(rodata_vaddr, IO::ByteFormat::LittleEndian)
         io.write_bytes(rodata_data.size.to_u32, IO::ByteFormat::LittleEndian)
         io.write_bytes(rodata_data.size.to_u32, IO::ByteFormat::LittleEndian)
-        io.write_bytes(PF_R, IO::ByteFormat::LittleEndian)
+        io.write_bytes(PF_R | PF_W, IO::ByteFormat::LittleEndian)
         io.write_bytes(0x1000_u32, IO::ByteFormat::LittleEndian)
 
         # PH 3 (or 2): Data (.data)

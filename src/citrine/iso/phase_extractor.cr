@@ -14,7 +14,7 @@ module Citrine
       property is_inline_assembly : Bool
       property inline_asm_words : Array(UInt32)
       property has_audio : Bool
-      property is_dvd_screensaver : Bool
+      property num_tracks : Int32
 
       def initialize(
         @phases = [] of Citrine::GS::Phase,
@@ -25,7 +25,7 @@ module Citrine
         @is_inline_assembly = false,
         @inline_asm_words = [] of UInt32,
         @has_audio = false,
-        @is_dvd_screensaver = false
+        @num_tracks = 1
       )
       end
 
@@ -41,6 +41,56 @@ module Citrine
     class PhaseExtractor
       alias DrawCommand = Citrine::GS::DrawCommand
       alias Phase = Citrine::GS::Phase
+
+      def self.emit_cbt_texture_spans(commands : Array(DrawCommand), path : String, start_x : Int32, start_y : Int32, grid_res : Int32 = 32)
+        return unless File.exists?(path)
+        bytes = File.read(path).to_slice
+        return unless bytes.size > 16 && String.new(bytes[0, 4]) == "CBT1"
+
+        w = IO::ByteFormat::LittleEndian.decode(UInt16, bytes[4, 2]).to_i
+        h = IO::ByteFormat::LittleEndian.decode(UInt16, bytes[6, 2]).to_i
+        pal_size = IO::ByteFormat::LittleEndian.decode(UInt32, bytes[10, 4]).to_i
+        pal = bytes[14, pal_size]
+        pixels = bytes[14 + pal_size + 4, w * h]
+
+        step_x = w // grid_res
+        step_y = h // grid_res
+        scale = 128 // grid_res
+
+        grid_res.times do |gy|
+          gx = 0
+          while gx < grid_res
+            px = gx * step_x
+            py = gy * step_y
+            pal_idx = pixels[py * w + px].to_i
+            r = pal[pal_idx * 4].to_u32
+            g = pal[pal_idx * 4 + 1].to_u32
+            b = pal[pal_idx * 4 + 2].to_u32
+            color = 0xFF000000_u32 | (b << 16) | (g << 8) | r
+
+            span_len = 1
+            while (gx + span_len) < grid_res
+              npx = (gx + span_len) * step_x
+              npal_idx = pixels[py * w + npx].to_i
+              nr = pal[npal_idx * 4].to_u32
+              ng = pal[npal_idx * 4 + 1].to_u32
+              nb = pal[npal_idx * 4 + 2].to_u32
+              ncolor = 0xFF000000_u32 | (nb << 16) | (ng << 8) | nr
+              break if ncolor != color
+              span_len += 1
+            end
+
+            x1 = start_x + (gx * scale)
+            y1 = start_y + (gy * scale)
+            x2 = x1 + (span_len * scale)
+            y2 = y1 + scale
+            commands << DrawCommand.new(DrawCommand::Type::Rect, x1, y1, x2, y2, color: color)
+
+            gx += span_len
+          end
+        end
+      end
+
 
 struct CVal
   property type : UInt8
@@ -83,7 +133,6 @@ struct AllocationRecord
 end
 
 getter has_button_checks : Bool = false
-getter is_dvd_screensaver : Bool = false
 getter is_controller_tester : Bool = false
 getter inline_asm_words = [] of UInt32
 getter is_inline_assembly : Bool = false
@@ -106,7 +155,6 @@ end
         is_inline_assembly = false
         inline_asm_words = [] of UInt32
         has_audio = false
-        is_dvd_screensaver = false
         is_animated = false
         phases = [] of Phase
 
@@ -204,8 +252,6 @@ end
       end
       is_inline_assembly = !inline_asm_words.empty?
       has_audio = strings.any? { |s| s.ends_with?(".vag") || s.ends_with?(".wav") || s.includes?("cdda") || s.includes?("CDDA") || s.includes?("SPU2") }
-      is_dvd_screensaver = strings.any? { |s| s.includes?("BouncingLogo") || s.includes?("DVD Bouncing Screensaver") }
-      @is_dvd_screensaver = is_dvd_screensaver
 
       main_fn = fns.find { |f| strings[f.name_idx]? == "__main__" }
       if main_fn
@@ -236,6 +282,7 @@ end
         next_regex_id = 5000_i64
         vec2_store = Hash(Int64, Tuple(Int64, Int64)).new
         next_vec2_id = 10000_i64
+        loaded_textures = Hash(Int64, String).new
         current_commands = [] of DrawCommand
         phases = [] of Phase
         pc = 0
@@ -252,9 +299,7 @@ end
         is_animated = false
         animation_checked = false
         prev_frame_cmds = [] of DrawCommand
-        is_live_example = strings.any? { |s| s.includes?("[LIVE]") || s.includes?("01 Hello World") }
-        max_anim_frames = is_live_example ? 60 : 16
-        is_animated = is_live_example
+        max_anim_frames = 16
         anim_frame_count = 0
         frames_per_bank = 16
         max_banks = 3
@@ -571,13 +616,10 @@ end
               regs[dst_r] = 1_i64
             when 40, 41, 42 # ButtonDown, ButtonPressed, ButtonReleased
               port_idx = regs[base_r].to_i
-              btn_idx = regs[base_r + 1].to_i
-              btn = constants[btn_idx]?.try(&.u32_val) || btn_idx.to_u32
-              regs[dst_r] = if is_animated && has_button_checks
-                              (btn == simulated_btn_id && simulated_button_press) ? 1_i64 : 0_i64
-                            else
-                              (btn == 14 && simulated_button_press) ? 1_i64 : 0_i64
-                            end
+              btn = (regs[base_r + 1] & 0xFF).to_u32
+              target_sim_btn = has_audio ? 5_u32 : 14_u32
+              regs[dst_r] = (btn == target_sim_btn && simulated_button_press) ? 1_i64 : 0_i64
+
             when 45, 46, 47 # ActionPressed, ActionDown, ActionReleased
               act_id = regs[base_r].to_i
               regs[dst_r] = if is_animated && has_button_checks
@@ -616,15 +658,7 @@ end
               end
 
               if current_commands.size > 0
-                if is_live_example
-                  # Live dynamic telemetry app: record up to 60 frames for the 1-second blink cycle
-                  phases << Phase.new(current_commands.dup, 1_u32, current_loop_message)
-                  current_loop_message = nil
-                  current_commands = [] of DrawCommand
-                  if phases.size >= max_anim_frames
-                    first_frame_done = true
-                  end
-                elsif !animation_checked
+                if !animation_checked
                   if phases.empty?
                     # Record Frame 0 without simulated button press
                     prev_frame_cmds = current_commands.dup
@@ -632,25 +666,22 @@ end
                     current_loop_message = nil
                     current_commands = [] of DrawCommand
                     simulated_button_press = false
-                    if is_dvd_screensaver
-                      first_frame_done = true
-                    end
                   else
                     # Frame 1: check if scene is moving autonomously (animation!)
                     animation_checked = true
-                    if current_commands != prev_frame_cmds
+                    if has_button_checks
+                      # Interactive scene with button checks
+                      phases[0].delay_frames = 0_u32
+                      button_phase_count += 1
+                      simulated_button_press = true
+                      current_commands = [] of DrawCommand
+                    elsif current_commands != prev_frame_cmds
                       # Active autonomous animation loop!
                       is_animated = true
                       phases << Phase.new(current_commands.dup, 1_u32, current_loop_message)
                       current_loop_message = nil
                       current_commands = [] of DrawCommand
                       anim_frame_count = 2
-                    elsif has_button_checks
-                      # Static scene with button checks (e.g. 08_controller_tester, 17_inline_assembly)
-                      phases[0].delay_frames = 0_u32
-                      button_phase_count += 1
-                      simulated_button_press = true
-                      current_commands = [] of DrawCommand
                     else
                       phases[0].delay_frames = 0_u32
                       first_frame_done = true
@@ -666,13 +697,7 @@ end
                   end
                 else
                   # Static / interactive button handling
-                  duplicate_idx = phases.index do |p|
-                    p.commands == current_commands ||
-                    (p.commands.size == current_commands.size &&
-                     p.commands.first?.try(&.type) == DrawCommand::Type::Clear &&
-                     current_commands.first?.try(&.type) == DrawCommand::Type::Clear &&
-                     p.commands.first?.try(&.color) == current_commands.first?.try(&.color))
-                  end
+                  duplicate_idx = phases.index { |p| p.commands == current_commands }
                   if duplicate_idx
                     if duplicate_idx == 0 && current_loop_message
                       phases[0].message ||= current_loop_message
@@ -682,7 +707,7 @@ end
                     phases << Phase.new(current_commands.dup, 0_u32, current_loop_message)
                     current_loop_message = nil
                     button_phase_count += 1
-                    if button_phase_count >= 8
+                    if button_phase_count >= 16
                       first_frame_done = true
                     else
                       simulated_button_press = true
@@ -765,8 +790,28 @@ end
               color = (val < constants.size) ? (constants[val]?.try(&.u32_val) || val) : val
               current_commands << DrawCommand.new(DrawCommand::Type::Quad, x1, y1, x2, y2, x3, y3, x4, y4, color: color)
             when 30 # LoadTexture
-              regs[dst_r] = 1_i64
+              t_val = (regs[base_r] & 0xFFFFFFFF_i64).to_u32
+              tex_path = (t_val < constants.size) ? (constants[t_val]?.try(&.str_val) || "") : ""
+              tid = (loaded_textures.size + 1).to_i64
+              loaded_textures[tid] = tex_path
+              regs[dst_r] = tid
             when 31 # DrawTexture
+              tex_id = regs[base_r]
+              tex_name = loaded_textures[tex_id]? || ""
+              dest_x = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
+              dest_y = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
+              found_file = if !tex_name.empty? && File.exists?(tex_name)
+                             tex_name
+                           elsif !tex_name.empty? && (entry = Dir.glob("**/#{File.basename(tex_name)}").first?)
+                             entry
+                           else
+                             nil
+                           end
+              if found_file
+                self.class.emit_cbt_texture_spans(current_commands, found_file, dest_x, dest_y)
+              else
+                current_commands << DrawCommand.new(DrawCommand::Type::Rect, dest_x, dest_y, dest_x + 128, dest_y + 128, color: 0xFF2A1F18_u32)
+              end
               regs[dst_r] = 0_i64
             when 32 # DrawTextureRec
               regs[dst_r] = 0_i64
@@ -1545,13 +1590,11 @@ end
             has_button_checks: has_button_checks,
             is_inline_assembly: is_inline_assembly,
             inline_asm_words: inline_asm_words,
-            has_audio: has_audio,
-            is_dvd_screensaver: is_dvd_screensaver
+            has_audio: has_audio
           )
       end
     rescue ex
-      STDERR.puts "[parse_cbc Exception] #{ex.class}: #{ex.message}\n#{ex.backtrace.join("\n")}"
-    end
+          end
   end
 
   # Default Citrine PS2 fallback screen
@@ -1572,8 +1615,7 @@ end
           has_button_checks: has_button_checks,
           is_inline_assembly: is_inline_assembly,
           inline_asm_words: inline_asm_words,
-          has_audio: has_audio,
-          is_dvd_screensaver: is_dvd_screensaver
+          has_audio: has_audio
         )
       end
     end

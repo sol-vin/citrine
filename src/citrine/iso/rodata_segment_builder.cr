@@ -7,6 +7,49 @@ module Citrine
   module ISO
     record VirtualInput, start_frame : UInt32, duration_frames : UInt16, button_mask : UInt16, port : UInt8 = 0_u8
 
+    struct PhaseWidgetInfo
+      property scrubber_present : Bool = false
+      property scrub_quad_offset : UInt32 = 0_u32
+      property scrub_min_x : UInt16 = 62_u16
+      property scrub_max_x : UInt16 = 578_u16
+      property scrub_y2 : UInt16 = 214_u16
+
+      property scrub_knob_present : Bool = false
+      property scrub_knob_offset : UInt32 = 0_u32
+      property scrub_knob_half_w : UInt16 = 3_u16
+      property scrub_knob_y1 : UInt16 = 200_u16
+      property scrub_knob_y2 : UInt16 = 218_u16
+
+      property vol_meter_present : Bool = false
+      property vol_meter_offset : UInt32 = 0_u32
+      property vol_min_x : UInt16 = 100_u16
+      property vol_max_x : UInt16 = 220_u16
+      property vol_y2 : UInt16 = 236_u16
+
+      property time_text_present : Bool = false
+      property min_tens_offset : UInt32 = 0_u32
+      property min_ones_offset : UInt32 = 0_u32
+      property sec_tens_offset : UInt32 = 0_u32
+      property sec_ones_offset : UInt32 = 0_u32
+      property min_tens_pos : UInt32 = 0_u32
+      property min_ones_pos : UInt32 = 0_u32
+      property sec_tens_pos : UInt32 = 0_u32
+      property sec_ones_pos : UInt32 = 0_u32
+      property time_text_scale : Int32 = 1
+      property dur_frames : UInt32 = 0_u32
+
+      property spinner_present : Bool = false
+      property spinner_offset : UInt32 = 0_u32
+      property spinner_cx : UInt16 = 0_u16
+      property spinner_cy : UInt16 = 0_u16
+      property spinner_radius : UInt16 = 0_u16
+
+      property frame_text_present : Bool = false
+      property frame_digit_offsets : Array(UInt32) = [] of UInt32
+      property frame_digit_positions : Array(UInt32) = [] of UInt32
+      property frame_text_scale : Int32 = 1
+    end
+
     # Encapsulates the assembled .rodata segment and symbol addresses
     struct RodataResult
       property data : Bytes
@@ -21,6 +64,7 @@ module Citrine
       property button_msg_addrs : Hash(String, UInt32)
       property phase_msg_addrs : Hash(Int32, UInt32)
       property digit_table_addr : UInt32
+      property spinner_table_addr : UInt32
       property time_text_present : Bool
       property min_tens_offset : UInt32
       property min_ones_offset : UInt32
@@ -35,16 +79,21 @@ module Citrine
       property scrub_min_x : UInt16
       property scrub_max_x : UInt16
       property scrub_y2 : UInt16
+      property scrub_knob_present : Bool
+      property scrub_knob_offset : UInt32
+      property scrub_knob_half_w : UInt16
+      property scrub_knob_y1 : UInt16
+      property scrub_knob_y2 : UInt16
+      property vol_meter_present : Bool
+      property vol_meter_offset : UInt32
+      property vol_min_x : UInt16
+      property vol_max_x : UInt16
+      property vol_y2 : UInt16
       property frame_text_present : Bool
       property frame_digit_offsets : Array(UInt32)
       property frame_digit_positions : Array(UInt32)
       property frame_text_scale : Int32
       property time_text_scale : Int32
-      property static_dvd_addr : UInt32
-      property static_dvd_qwc : UInt16
-      property font_quad_addr : UInt32
-      property font_quad_count : UInt16
-      property color_palette_addr : UInt32
 
       def initialize(
         @data = Bytes.empty,
@@ -59,6 +108,7 @@ module Citrine
         @button_msg_addrs = Hash(String, UInt32).new,
         @phase_msg_addrs = Hash(Int32, UInt32).new,
         @digit_table_addr = 0_u32,
+        @spinner_table_addr = 0_u32,
         @time_text_present = false,
         @min_tens_offset = 0_u32,
         @min_ones_offset = 0_u32,
@@ -73,16 +123,21 @@ module Citrine
         @scrub_min_x = 62_u16,
         @scrub_max_x = 578_u16,
         @scrub_y2 = 214_u16,
+        @scrub_knob_present = false,
+        @scrub_knob_offset = 0_u32,
+        @scrub_knob_half_w = 3_u16,
+        @scrub_knob_y1 = 200_u16,
+        @scrub_knob_y2 = 218_u16,
+        @vol_meter_present = false,
+        @vol_meter_offset = 0_u32,
+        @vol_min_x = 100_u16,
+        @vol_max_x = 220_u16,
+        @vol_y2 = 236_u16,
         @frame_text_present = false,
         @frame_digit_offsets = [] of UInt32,
         @frame_digit_positions = [] of UInt32,
         @frame_text_scale = 1,
-        @time_text_scale = 1,
-        @static_dvd_addr = 0_u32,
-        @static_dvd_qwc = 0_u16,
-        @font_quad_addr = 0_u32,
-        @font_quad_count = 0_u16,
-        @color_palette_addr = 0_u32
+        @time_text_scale = 1
       )
       end
     end
@@ -92,7 +147,6 @@ module Citrine
     class RodataSegmentBuilder
       alias GifPacketBuilder = Citrine::GS::GifPacketBuilder
       alias Phase = Citrine::GS::Phase
-      alias DrawCommand = Citrine::GS::DrawCommand
 
       RODATA_VADDR = 0x00500000_u32
 
@@ -118,74 +172,234 @@ module Citrine
         out_mem.write(env_packet)
         curr_addr += env_packet.size.to_u32
 
-        # 2. DVD Screensaver Static Packets & Font Quads
-        static_dvd_addr = 0_u32
-        static_dvd_qwc = 0_u16
-        font_quad_addr = 0_u32
-        font_quad_count = 0_u16
-        color_palette_addr = 0_u32
-
-        if @profile.is_dvd_screensaver
-          static_cmds = [
-            DrawCommand.new(DrawCommand::Type::Clear, color: 0xFF000000_u32),
-            DrawCommand.new(DrawCommand::Type::Rect, 0, 0, 640, 6, color: 0xFF808080_u32),
-            DrawCommand.new(DrawCommand::Type::Rect, 0, 442, 640, 6, color: 0xFF808080_u32),
-            DrawCommand.new(DrawCommand::Type::Rect, 0, 0, 6, 448, color: 0xFF808080_u32),
-            DrawCommand.new(DrawCommand::Type::Rect, 634, 0, 6, 448, color: 0xFF808080_u32),
-            DrawCommand.new(DrawCommand::Type::Text, 60, 420, 14, 0, color: 0xFF00FFFF_u32, text: "CROSS: +1 | R1: +10 | TRIANGLE: RESET | STRESS TEST")
-          ]
-          static_dvd_packet = GifPacketBuilder.build_draw_packet(static_cmds)
-          static_dvd_qwc = (static_dvd_packet.size // 16).to_u16
-          static_dvd_addr = curr_addr
-          out_mem.write(static_dvd_packet)
-          curr_addr += static_dvd_packet.size.to_u32
-
-          raw_fq = GifPacketBuilder.extract_text_glyph_quads("HELLO WORLD!", 2)
-          fq_pad = (16 - (raw_fq.size % 16)) % 16
-          font_quad_count = (raw_fq.size // 4).to_u16
-          font_quad_addr = curr_addr
-          out_mem.write(raw_fq)
-          fq_pad.times { out_mem.write_byte(0_u8) }
-          curr_addr += (raw_fq.size + fq_pad).to_u32
-
-          c_mem = IO::Memory.new(64)
-          c_mem.write_bytes(0x3F800000_800000FF_u64, IO::ByteFormat::LittleEndian) # 0: Red
-          c_mem.write_bytes(0x3F800000_8000FF00_u64, IO::ByteFormat::LittleEndian) # 1: Green
-          c_mem.write_bytes(0x3F800000_80FF0000_u64, IO::ByteFormat::LittleEndian) # 2: Blue
-          c_mem.write_bytes(0x3F800000_8000FFFF_u64, IO::ByteFormat::LittleEndian) # 3: Yellow
-          c_mem.write_bytes(0x3F800000_80FFFF00_u64, IO::ByteFormat::LittleEndian) # 4: Cyan
-          c_mem.write_bytes(0x3F800000_80FF00FF_u64, IO::ByteFormat::LittleEndian) # 5: Magenta
-          c_mem.write_bytes(0x3F800000_80FFFFFF_u64, IO::ByteFormat::LittleEndian) # 6: White
-          c_mem.write_bytes(0x3F800000_80000000_u64, IO::ByteFormat::LittleEndian) # 7: Black
-          color_palette_slice = c_mem.to_slice
-          color_palette_addr = curr_addr
-          out_mem.write(color_palette_slice)
-          curr_addr += color_palette_slice.size.to_u32
-        end
-
-        # 3. Primary Phase Draw Packets
+        # 2. Primary Phase Draw Packets & Per-Phase Widget Analysis
         phase_addrs = [] of UInt32
         phase_qwcs = [] of UInt16
+        phase_infos = [] of PhaseWidgetInfo
 
         @profile.phases.each do |phase|
-          pkt = GifPacketBuilder.build_draw_packet(phase.commands)
+          body_mem = IO::Memory.new
+          info = PhaseWidgetInfo.new
+          info.dur_frames = phase.delay_frames if phase.delay_frames > 0
+          prev_cmd : Citrine::GS::DrawCommand? = nil
+          prev_cmd_body_start = 0_u32
+
+          phase.commands.each do |cmd|
+            cmd_body_start = body_mem.pos.to_u32
+            r = (cmd.color & 0xFF).to_u8
+            g = ((cmd.color >> 8) & 0xFF).to_u8
+            b = ((cmd.color >> 16) & 0xFF).to_u8
+
+            case cmd.type
+            when Citrine::GS::DrawCommand::Type::Clear
+              GifPacketBuilder.emit_quad(body_mem, 0, 0, 640, 448, r, g, b)
+            when Citrine::GS::DrawCommand::Type::Rect
+              w = cmd.x2 - cmd.x1
+              h = cmd.y2 - cmd.y1
+              if prev = prev_cmd
+                prev_w = prev.x2 - prev.x1
+                if prev.type == Citrine::GS::DrawCommand::Type::Rect && cmd.y1 == prev.y1 && cmd.x1 == prev.x1
+                  if prev_w >= 200
+                    info.scrubber_present = true
+                    info.scrub_quad_offset = 16_u32 + cmd_body_start
+                    info.scrub_min_x = cmd.x1.to_u16
+                    info.scrub_max_x = prev.x2.to_u16
+                    info.scrub_y2 = cmd.y2.to_u16
+                  else
+                    info.vol_meter_present = true
+                    info.vol_meter_offset = 16_u32 + cmd_body_start
+                    info.vol_min_x = cmd.x1.to_u16
+                    info.vol_max_x = prev.x2.to_u16
+                    info.vol_y2 = cmd.y2.to_u16
+                  end
+                elsif info.scrubber_present && prev.type == Citrine::GS::DrawCommand::Type::Rect &&
+                      (16_u32 + cmd_body_start == info.scrub_quad_offset + 64_u32) &&
+                      w <= 20 && cmd.y1 <= info.scrub_y2 && cmd.y2 >= (info.scrub_y2.to_i - 20)
+                  info.scrub_knob_present = true
+                  info.scrub_knob_offset = 16_u32 + cmd_body_start
+                  info.scrub_knob_half_w = (w // 2).to_u16
+                  info.scrub_knob_y1 = cmd.y1.to_u16
+                  info.scrub_knob_y2 = cmd.y2.to_u16
+                end
+              end
+              GifPacketBuilder.emit_quad(body_mem, cmd.x1, cmd.y1, cmd.x2, cmd.y2, r, g, b)
+            when Citrine::GS::DrawCommand::Type::Circle
+              GifPacketBuilder.emit_circle(body_mem, cmd.x1, cmd.y1, cmd.radius, r, g, b)
+            when Citrine::GS::DrawCommand::Type::Line
+              if prev = prev_cmd
+                if prev.type == Citrine::GS::DrawCommand::Type::Line
+                  is_case_a = (prev.y1 == prev.y2) && (cmd.x1 == cmd.x2)
+                  is_case_b = (prev.x1 == prev.x2) && (cmd.y1 == cmd.y2)
+
+                  if is_case_a || is_case_b
+                    cx1 = is_case_a ? (prev.x1 + prev.x2) // 2 : prev.x1
+                    cy1 = is_case_a ? prev.y1 : (prev.y1 + prev.y2) // 2
+                    r1 = is_case_a ? (prev.x2 - prev.x1).abs // 2 : (prev.y2 - prev.y1).abs // 2
+
+                    cx2 = is_case_a ? cmd.x1 : (cmd.x1 + cmd.x2) // 2
+                    cy2 = is_case_a ? (cmd.y1 + cmd.y2) // 2 : cmd.y1
+                    r2 = is_case_a ? (cmd.y2 - cmd.y1).abs // 2 : (cmd.x2 - cmd.x1).abs // 2
+
+                    if cx1 == cx2 && cy1 == cy2 && r1 == r2 && r1 >= 4 && r1 <= 32
+                      info.spinner_present = true
+                      info.spinner_offset = 16_u32 + prev_cmd_body_start
+                      info.spinner_cx = cx1.to_u16
+                      info.spinner_cy = cy1.to_u16
+                      info.spinner_radius = r1.to_u16
+                    end
+                  end
+                end
+              end
+              GifPacketBuilder.emit_line(body_mem, cmd.x1, cmd.y1, cmd.x2, cmd.y2, r, g, b)
+            when Citrine::GS::DrawCommand::Type::Triangle
+              GifPacketBuilder.emit_triangle(body_mem, cmd.x1, cmd.y1, cmd.x2, cmd.y2, cmd.x3, cmd.y3, r, g, b)
+            when Citrine::GS::DrawCommand::Type::Quad
+              GifPacketBuilder.emit_quad_triangles(body_mem, cmd.x1, cmd.y1, cmd.x2, cmd.y2, cmd.x3, cmd.y3, cmd.x4, cmd.y4, r, g, b)
+            when Citrine::GS::DrawCommand::Type::Text
+              scale = cmd.x2 >= 20 ? 2 : 1
+              char_w = 5 * scale
+              spacing = 2 * scale
+
+              if md = cmd.text.match(/Frame:\s*(\d{5})/i)
+                info.frame_text_present = true
+                info.frame_text_scale = scale
+                match_start = md.begin(1).not_nil!
+                cx = cmd.x1
+                cy = cmd.y1
+                cmd.text.each_char_with_index do |ch, ci|
+                  if ch == '\n'
+                    cx = cmd.x1
+                    cy += 8 * scale
+                    next
+                  end
+                  pos_fixed = ((cy.to_u32 << 4) << 16) | (cx.to_u32 << 4)
+                  if ci >= match_start && ci < match_start + 5
+                    info.frame_digit_offsets << (16_u32 + body_mem.pos.to_u32)
+                    info.frame_digit_positions << pos_fixed
+                    emit_digit_slot(body_mem, ch, cx, cy, scale, r, g, b)
+                  elsif ch != ' '
+                    GifPacketBuilder.emit_text(body_mem, ch.to_s, cx, cy, scale, r, g, b)
+                  end
+                  cx += char_w + spacing
+                end
+              elsif md = cmd.text.match(/(\d\d):(\d\d)/)
+                info.time_text_present = true
+                info.time_text_scale = scale
+                all_times = cmd.text.scan(/(\d\d):(\d\d)/)
+                if all_times.size >= 2
+                  d_min = all_times[1][1].to_i
+                  d_sec = all_times[1][2].to_i
+                  tot_sec = d_min * 60 + d_sec
+                  info.dur_frames = (tot_sec * 60).to_u32 if tot_sec > 0
+                end
+                match_start = md.begin(0).not_nil!
+                cx = cmd.x1
+                cy = cmd.y1
+                cmd.text.each_char_with_index do |ch, ci|
+                  if ch == '\n'
+                    cx = cmd.x1
+                    cy += 8 * scale
+                    next
+                  end
+                  pos_fixed = ((cy.to_u32 << 4) << 16) | (cx.to_u32 << 4)
+                  char_offset = 16_u32 + body_mem.pos.to_u32
+                  is_dynamic_digit = false
+                  case ci
+                  when match_start
+                    info.min_tens_offset = char_offset
+                    info.min_tens_pos = pos_fixed
+                    is_dynamic_digit = true
+                  when match_start + 1
+                    info.min_ones_offset = char_offset
+                    info.min_ones_pos = pos_fixed
+                    is_dynamic_digit = true
+                  when match_start + 3
+                    info.sec_tens_offset = char_offset
+                    info.sec_tens_pos = pos_fixed
+                    is_dynamic_digit = true
+                  when match_start + 4
+                    info.sec_ones_offset = char_offset
+                    info.sec_ones_pos = pos_fixed
+                    is_dynamic_digit = true
+                  end
+                  if is_dynamic_digit
+                    emit_digit_slot(body_mem, ch, cx, cy, scale, r, g, b)
+                  elsif ch != ' '
+                    GifPacketBuilder.emit_text(body_mem, ch.to_s, cx, cy, scale, r, g, b)
+                  end
+                  cx += char_w + spacing
+                end
+              else
+                GifPacketBuilder.emit_text(body_mem, cmd.text, cmd.x1, cmd.y1, scale, r, g, b)
+              end
+            end
+            prev_cmd = cmd
+            prev_cmd_body_start = cmd_body_start
+          end
+
+          total_items = {(body_mem.pos // 16).to_i, 65500}.min
+          packet = IO::Memory.new
+          body_slice = body_mem.to_slice
+          gif_tag = (1_u64 << 60) | (1_u64 << 15) | total_items.to_u64
+          packet.write_bytes(gif_tag, IO::ByteFormat::LittleEndian)
+          packet.write_bytes(0x0e_u64, IO::ByteFormat::LittleEndian)
+          packet.write(body_slice[0, total_items * 16])
+
+          pkt = packet.to_slice
           phase_addrs << curr_addr
           phase_qwcs << (pkt.size // 16).to_u16
           out_mem.write(pkt)
           curr_addr += pkt.size.to_u32
+          phase_infos << info
         end
 
-        # 3. Phase Lookup Table (for multi-phase and animated programs)
+        # 3. Phase Descriptor Table (128 bytes per phase, LittleEndian)
         phase_table_addr = 0_u32
-        if @profile.phases.size > 1
-          phase_table_addr = curr_addr
+        if phase_infos.size > 0
+          pad = (16 - (out_mem.size % 16)) % 16
+          pad.times { out_mem.write_byte(0_u8) }
+          phase_table_addr = RODATA_VADDR + out_mem.size.to_u32
+
           pt_mem = IO::Memory.new
-          phase_addrs.each_with_index do |addr, i|
-            pt_mem.write_bytes(addr, IO::ByteFormat::LittleEndian)
-            pt_mem.write_bytes(phase_qwcs[i].to_u32, IO::ByteFormat::LittleEndian)
+          phase_infos.each_with_index do |info, i|
+            pt_mem.write_bytes(phase_addrs[i], IO::ByteFormat::LittleEndian)         # +0: madr
+            pt_mem.write_bytes(phase_qwcs[i].to_u32, IO::ByteFormat::LittleEndian)   # +4: qwc
+            pt_mem.write_bytes(info.scrub_quad_offset, IO::ByteFormat::LittleEndian) # +8: scrub_offset
+            pt_mem.write_bytes(info.scrub_knob_offset, IO::ByteFormat::LittleEndian) # +12: knob_offset
+            pt_mem.write_bytes(info.vol_meter_offset, IO::ByteFormat::LittleEndian)  # +16: vol_offset
+            pt_mem.write_bytes(info.min_tens_offset, IO::ByteFormat::LittleEndian)   # +20: min_tens_offset
+            pt_mem.write_bytes(info.min_ones_offset, IO::ByteFormat::LittleEndian)   # +24: min_ones_offset
+            pt_mem.write_bytes(info.sec_tens_offset, IO::ByteFormat::LittleEndian)   # +28: sec_tens_offset
+            pt_mem.write_bytes(info.sec_ones_offset, IO::ByteFormat::LittleEndian)   # +32: sec_ones_offset
+            pt_mem.write_bytes(info.min_tens_pos, IO::ByteFormat::LittleEndian)      # +36: min_tens_pos
+            pt_mem.write_bytes(info.min_ones_pos, IO::ByteFormat::LittleEndian)      # +40: min_ones_pos
+            pt_mem.write_bytes(info.sec_tens_pos, IO::ByteFormat::LittleEndian)      # +44: sec_tens_pos
+            pt_mem.write_bytes(info.sec_ones_pos, IO::ByteFormat::LittleEndian)      # +48: sec_ones_pos
+            pt_mem.write_bytes(info.scrub_min_x.to_u32, IO::ByteFormat::LittleEndian) # +52: scrub_min_x
+            pt_mem.write_bytes(info.scrub_max_x.to_u32, IO::ByteFormat::LittleEndian) # +56: scrub_max_x
+            pt_mem.write_bytes(info.scrub_y2.to_u32, IO::ByteFormat::LittleEndian)    # +60: scrub_y2
+            pt_mem.write_bytes(info.scrub_knob_half_w.to_u32, IO::ByteFormat::LittleEndian) # +64: knob_half_w
+            pt_mem.write_bytes(info.scrub_knob_y1.to_u32, IO::ByteFormat::LittleEndian)    # +68: knob_y1
+            pt_mem.write_bytes(info.scrub_knob_y2.to_u32, IO::ByteFormat::LittleEndian)    # +72: knob_y2
+            pt_mem.write_bytes(info.vol_min_x.to_u32, IO::ByteFormat::LittleEndian)   # +76: vol_min_x
+            pt_mem.write_bytes(info.vol_max_x.to_u32, IO::ByteFormat::LittleEndian)   # +80: vol_max_x
+            pt_mem.write_bytes(info.vol_y2.to_u32, IO::ByteFormat::LittleEndian)      # +84: vol_y2
+            pt_mem.write_bytes(info.dur_frames, IO::ByteFormat::LittleEndian)         # +88: dur_frames
+            flags = 0_u32
+            flags |= 1_u32 if info.scrubber_present
+            flags |= 2_u32 if info.scrub_knob_present
+            flags |= 4_u32 if info.vol_meter_present
+            flags |= 8_u32 if info.time_text_present
+            flags |= 16_u32 if info.frame_text_present
+            flags |= 32_u32 if info.spinner_present
+            flags |= (info.time_text_scale.to_u32 & 0xFF_u32) << 8 # scale packed in bits 8..15
+            pt_mem.write_bytes(flags, IO::ByteFormat::LittleEndian)                     # +92: flags
+            pt_mem.write_bytes(info.spinner_offset, IO::ByteFormat::LittleEndian)        # +96: spinner_offset
+            pt_mem.write_bytes(info.spinner_cx.to_u32, IO::ByteFormat::LittleEndian)     # +100: spinner_cx
+            pt_mem.write_bytes(info.spinner_cy.to_u32, IO::ByteFormat::LittleEndian)     # +104: spinner_cy
+            pt_mem.write_bytes(info.spinner_radius.to_u32, IO::ByteFormat::LittleEndian) # +108: spinner_radius
+            4.times { pt_mem.write_bytes(0_u32, IO::ByteFormat::LittleEndian) }          # +112..+124: padding to 128 bytes
           end
-          pt_pad = (16 - (pt_mem.size % 16)) % 16
-          pt_pad.times { pt_mem.write_byte(0_u8) }
           pt_slice = pt_mem.to_slice
           out_mem.write(pt_slice)
           curr_addr += pt_slice.size.to_u32
@@ -265,177 +479,9 @@ module Citrine
         out_mem.write(s2.to_slice)
         curr_addr += s2.bytesize.to_u32
 
-        # 6. Scan phase 0 commands to discover dynamic time text and scrubber rect
+        # 6. Digit Quad Table (1040 bytes)
         digit_table_addr = 0_u32
-        time_text_present = false
-        min_tens_offset = 0_u32
-        min_ones_offset = 0_u32
-        sec_tens_offset = 0_u32
-        sec_ones_offset = 0_u32
-        min_tens_pos = 0_u32
-        min_ones_pos = 0_u32
-        sec_tens_pos = 0_u32
-        sec_ones_pos = 0_u32
-
-        frame_text_present = false
-        frame_digit_offsets = [] of UInt32
-        frame_digit_positions = [] of UInt32
-        frame_text_scale = 1
-        time_text_scale = 1
-
-        scrubber_present = false
-        scrub_quad_offset = 0_u32
-        scrub_min_x = 62_u16
-        scrub_max_x = 578_u16
-        scrub_y2 = 214_u16
-
-        if first_phase = @profile.phases.first?
-          body_pos = 0_u32
-          prev_cmd : Citrine::GS::DrawCommand? = nil
-
-          first_phase.commands.each do |cmd|
-            r = (cmd.color & 0xFF).to_u8
-            g = ((cmd.color >> 8) & 0xFF).to_u8
-            b = ((cmd.color >> 16) & 0xFF).to_u8
-            cmd_body_start = body_pos
-
-            case cmd.type
-            when Citrine::GS::DrawCommand::Type::Clear
-              body_pos += 64_u32
-            when Citrine::GS::DrawCommand::Type::Rect
-              if prev = prev_cmd
-                if prev.type == Citrine::GS::DrawCommand::Type::Rect && cmd.y1 == prev.y1 && cmd.x1 == prev.x1 && prev.x2 > cmd.x1 + 100
-                  scrubber_present = true
-                  scrub_quad_offset = 16_u32 + cmd_body_start
-                  scrub_min_x = cmd.x1.to_u16
-                  scrub_max_x = prev.x2.to_u16
-                  scrub_y2 = cmd.y2.to_u16
-                end
-              end
-              body_pos += 64_u32
-            when Citrine::GS::DrawCommand::Type::Circle
-              body_pos += 24_u32 * 64_u32
-            when Citrine::GS::DrawCommand::Type::Line
-              body_pos += 128_u32
-            when Citrine::GS::DrawCommand::Type::Triangle
-              body_pos += 64_u32
-            when Citrine::GS::DrawCommand::Type::Quad
-              body_pos += 128_u32
-            when Citrine::GS::DrawCommand::Type::Text
-              scale = cmd.x2 >= 20 ? 2 : 1
-              if md = cmd.text.match(/Frame:\s*(\d{5})/i)
-                frame_text_present = true
-                frame_text_scale = scale
-                frame_pkt_offset = 16_u32 + cmd_body_start
-                char_w = 5 * scale
-                spacing = 2 * scale
-                match_start = md.begin(1).not_nil!
-                cum_quads = 0_u32
-                cx = cmd.x1
-                cy = cmd.y1
-
-                cmd.text.each_char_with_index do |ch, ci|
-                  if ch == '\n'
-                    cx = cmd.x1
-                    cy += 8 * scale
-                    next
-                  end
-
-                  char_quads = 0_u32
-                  if ch != ' '
-                    glyph = GifPacketBuilder::FONT_5X7[ch.upcase]? || GifPacketBuilder::FONT_5X7['?']
-                    7.times do |row|
-                      in_run = false
-                      5.times do |col|
-                        pixel = ((glyph[col] >> row) & 1) == 1
-                        if pixel && !in_run
-                          in_run = true
-                        elsif !pixel && in_run
-                          in_run = false
-                          char_quads += 1
-                        end
-                      end
-                      char_quads += 1 if in_run
-                    end
-                  end
-
-                  pos_fixed = ((cy.to_u32 << 4) << 16) | (cx.to_u32 << 4)
-
-                  if ci >= match_start && ci < match_start + 5
-                    frame_digit_offsets << (frame_pkt_offset + cum_quads * 64_u32)
-                    frame_digit_positions << pos_fixed
-                  end
-
-                  cum_quads += char_quads
-                  cx += char_w + spacing
-                end
-              elsif md = cmd.text.match(/(\d\d):(\d\d)/)
-                time_text_present = true
-                time_text_scale = scale
-                time_pkt_offset = 16_u32 + cmd_body_start
-                char_w = 5 * scale
-                spacing = 2 * scale
-                match_start = md.begin(0).not_nil!
-                cum_quads = 0_u32
-                cx = cmd.x1
-                cy = cmd.y1
-
-                cmd.text.each_char_with_index do |ch, ci|
-                  if ch == '\n'
-                    cx = cmd.x1
-                    cy += 8 * scale
-                    next
-                  end
-
-                  char_quads = 0_u32
-                  if ch != ' '
-                    glyph = GifPacketBuilder::FONT_5X7[ch.upcase]? || GifPacketBuilder::FONT_5X7['?']
-                    7.times do |row|
-                      in_run = false
-                      5.times do |col|
-                        pixel = ((glyph[col] >> row) & 1) == 1
-                        if pixel && !in_run
-                          in_run = true
-                        elsif !pixel && in_run
-                          in_run = false
-                          char_quads += 1
-                        end
-                      end
-                      char_quads += 1 if in_run
-                    end
-                  end
-
-                  pos_fixed = ((cy.to_u32 << 4) << 16) | (cx.to_u32 << 4)
-
-                  case ci
-                  when match_start
-                    min_tens_offset = time_pkt_offset + cum_quads * 64_u32
-                    min_tens_pos = pos_fixed
-                  when match_start + 1
-                    min_ones_offset = time_pkt_offset + cum_quads * 64_u32
-                    min_ones_pos = pos_fixed
-                  when match_start + 3
-                    sec_tens_offset = time_pkt_offset + cum_quads * 64_u32
-                    sec_tens_pos = pos_fixed
-                  when match_start + 4
-                    sec_ones_offset = time_pkt_offset + cum_quads * 64_u32
-                    sec_ones_pos = pos_fixed
-                  end
-
-                  cum_quads += char_quads
-                  cx += char_w + spacing
-                end
-              end
-              tmp_mem = IO::Memory.new
-              quad_count = GifPacketBuilder.emit_text(tmp_mem, cmd.text, cmd.x1, cmd.y1, scale, r, g, b)
-              body_pos += quad_count.to_u32 * 64_u32
-            end
-            prev_cmd = cmd
-          end
-        end
-
-        # 7. Digit Quad Table (1040 bytes)
-        if time_text_present || frame_text_present
+        if phase_infos.any?(&.time_text_present) || phase_infos.any?(&.frame_text_present)
           pad = (16 - (out_mem.size % 16)) % 16
           pad.times { out_mem.write_byte(0_u8) }
           digit_table_addr = RODATA_VADDR + out_mem.size.to_u32
@@ -444,6 +490,28 @@ module Citrine
           end
           curr_addr = RODATA_VADDR + out_mem.size.to_u32
         end
+
+        # 7. Spinner Trig Table (64 bytes: 8 steps of dx_factor:Int32, dy_factor:Int32)
+        pad = (16 - (out_mem.size % 16)) % 16
+        pad.times { out_mem.write_byte(0_u8) }
+        spinner_table_addr = RODATA_VADDR + out_mem.size.to_u32
+        spinner_factors = [
+          {256, 0},
+          {181, 181},
+          {0, 256},
+          {-181, 181},
+          {-256, 0},
+          {-181, -181},
+          {0, -256},
+          {181, -181},
+        ]
+        spinner_factors.each do |(dx_f, dy_f)|
+          out_mem.write_bytes(dx_f.to_i32, IO::ByteFormat::LittleEndian)
+          out_mem.write_bytes(dy_f.to_i32, IO::ByteFormat::LittleEndian)
+        end
+        curr_addr = RODATA_VADDR + out_mem.size.to_u32
+
+        f_info = phase_infos.first? || PhaseWidgetInfo.new
 
         RodataResult.new(
           data: out_mem.to_slice,
@@ -458,31 +526,54 @@ module Citrine
           button_msg_addrs: button_msg_addrs,
           phase_msg_addrs: phase_msg_addrs,
           digit_table_addr: digit_table_addr,
-          time_text_present: time_text_present,
-          min_tens_offset: min_tens_offset,
-          min_ones_offset: min_ones_offset,
-          sec_tens_offset: sec_tens_offset,
-          sec_ones_offset: sec_ones_offset,
-          min_tens_pos: min_tens_pos,
-          min_ones_pos: min_ones_pos,
-          sec_tens_pos: sec_tens_pos,
-          sec_ones_pos: sec_ones_pos,
-          scrubber_present: scrubber_present,
-          scrub_quad_offset: scrub_quad_offset,
-          scrub_min_x: scrub_min_x,
-          scrub_max_x: scrub_max_x,
-          scrub_y2: scrub_y2,
-          frame_text_present: frame_text_present,
-          frame_digit_offsets: frame_digit_offsets,
-          frame_digit_positions: frame_digit_positions,
-          frame_text_scale: frame_text_scale,
-          time_text_scale: time_text_scale,
-          static_dvd_addr: static_dvd_addr,
-          static_dvd_qwc: static_dvd_qwc,
-          font_quad_addr: font_quad_addr,
-          font_quad_count: font_quad_count,
-          color_palette_addr: color_palette_addr
+          spinner_table_addr: spinner_table_addr,
+          time_text_present: f_info.time_text_present,
+          min_tens_offset: f_info.min_tens_offset,
+          min_ones_offset: f_info.min_ones_offset,
+          sec_tens_offset: f_info.sec_tens_offset,
+          sec_ones_offset: f_info.sec_ones_offset,
+          min_tens_pos: f_info.min_tens_pos,
+          min_ones_pos: f_info.min_ones_pos,
+          sec_tens_pos: f_info.sec_tens_pos,
+          sec_ones_pos: f_info.sec_ones_pos,
+          scrubber_present: f_info.scrubber_present,
+          scrub_quad_offset: f_info.scrub_quad_offset,
+          scrub_min_x: f_info.scrub_min_x,
+          scrub_max_x: f_info.scrub_max_x,
+          scrub_y2: f_info.scrub_y2,
+          scrub_knob_present: f_info.scrub_knob_present,
+          scrub_knob_offset: f_info.scrub_knob_offset,
+          scrub_knob_half_w: f_info.scrub_knob_half_w,
+          scrub_knob_y1: f_info.scrub_knob_y1,
+          scrub_knob_y2: f_info.scrub_knob_y2,
+          vol_meter_present: f_info.vol_meter_present,
+          vol_meter_offset: f_info.vol_meter_offset,
+          vol_min_x: f_info.vol_min_x,
+          vol_max_x: f_info.vol_max_x,
+          vol_y2: f_info.vol_y2,
+          frame_text_present: f_info.frame_text_present,
+          frame_digit_offsets: f_info.frame_digit_offsets,
+          frame_digit_positions: f_info.frame_digit_positions,
+          frame_text_scale: f_info.frame_text_scale,
+          time_text_scale: f_info.time_text_scale
         )
+      end
+
+      private def emit_digit_slot(io : IO::Memory, ch : Char, cx : Int32, cy : Int32, scale : Int32, r : UInt8, g : UInt8, b : UInt8)
+        d = ch.to_i? || 0
+        13.times do |qi|
+          d3 = DigitQuadTable::DATA[d * 26 + qi * 2]
+          d2 = DigitQuadTable::DATA[d * 26 + qi * 2 + 1]
+          if d2 != 0
+            x1 = cx + ((d3 & 0xFFFF) >> 4) * scale
+            y1 = cy + ((d3 >> 20)) * scale
+            x2 = cx + ((d2 & 0xFFFF) >> 4) * scale
+            y2 = cy + ((d2 >> 20)) * scale
+            GifPacketBuilder.emit_quad(io, x1.to_i, y1.to_i, x2.to_i, y2.to_i, r, g, b, 128_u8)
+          else
+            GifPacketBuilder.emit_quad(io, 0, 0, 0, 0, 0_u8, 0_u8, 0_u8, 0_u8)
+          end
+        end
       end
     end
   end

@@ -34,7 +34,9 @@ module Citrine
           end
         end
 
-        unless input_file && File.exists?(input_file)
+        if file_arg && !File.exists?(file_arg)
+          STDERR.puts "Error: Target file '#{file_arg}' not found."
+          STDERR.puts ""
           puts "Usage: citrine run [file.cr | file.cbc | game.iso] [options]"
           puts ""
           puts "Options:"
@@ -47,6 +49,26 @@ module Citrine
           puts "  citrine run examples/01_hello_world/main.cr"
           puts "  citrine run examples/05_hello_world/main.cr --batch"
           puts "  citrine run examples/08_controller_tester/main.cr"
+          puts "  citrine run examples/10_cd_player/main.cr"
+          exit(1)
+        end
+
+        unless input_file && File.exists?(input_file)
+          STDERR.puts "Error: No target file specified and no default found (main.cr, *.iso, *.cbc)."
+          STDERR.puts ""
+          puts "Usage: citrine run [file.cr | file.cbc | game.iso] [options]"
+          puts ""
+          puts "Options:"
+          puts "  --watch   Watch source file and hot-reload bytecode and ISO on save"
+          puts "  --batch   Run PCSX2 in headless / batch mode"
+          puts "  --host    Run in local desktop host simulator (citrine_host_runner.exe)"
+          puts ""
+          puts "Examples:"
+          puts "  citrine run"
+          puts "  citrine run examples/01_hello_world/main.cr"
+          puts "  citrine run examples/05_hello_world/main.cr --batch"
+          puts "  citrine run examples/08_controller_tester/main.cr"
+          puts "  citrine run examples/10_cd_player/main.cr"
           exit(1)
         end
 

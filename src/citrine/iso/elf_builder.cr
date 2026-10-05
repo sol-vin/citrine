@@ -33,7 +33,6 @@ module Citrine
     RODATA_VADDR = 0x00500000_u32
 
     getter is_controller_tester : Bool = false
-    getter is_dvd_screensaver : Bool = false
     getter is_audio_player : Bool = false
     getter has_audio : Bool = false
     getter has_button_checks : Bool = false
@@ -43,26 +42,28 @@ module Citrine
     def self.build_default_runner_elf(
       cbc_bytes : Bytes? = nil,
       input_schedule : Array(VirtualInput) = [] of VirtualInput,
-      vag_bytes : Bytes? = nil
+      vag_bytes : Bytes? = nil,
+      vag_tracks : Array(Bytes) = [] of Bytes
     ) : Bytes
       builder = new
-      builder.generate(cbc_bytes, input_schedule, vag_bytes)
+      builder.generate(cbc_bytes, input_schedule, vag_bytes, vag_tracks)
     end
 
     def generate(
       cbc_bytes : Bytes? = nil,
       input_schedule : Array(VirtualInput) = [] of VirtualInput,
-      vag_bytes : Bytes? = nil
+      vag_bytes : Bytes? = nil,
+      vag_tracks : Array(Bytes) = [] of Bytes
     ) : Bytes
       profile = PhaseExtractor.extract(cbc_bytes)
 
-      @has_audio = profile.has_audio || (vag_bytes.try(&.empty?) == false)
+      @has_audio = profile.has_audio || !vag_tracks.empty? || (vag_bytes.try(&.empty?) == false)
       profile.has_audio = @has_audio
+      profile.num_tracks = !vag_tracks.empty? ? vag_tracks.size : profile.phases.size
       @has_button_checks = profile.has_button_checks
       @is_inline_assembly = profile.is_inline_assembly
       @inline_asm_words = profile.inline_asm_words
       @is_controller_tester = profile.has_button_checks
-      @is_dvd_screensaver = profile.is_dvd_screensaver
 
       # 1. Build .rodata Segment
       rodata = RodataSegmentBuilder.build(profile, input_schedule)
@@ -118,13 +119,6 @@ module Citrine
         symbols << SymbolEntry.new("Citrine_InlineAsm_Block", emitter.labels["Citrine_InlineAsm_Block"], (@inline_asm_words.size.to_u32 * 4) + 8, STT_FUNC, STB_GLOBAL, 1_u16)
       end
 
-      if emitter.labels.has_key?("rng_next_int")
-        symbols << SymbolEntry.new("rng_next_int", emitter.labels["rng_next_int"], 80_u32, STT_FUNC, STB_GLOBAL, 1_u16)
-      end
-      if emitter.labels.has_key?("emit_quad_s0")
-        symbols << SymbolEntry.new("emit_quad_s0", emitter.labels["emit_quad_s0"], 108_u32, STT_FUNC, STB_GLOBAL, 1_u16)
-      end
-
       ElfWriter.write(text_data, rodata.data, data_data, symbols, 0x00100000_u32, rodata_vaddr: RODATA_VADDR)
     end
 
@@ -154,7 +148,6 @@ module Citrine
       @is_inline_assembly = profile.is_inline_assembly
       @inline_asm_words = profile.inline_asm_words
       @is_controller_tester = profile.has_button_checks
-      @is_dvd_screensaver = profile.is_dvd_screensaver
       {profile.phases, profile.boot_messages, profile.loop_start_phase, profile.is_animated}
     end
   end
