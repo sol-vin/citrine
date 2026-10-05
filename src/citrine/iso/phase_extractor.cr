@@ -914,7 +914,7 @@ end
               regs[dst_r] = io_id
             when 141 # MemoryIOWriteByte
               io_id = regs[base_r]
-              byte = regs[base_r + 1].to_u8
+              byte = (regs[base_r + 1] & 0xFF).to_u8
               io_streams[io_id]?.try(&.write_byte(byte))
               regs[dst_r] = 1_i64
             when 142 # MemoryIOWrite
@@ -951,7 +951,7 @@ end
               io_streams[io_id]?.try(&.clear)
               regs[dst_r] = 0_i64
             when 150 # ObjectNew
-              cid = regs[base_r].to_u32
+              cid = (regs[base_r] & 0xFFFFFFFF_i64).to_u32
               field_count = regs[base_r + 1].to_i
               is_struct = (regs[base_r + 2]? || 0_i64) == 1_i64
               size_bytes = (8 + (field_count * 4) + 7) & ~7 # 8-byte aligned
@@ -1170,7 +1170,12 @@ end
               regs[dst_r] = 0_i64
             when 170 # TypeIsA
               val = regs[base_r]
-              target_id = regs[base_r + 1].to_u32
+              raw_tid = regs[base_r + 1]
+              target_id = if raw_tid < 0 && raw_tid >= -32768
+                            (raw_tid & 0xFFFF_i64).to_u32
+                          else
+                            (raw_tid & 0xFFFFFFFF_i64).to_u32
+                          end
               is_match = false
               if target_id == TypeKind::Nil.value
                 is_match = val == 0_i64

@@ -490,9 +490,19 @@ module Citrine
       encode_r_imm(Opcode::LoadImm, LoadImmSubOp::Bool.value, dest, b_val ? 1_u16 : 0_u16)
     end
 
-    # Encodes a LoadInt instruction (R_IMM format with SubOp LoadImmSubOp::Int16)
+    # Encodes a LoadInt instruction (R_IMM format with SubOp LoadImmSubOp::Int16 or UInt16)
     def self.encode_load_int(dest : UInt8, val : Int) : Instruction
-      encode_r_imm(Opcode::LoadImm, LoadImmSubOp::Int16.value, dest, (val.to_i64 & 0xFFFF).to_u16)
+      subop = if val >= 0 && val > 0x7FFF && val <= 0xFFFF
+                LoadImmSubOp::UInt16.value
+              else
+                LoadImmSubOp::Int16.value
+              end
+      encode_r_imm(Opcode::LoadImm, subop, dest, (val.to_i64 & 0xFFFF).to_u16)
+    end
+
+    # Encodes a LoadUInt instruction (R_IMM format with SubOp LoadImmSubOp::UInt16)
+    def self.encode_load_uint(dest : UInt8, val : Int) : Instruction
+      encode_r_imm(Opcode::LoadImm, LoadImmSubOp::UInt16.value, dest, (val.to_i64 & 0xFFFF).to_u16)
     end
 
     # Encodes a Compare instruction (RRR format with SubOp CompareSubOp)
