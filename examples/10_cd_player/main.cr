@@ -18,7 +18,7 @@ require "citrine"
 #   DPAD Down   - Volume -
 
 # Code-first Disc Asset Baking DSL
-Citrine.bake_cd_album "album/"
+Citrine.bake_stream_album "album/", bitrate: 96.kbps
 Citrine.bake_texture "album/cover.png", "cover.cbt", 128, 128, 8
 
 # Code-first album metadata loading (Album Agnostic)
@@ -29,14 +29,13 @@ ALBUM_ARTIST = Citrine.album_artist
 TOTAL_TRACKS = Citrine.album_track_count
 ALBUM_HEADER = "#{ALBUM_ARTIST.upcase} - #{ALBUM_TITLE.upcase}"
 
-Citrine.init_window(640, 448, "#{ALBUM_ARTIST} - #{ALBUM_TITLE} (Citrine PS2 CD-DA Player)")
+Citrine.init_window(640, 448, "#{ALBUM_ARTIST} - #{ALBUM_TITLE} (Citrine PS2 Stream Player)")
 Citrine.set_target_fps(60)
 
 # Load album cover texture (128x128 GS CLUT8)
 cover_tex = Citrine.load_texture("cover.cbt")
 
 track_idx = 0
-optical_track = 2
 is_playing = true
 is_looping = true
 elapsed_sec = 0.0_f32
@@ -44,8 +43,8 @@ master_vol = 240
 frame_pulse = 0
 status_mode = 0 # 0=PLAYING, 1=PAUSED, 2=STOPPED, 3=FAST FORWARD, 4=REWIND
 
-# Start playing Track 1 (Optical Track 2)
-Citrine.play_cdda_track(2)
+# Start playing Track 0 (Stream Track 0)
+Citrine.play_stream(track_idx)
 Citrine.set_volume(master_vol)
 
 Citrine.main_loop do
@@ -60,12 +59,12 @@ Citrine.main_loop do
     if is_playing
       # True Pause: preserves elapsed position, silences output
       is_playing = false
-      Citrine.stop_cdda
+      Citrine.stop_stream
       status_mode = 1 # PAUSED
     else
       # Resume playback from current position
       is_playing = true
-      Citrine.play_cdda_track(optical_track)
+      Citrine.play_stream(track_idx)
       status_mode = 0 # PLAYING
     end
   end
@@ -74,7 +73,7 @@ Citrine.main_loop do
   if pad.button_pressed?(Button::Circle)
     is_playing = false
     elapsed_sec = 0.0_f32
-    Citrine.stop_cdda
+    Citrine.stop_stream
     status_mode = 2 # STOPPED
   end
 
@@ -118,17 +117,15 @@ Citrine.main_loop do
   # 6. Track Selection: Next (DPAD Right) / Previous (DPAD Left)
   if pad.button_pressed?(Button::Right)
     track_idx = (track_idx + 1) % TOTAL_TRACKS
-    optical_track = track_idx + 2
     elapsed_sec = 0.0_f32
     if is_playing
-      Citrine.play_cdda_track(optical_track)
+      Citrine.play_stream(track_idx)
     end
   elsif pad.button_pressed?(Button::Left)
     track_idx = (track_idx + TOTAL_TRACKS - 1) % TOTAL_TRACKS
-    optical_track = track_idx + 2
     elapsed_sec = 0.0_f32
     if is_playing
-      Citrine.play_cdda_track(optical_track)
+      Citrine.play_stream(track_idx)
     end
   end
   dur = TRACK_DURATIONS[track_idx]
@@ -155,14 +152,13 @@ Citrine.main_loop do
       if is_looping
         # Auto-advance to next track
         track_idx = (track_idx + 1) % TOTAL_TRACKS
-        optical_track = track_idx + 2
         elapsed_sec = 0.0_f32
-        Citrine.play_cdda_track(optical_track)
+        Citrine.play_stream(track_idx)
       else
         is_playing = false
         elapsed_sec = dur
         status_mode = 2 # STOPPED
-        Citrine.stop_cdda
+        Citrine.stop_stream
       end
     end
   end
@@ -171,8 +167,8 @@ Citrine.main_loop do
   track_title = TRACK_TITLES[track_idx]
 
   # Dynamic optical track string
-  opt_num = track_idx + 2
-  opt_str = opt_num < 10 ? "Optical Track 0#{opt_num} (CD-DA AUDIO/2352)" : "Optical Track #{opt_num} (CD-DA AUDIO/2352)"
+  opt_num = track_idx + 1
+  opt_str = opt_num < 10 ? "Track 0#{opt_num}: TRACK0#{opt_num}.CAS (96 kbps SPU2 Stream)" : "Track #{opt_num}: TRACK#{opt_num}.CAS (96 kbps SPU2 Stream)"
 
   # Duration formatting
   dur_i = dur.to_i
@@ -213,7 +209,7 @@ Citrine.main_loop do
 
   # Header Bar
   Citrine.draw_rectangle(0, 0, 640, 36, Color::Blue)
-  Citrine.draw_text("CITRINE PS2: CD-DA RED BOOK ALBUM PLAYER", 40, 8, 18, Color::White)
+  Citrine.draw_text("CITRINE PS2: OPTICAL AUDIO STREAM PLAYER", 40, 8, 18, Color::White)
 
   # Dynamic CD Optical Indicator
   Citrine.draw_circle(590, 18, 10, Color.new(24_u8, 28_u8, 48_u8, 255_u8))
@@ -228,7 +224,7 @@ Citrine.main_loop do
   Citrine.draw_circle(129, 119, 42, Color.new(42_u8, 46_u8, 60_u8, 255_u8))
   Citrine.draw_circle(129, 119, 24, Color::Yellow)
   Citrine.draw_circle(129, 119, 7, Color::Black)
-  Citrine.draw_text("CD-DA", 113, 115, 9, Color::Black)
+  Citrine.draw_text("CAS", 120, 115, 9, Color::Black)
   Citrine.draw_texture(cover_tex, 65, 55)
 
   # Track Info Card
@@ -269,7 +265,7 @@ Citrine.main_loop do
   loop_str = is_looping ? "ON" : "OFF"
   Citrine.draw_text("CROSS: Play/Pause - CIRCLE: Stop - SQUARE: Loop (#{loop_str})", 55, 370, 11, Color::Yellow)
   Citrine.draw_text("DPAD L/R: Prev/Next Track - R1/L1: +/-10s Jump - R2/L2: Fast Fwd/Rewind", 55, 388, 11, Color::Cyan)
-  Citrine.draw_text("DPAD U/D: Volume (#{master_vol}/255) - #{TOTAL_TRACKS} Album Tracks on Disc", 55, 406, 11, Color::White)
+  Citrine.draw_text("DPAD U/D: Volume (#{master_vol}/255) - #{TOTAL_TRACKS} Streamed CAS Tracks on Disc", 55, 406, 11, Color::White)
 
   Citrine.end_drawing
 end

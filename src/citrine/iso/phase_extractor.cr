@@ -15,6 +15,7 @@ module Citrine
       property inline_asm_words : Array(UInt32)
       property has_audio : Bool
       property num_tracks : Int32
+      property is_dvd_screensaver : Bool
 
       def initialize(
         @phases = [] of Citrine::GS::Phase,
@@ -25,7 +26,8 @@ module Citrine
         @is_inline_assembly = false,
         @inline_asm_words = [] of UInt32,
         @has_audio = false,
-        @num_tracks = 1
+        @num_tracks = 1,
+        @is_dvd_screensaver = false
       )
       end
 
@@ -156,10 +158,9 @@ end
         inline_asm_words = [] of UInt32
         has_audio = false
         is_animated = false
+        is_dvd_screensaver = false
         phases = [] of Phase
 
-  boot_messages = [] of String
-  loop_start_phase = 0
         magic = cbc_bytes ? (cbc_bytes.size >= 4 ? String.new(cbc_bytes[0..3]) : "") : ""
         is_cbc2 = (magic == "CBC2")
         if cbc_bytes && cbc_bytes.size > 20 && (magic == "CBC1" || is_cbc2)
@@ -252,6 +253,7 @@ end
       end
       is_inline_assembly = !inline_asm_words.empty?
       has_audio = strings.any? { |s| s.ends_with?(".vag") || s.ends_with?(".wav") || s.includes?("cdda") || s.includes?("CDDA") || s.includes?("SPU2") }
+      is_dvd_screensaver = strings.any? { |s| s.includes?("BouncingLogo") || s.includes?("DVD Bouncing Screensaver") }
 
       main_fn = fns.find { |f| strings[f.name_idx]? == "__main__" }
       if main_fn
@@ -666,6 +668,9 @@ end
                     current_loop_message = nil
                     current_commands = [] of DrawCommand
                     simulated_button_press = false
+                    if is_dvd_screensaver
+                      first_frame_done = true
+                    end
                   else
                     # Frame 1: check if scene is moving autonomously (animation!)
                     animation_checked = true
@@ -1590,7 +1595,8 @@ end
             has_button_checks: has_button_checks,
             is_inline_assembly: is_inline_assembly,
             inline_asm_words: inline_asm_words,
-            has_audio: has_audio
+            has_audio: has_audio,
+            is_dvd_screensaver: is_dvd_screensaver
           )
       end
     rescue ex
@@ -1615,7 +1621,8 @@ end
           has_button_checks: has_button_checks,
           is_inline_assembly: is_inline_assembly,
           inline_asm_words: inline_asm_words,
-          has_audio: has_audio
+          has_audio: has_audio,
+          is_dvd_screensaver: is_dvd_screensaver
         )
       end
     end

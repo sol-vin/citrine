@@ -9,3 +9,4 @@
 *.raw filter=lfs diff=lfs merge=lfs -text
 *.bin filter=lfs diff=lfs merge=lfs -text
 *.iso filter=lfs diff=lfs merge=lfs -text
+*.cas filter=lfs diff=lfs merge=lfs -text

@@ -3617,10 +3617,10 @@ module Citrine
       when "panic" then NativeId::Panic
       when "batch_transform_points", "vu0_batch_transform" then NativeId::VU0BatchTransform
       when "batch_dot_product", "vu0_batch_dot" then NativeId::VU0BatchDot
-      when "play_cdda_track", "play_cdda" then NativeId::AudioPlayCDDA
-      when "stop_cdda" then NativeId::AudioStopCDDA
-      when "cdda_status", "get_cdda_status" then NativeId::AudioGetCDDAStatus
-      when "set_volume", "set_audio_volume", "set_cdda_volume" then NativeId::AudioSetVolume
+      when "play_cdda_track", "play_cdda", "play_stream" then NativeId::AudioPlayCDDA
+      when "stop_cdda", "stop_stream" then NativeId::AudioStopCDDA
+      when "cdda_status", "get_cdda_status", "stream_status" then NativeId::AudioGetCDDAStatus
+      when "set_volume", "set_audio_volume", "set_cdda_volume", "set_stream_volume" then NativeId::AudioSetVolume
       else nil
       end
     end

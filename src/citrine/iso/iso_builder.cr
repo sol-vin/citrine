@@ -31,6 +31,14 @@ module Citrine
                          vag_entries.map(&.[1])
                        end
 
+      cas_files = extra_files.select { |k, _| k.downcase.ends_with?(".cas") }.to_a.sort_by do |k, _|
+        if md = k.match(/(\d+)/)
+          md[1].to_i
+        else
+          999
+        end
+      end
+
       vag_files = extra_files.select { |k, _| k.downcase.ends_with?(".vag") }.to_a.sort_by do |k, _|
         if md = k.match(/(\d+)/)
           md[1].to_i
@@ -39,20 +47,25 @@ module Citrine
         end
       end
 
-      if vag_files.empty? && !all_vag_tracks.empty?
+      if vag_files.empty? && cas_files.empty? && !all_vag_tracks.empty?
         all_vag_tracks.each_with_index do |tdata, idx|
           tnum = sprintf("%02d", idx + 1)
           vag_files << {"TRACK#{tnum}.VAG", tdata}
         end
       end
 
-      non_vag_files = extra_files.reject { |k, _| k == "S.IRX" || k == "S.IRX;1" || k.downcase.ends_with?(".vag") }.to_a
+      non_stream_files = extra_files.reject { |k, _| k == "S.IRX" || k == "S.IRX;1" || k.downcase.ends_with?(".vag") || k.downcase.ends_with?(".cas") }.to_a
 
       has_custom_sirx = extra_files.has_key?("S.IRX") || extra_files.has_key?("S.IRX;1")
-      use_streaming = !has_custom_sirx && (vag_files.size > 1 || all_vag_tracks.size > 1 || vag_files.any? { |_, d| d.size > 131072 } || all_vag_tracks.any? { |d| d.size > 131072 })
+      use_streaming = !has_custom_sirx && (!cas_files.empty? || vag_files.size > 1 || all_vag_tracks.size > 1 || vag_files.any? { |_, d| d.size > 131072 } || all_vag_tracks.any? { |d| d.size > 131072 })
 
       vag_extra = vag_bytes || all_vag_tracks.first?
-      elf_data = elf_bytes || ElfBuilder.build_default_runner_elf(cbc_bytes, input_schedule, vag_bytes: vag_extra, vag_tracks: all_vag_tracks)
+      elf_data = elf_bytes || ElfBuilder.build_default_runner_elf(
+        cbc_bytes,
+        input_schedule,
+        vag_bytes: (use_streaming ? nil : vag_extra),
+        vag_tracks: (use_streaming ? [] of Bytes : all_vag_tracks)
+      )
 
       # Standard PS2 boot configuration
       system_cnf = "BOOT2 = cdrom0:\\CITRINE.ELF;1\r\nVER = 1.00\r\nVMODE = NTSC\r\n".to_slice
@@ -84,19 +97,36 @@ module Citrine
         sec_sirx = sec_cursor
         sec_cursor += s_irx_sec
 
-        non_vag_entries = non_vag_files.map do |fname, data|
+        non_stream_entries = non_stream_files.map do |fname, data|
           sec = sec_cursor
           sec_cursor += ((data.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
           {fname, data, sec}
         end
 
         track_table = [] of SoundIrxBuilder::TrackInfo
-        vag_entries = vag_files.map do |fname, data|
-          track_lba = sec_cursor
-          bank_count = (data.size // 16384).to_u32
-          track_table << SoundIrxBuilder::TrackInfo.new(track_lba, bank_count)
-          sec_cursor += ((data.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
-          {fname, data, track_lba}
+        stream_entries = [] of Tuple(String, Bytes, UInt32)
+
+        if !cas_files.empty?
+          cas_files.each do |fname, data|
+            pitch_reg = 0x075A_u16
+            if data.size >= 32 && data[0, 4] == Bytes[0x43, 0x41, 0x53, 0x01] # "CAS\1"
+              pitch_reg = IO::ByteFormat::LittleEndian.decode(UInt16, data[12, 2])
+            end
+            track_lba = sec_cursor + 1_u32 # Audio data begins at sector 1 (skipping 2048-byte header sector)
+            bank_count = ((data.size - 2048) // 16384).to_u32
+            track_table << SoundIrxBuilder::TrackInfo.new(track_lba, bank_count, pitch_reg)
+            file_lba = sec_cursor
+            sec_cursor += ((data.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
+            stream_entries << {fname, data, file_lba}
+          end
+        else
+          vag_files.each do |fname, data|
+            track_lba = sec_cursor
+            bank_count = (data.size // 16384).to_u32
+            track_table << SoundIrxBuilder::TrackInfo.new(track_lba, bank_count, 0x0000_u16)
+            sec_cursor += ((data.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
+            stream_entries << {fname, data, track_lba}
+          end
         end
 
         s_irx_bytes = SoundIrxBuilder.build_streaming(track_table)
@@ -106,13 +136,13 @@ module Citrine
         files << IsoFile.new("GAME.CBC;1", cbc_bytes, sec_cbc, cbc_bytes.size.to_u32)
         files << IsoFile.new("S.IRX;1", s_irx_bytes, sec_sirx, s_irx_bytes.size.to_u32)
 
-        non_vag_entries.each do |fname, data, sec|
+        non_stream_entries.each do |fname, data, sec|
           iso_name = fname.upcase.gsub(/[^A-Z0-9_\.]/, "_")
           iso_name = "#{iso_name};1" unless iso_name.includes?(";")
           files << IsoFile.new(iso_name, data, sec, data.size.to_u32)
         end
 
-        vag_entries.each do |fname, data, sec|
+        stream_entries.each do |fname, data, sec|
           iso_name = fname.upcase.gsub(/[^A-Z0-9_\.]/, "_")
           iso_name = "#{iso_name};1" unless iso_name.includes?(";")
           files << IsoFile.new(iso_name, data, sec, data.size.to_u32)

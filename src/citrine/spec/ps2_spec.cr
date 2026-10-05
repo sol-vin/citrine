@@ -199,6 +199,9 @@ module Citrine
             Dir.glob(File.join(target_dir, "*.vag").gsub('\\', '/')).each do |f|
               extra_files[File.basename(f)] = File.read(f).to_slice
             end
+            Dir.glob(File.join(target_dir, "*.cas").gsub('\\', '/')).each do |f|
+              extra_files[File.basename(f)] = File.read(f).to_slice
+            end
             discovered = Dir.children(target_dir).select do |f|
               ext = File.extname(f).downcase
               (ext == ".raw" || ext == ".bin") && f.downcase.starts_with?("track")

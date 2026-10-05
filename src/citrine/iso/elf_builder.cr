@@ -34,6 +34,7 @@ module Citrine
 
     getter is_controller_tester : Bool = false
     getter is_audio_player : Bool = false
+    getter is_dvd_screensaver : Bool = false
     getter has_audio : Bool = false
     getter has_button_checks : Bool = false
     getter is_inline_assembly : Bool = false
@@ -148,6 +149,8 @@ module Citrine
       @is_inline_assembly = profile.is_inline_assembly
       @inline_asm_words = profile.inline_asm_words
       @is_controller_tester = profile.has_button_checks
+      @is_dvd_screensaver = profile.is_dvd_screensaver
+      @is_audio_player = profile.is_audio_player
       {profile.phases, profile.boot_messages, profile.loop_start_phase, profile.is_animated}
     end
   end

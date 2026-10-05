@@ -510,7 +510,12 @@ module Citrine
 
       # Dynamically updates 13 font quads for a single digit slot in uncached GIF packet memory
       def self.emit_digit_quad_updater(emitter : MipsEmitter, digit_table_addr : UInt32)
-        return if digit_table_addr == 0_u32
+        if digit_table_addr == 0_u32
+          emitter.label("update_digit_quads")
+          emitter.jr(RA)
+          emitter.nop
+          return
+        end
         emitter.label("update_digit_quads")
         # a0 = digit (0..9) or >= 10 for blank slot
         # a1 = base_pos ((y << 4 << 16) | (x << 4))

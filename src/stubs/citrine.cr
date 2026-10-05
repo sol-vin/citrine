@@ -530,6 +530,46 @@ module Citrine
     Citrine::Audio.set_volume(vol)
   end
 
+  # Starts background streaming playback of a Citrine Audio Stream (.cas) file.
+  def self.play_stream(path_or_track : String | Int32) : Bool
+    true
+  end
+
+  # Pauses the active audio stream.
+  def self.pause_stream : Bool
+    true
+  end
+
+  # Resumes paused audio streaming.
+  def self.resume_stream : Bool
+    true
+  end
+
+  # Stops the active audio stream.
+  def self.stop_stream : Bool
+    true
+  end
+
+  # Seeks to an arbitrary position (in seconds) in the active audio stream.
+  def self.seek_stream(time_sec : Float32 | Float64) : Bool
+    true
+  end
+
+  # Sets the streaming playback volume (0-255).
+  def self.set_stream_volume(vol : Int32) : Bool
+    true
+  end
+
+  # Returns current playback position in seconds for the active audio stream.
+  def self.stream_playback_time : Float32
+    0.0_f32
+  end
+
+  # Returns total duration in seconds for the active audio stream.
+  def self.stream_duration : Float32
+    0.0_f32
+  end
+
   # Compile-time / code-first inspection of album track titles from album_metadata.json
   def self.album_track_titles(metadata_path : String = "album_metadata.json") : Array(String)
     [] of String
@@ -952,12 +992,26 @@ def bake_spu2_sound(path : String, target : String? = nil) : String
   Citrine.bake_spu2_sound(path, target)
 end
 
+def bake_stream(path : String, target : String? = nil, bitrate : Int32 = 96_000) : String
+  target || File.basename(path).sub(/\.[^.]+$/, ".cas")
+end
+
+def bake_stream_album(path : String = "album/", bitrate : Int32 = 96_000) : Int32
+  13
+end
+
 def album_track_count(path : String = "album_metadata.json") : Int32
   Citrine.album_track_count(path)
 end
 
 def disc_files : Array(String)
   Citrine.disc_files
+end
+
+struct Int
+  def kbps : Int32
+    self.to_i32 * 1000
+  end
 end
 
 # Top-level DSL helper for inline MIPS R5900 assembly.

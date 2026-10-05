@@ -184,7 +184,7 @@ module Citrine
         Dir.children(src_dir).each do |child|
           next if child == "SYSTEM.CNF" || child.ends_with?(".elf") || child.ends_with?(".cbc") || child.ends_with?(".iso") || child.ends_with?(".cue") || child.ends_with?(".cr")
           ext = File.extname(child).downcase
-          if [".vag", ".cbt", ".json", ".fnt", ".mesh"].includes?(ext)
+          if [".vag", ".cas", ".cbt", ".json", ".fnt", ".mesh"].includes?(ext)
             cpath = File.join(src_dir, child)
             if File.file?(cpath)
               extra_files[child] ||= File.read(cpath).to_slice

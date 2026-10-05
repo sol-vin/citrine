@@ -2,6 +2,7 @@ require "fluorite"
 require "json"
 require "./sound_importer"
 require "./image_importer"
+require "./cas_encoder"
 
 module Citrine
   module Importers
@@ -183,6 +184,47 @@ module Citrine
           vag_bytes = SoundImporter.to_vag(sound_asset, vag_name, loop_audio: config.loop_audio)
 
           File.write(output_path, vag_bytes)
+          true
+        ensure
+          File.delete(temp_wav) if File.exists?(temp_wav)
+        end
+      end
+
+      # Converts any audio or video stream into PlayStation 2 Citrine Audio Stream (.cas)
+      # with configurable output sizing (bitrate/quality)
+      def self.convert_to_cas(
+        input_path : String,
+        output_path : String,
+        bitrate : Int32 = 96_000,
+        channels : Int32 = 1,
+        loop_audio : Bool = true
+      ) : Bool
+        raise "FFmpeg is not installed or not in PATH." unless ffmpeg_installed?
+
+        config = CasConfig.new(bitrate: bitrate, channels: channels, loop_audio: loop_audio)
+        temp_wav = "#{output_path}.tmp_cas_pcm.wav"
+
+        cmd = Fluorite.build do
+          overwrite!
+          input(input_path)
+
+          output(temp_wav) do |outp|
+            outp.no_video
+            outp.audio_codec("pcm_s16le")
+            outp.sample_rate(config.sample_rate)
+            outp.channels(config.channels)
+          end
+        end
+
+        status = cmd.run
+        return false unless status.success? && File.exists?(temp_wav)
+
+        begin
+          wav_bytes = File.read(temp_wav).to_slice
+          sound_asset = SoundImporter.import_wav(wav_bytes)
+          cas_bytes = CasEncoder.encode(sound_asset, config)
+
+          File.write(output_path, cas_bytes)
           true
         ensure
           File.delete(temp_wav) if File.exists?(temp_wav)
@@ -504,6 +546,94 @@ module Citrine
         output_dir : String
       ) : Array(AudioTrackMetadata)
         import_album(album_dir, output_dir) { |msg| puts msg }
+      end
+
+      # Transcodes an entire album directory of MP3/OGG/FLAC files into Citrine Audio Stream (.cas) files
+      # for PlayStation 2 optical disc file streaming with configurable output sizing (bitrate/quality).
+      def self.import_stream_album(
+        album_dir : String,
+        output_dir : String,
+        bitrate : Int32 = 96_000,
+        channels : Int32 = 1,
+        &block : String -> Nil
+      ) : Array(AudioTrackMetadata)
+        audio_exts = [".ogg", ".mp3", ".wav", ".flac", ".m4a"]
+
+        files = Dir.children(album_dir).map { |f| File.join(album_dir, f) }.select do |f|
+          File.file?(f) && audio_exts.includes?(File.extname(f).downcase)
+        end
+
+        if files.empty?
+          yield "Warning: No audio files found in #{album_dir}"
+          return [] of AudioTrackMetadata
+        end
+
+        yield "Found #{files.size} audio tracks in #{album_dir}. Extracting metadata (bitrate: #{bitrate // 1000} kbps)..."
+
+        # Extract metadata
+        tracks = files.map { |f| extract_audio_metadata(f) }
+        tracks.sort_by!(&.track_number)
+
+        Dir.mkdir_p(output_dir)
+        processed_tracks = [] of AudioTrackMetadata
+
+        tracks.each_with_index do |track, idx|
+          out_filename = sprintf("track%02d.cas", idx + 1)
+          out_path = File.join(output_dir, out_filename)
+
+          yield sprintf("  [%02d/%02d] Trk %02d: %s - %s (%.1fs) -> %s (%d kbps)",
+                        idx + 1, tracks.size, track.track_number, track.artist, track.title,
+                        track.duration_seconds, out_filename, bitrate // 1000)
+
+          convert_to_cas(track.source_file, out_path, bitrate: bitrate, channels: channels)
+
+          actual_size = File.exists?(out_path) ? File.size(out_path) : 0_i64
+          actual_sectors = ((actual_size + 2047) // 2048).to_u32
+
+          processed_tracks << AudioTrackMetadata.new(
+            track_number: idx + 1,
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            duration_seconds: track.duration_seconds,
+            sector_count: actual_sectors,
+            source_file: track.source_file,
+            output_file: out_path
+          )
+        end
+
+        # Ingest cover art if present
+        ["cover.jpg", "cover.png", "folder.jpg", "cover.jpeg"].each do |img_name|
+          img_path = File.join(album_dir, img_name)
+          if File.exists?(img_path)
+            cbt_path = File.join(output_dir, "cover.cbt")
+            yield "  Ingesting album cover #{img_path} -> #{cbt_path} (GS CLUT8, 128x128)..."
+            begin
+              convert_texture(img_path, cbt_path, TextureConfig.new(width: 128, height: 128, clut_bits: 8))
+            rescue ex
+              yield "  Warning: Album cover conversion failed: #{ex.message}"
+            end
+            break
+          end
+        end
+
+        # Save album_metadata.json
+        json_path = File.join(output_dir, "album_metadata.json")
+        File.open(json_path, "w") do |f|
+          processed_tracks.to_json(f)
+        end
+        yield "Saved album stream descriptors to #{json_path}"
+
+        processed_tracks
+      end
+
+      def self.import_stream_album(
+        album_dir : String,
+        output_dir : String,
+        bitrate : Int32 = 96_000,
+        channels : Int32 = 1
+      ) : Array(AudioTrackMetadata)
+        import_stream_album(album_dir, output_dir, bitrate, channels) { |msg| puts msg }
       end
     end
   end

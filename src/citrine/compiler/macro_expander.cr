@@ -211,6 +211,8 @@ module Citrine
         "bake_texture",
         "bake_cd_track",
         "bake_cd_album",
+        "bake_stream",
+        "bake_stream_album",
         "bake_dvd_video",
         "bake_spu2_sound",
         "album_track_count",
@@ -249,6 +251,10 @@ module Citrine
         expand_bake_cd_track(call)
       when "bake_cd_album"
         expand_bake_cd_album(call)
+      when "bake_stream"
+        expand_bake_stream(call)
+      when "bake_stream_album"
+        expand_bake_stream_album(call)
       when "bake_dvd_video"
         expand_bake_dvd_video(call)
       when "bake_spu2_sound"
@@ -595,6 +601,133 @@ module Citrine
       end
 
       count = meta ? meta.size : Citrine::ISO::DiscManifest.current.cd_audio_tracks.size
+      Crystal::NumberLiteral.new(count)
+    end
+
+    private def expand_bake_stream(call : Crystal::Call) : Crystal::ASTNode
+      return Crystal::StringLiteral.new("") if call.args.empty?
+      arg0 = call.args[0]
+      src_rel = arg0.is_a?(Crystal::StringLiteral) ? arg0.value : arg0.to_s
+      target_rel = (call.args.size > 1 && call.args[1].is_a?(Crystal::StringLiteral)) ? call.args[1].as(Crystal::StringLiteral).value : nil
+
+      bitrate = 96_000
+      call.named_args.try(&.each do |narg|
+        if narg.name == "bitrate"
+          if narg.value.is_a?(Crystal::NumberLiteral)
+            bitrate = narg.value.as(Crystal::NumberLiteral).value.to_i
+          elsif narg.value.is_a?(Crystal::Call) && narg.value.as(Crystal::Call).name == "kbps"
+            obj = narg.value.as(Crystal::Call).obj
+            if obj.is_a?(Crystal::NumberLiteral)
+              bitrate = obj.as(Crystal::NumberLiteral).value.to_i * 1000
+            end
+          end
+        elsif narg.name == "quality"
+          val = narg.value.to_s.sub(/^:/, "")
+          case val
+          when "hi", "high", "studio" then bitrate = 192_000
+          when "mid", "medium", "standard" then bitrate = 96_000
+          when "low", "compact" then bitrate = 64_000
+          when "voice", "speech" then bitrate = 32_000
+          end
+        end
+      end)
+
+      full_src = resolve_asset_path(src_rel)
+      base_dir = @filename ? File.dirname(@filename.not_nil!) : "."
+      out_target = target_rel || File.basename(src_rel).sub(/\.(wav|ogg|mp3|flac|m4a|aac)$/i, ".cas")
+      out_full = File.join(base_dir, out_target)
+
+      if File.exists?(full_src) && (!File.exists?(out_full) || File.info(full_src).modification_time > File.info(out_full).modification_time)
+        ext = File.extname(full_src).downcase
+        if [".wav", ".ogg", ".mp3", ".flac", ".m4a", ".aac"].includes?(ext)
+          begin
+            Citrine::Importers::FluoriteMedia.convert_to_cas(full_src, out_full, bitrate: bitrate)
+          rescue
+          end
+        end
+      end
+
+      asset = Citrine::ISO::DiscManifest.current.add_file(File.exists?(out_full) ? out_full : full_src, out_target)
+      Crystal::StringLiteral.new(asset.target_name)
+    end
+
+    private def expand_bake_stream_album(call : Crystal::Call) : Crystal::ASTNode
+      base_dir = @filename ? File.dirname(@filename.not_nil!) : "."
+      album_dir = File.join(base_dir, "album")
+      if call.args.size > 0 && call.args.first.is_a?(Crystal::StringLiteral)
+        arg_val = call.args.first.as(Crystal::StringLiteral).value
+        expanded = File.expand_path(arg_val, base_dir)
+        album_dir = expanded if Dir.exists?(expanded)
+      end
+
+      bitrate = 96_000
+      call.named_args.try(&.each do |narg|
+        if narg.name == "bitrate"
+          if narg.value.is_a?(Crystal::NumberLiteral)
+            bitrate = narg.value.as(Crystal::NumberLiteral).value.to_i
+          elsif narg.value.is_a?(Crystal::Call) && narg.value.as(Crystal::Call).name == "kbps"
+            obj = narg.value.as(Crystal::Call).obj
+            if obj.is_a?(Crystal::NumberLiteral)
+              bitrate = obj.as(Crystal::NumberLiteral).value.to_i * 1000
+            end
+          end
+        elsif narg.name == "quality"
+          val = narg.value.to_s.sub(/^:/, "")
+          case val
+          when "hi", "high", "studio" then bitrate = 192_000
+          when "mid", "medium", "standard" then bitrate = 96_000
+          when "low", "compact" then bitrate = 64_000
+          when "voice", "speech" then bitrate = 32_000
+          end
+        end
+      end)
+
+      if Dir.exists?(album_dir)
+        json_path = File.join(base_dir, "album_metadata.json")
+        existing_cas = Dir.children(base_dir).any? { |f| f =~ /^track\d+\.cas$/i }
+        needs_regen = false
+        if !existing_cas || !File.exists?(json_path)
+          needs_regen = true
+        else
+          meta_mtime = File.info(json_path).modification_time
+          audio_exts = [".ogg", ".mp3", ".wav", ".flac", ".m4a"]
+          album_files = Dir.children(album_dir).select do |f|
+            audio_exts.includes?(File.extname(f).downcase)
+          end
+          if album_files.any? { |f| File.info(File.join(album_dir, f)).modification_time > meta_mtime }
+            needs_regen = true
+          end
+        end
+
+        if needs_regen
+          Citrine::Importers::FluoriteMedia.import_stream_album(album_dir, base_dir, bitrate: bitrate) rescue nil
+        end
+      end
+
+      count = 0
+      if Dir.exists?(base_dir)
+        cas_tracks = Dir.children(base_dir).select { |f| f =~ /^track\d+\.cas$/i }.sort_by do |f|
+          md = f.match(/track(\d+)/i)
+          md ? md[1].to_i : 999
+        end
+
+        cas_tracks.each do |cas_f|
+          cas_path = File.join(base_dir, cas_f)
+          Citrine::ISO::DiscManifest.current.add_file(cas_path, cas_f.upcase)
+          count += 1
+        end
+
+        cbt_path = File.join(base_dir, "cover.cbt")
+        if File.exists?(cbt_path)
+          Citrine::ISO::DiscManifest.current.add_file(cbt_path, "COVER.CBT")
+        end
+
+        json_path = File.join(base_dir, "album_metadata.json")
+        if File.exists?(json_path)
+          Citrine::ISO::DiscManifest.current.add_file(json_path, "ALBUM.JSON")
+        end
+      end
+
       Crystal::NumberLiteral.new(count)
     end
 
