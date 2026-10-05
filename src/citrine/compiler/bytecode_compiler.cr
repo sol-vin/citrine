@@ -559,11 +559,11 @@ module Citrine
       # Check window_open?
       cond_reg = allocator.alloc_temp
       native_id = NativeId::WindowOpen.value
-      instructions << Instruction.encode_ab_imm(Opcode::CallNative, cond_reg, native_id)
+      instructions << Instruction.encode_call_native(cond_reg, 0_u8, native_id)
 
       # Branch if false to exit
       jump_exit_idx = instructions.size
-      instructions << Instruction.encode_branch(Opcode::JumpIfFalse, cond_reg, 0_i16)
+      instructions << Instruction.encode_jump_if_false(cond_reg, 0_i16)
 
       # Body
       body_reg = compile_node(body, allocator, instructions, fn)
@@ -576,7 +576,7 @@ module Citrine
 
       # Patch exit jump
       exit_offset = (instructions.size - jump_exit_idx - 1).to_i16
-      instructions[jump_exit_idx] = Instruction.encode_branch(Opcode::JumpIfFalse, cond_reg, exit_offset)
+      instructions[jump_exit_idx] = Instruction.encode_jump_if_false(cond_reg, exit_offset)
       allocator.free_temp(cond_reg)
 
       ret_reg = allocator.alloc_temp
@@ -810,11 +810,11 @@ module Citrine
         left_reg = compile_node(node.left, allocator, instructions, fn)
         instructions << Instruction.encode_abc(Opcode::Move, dest, left_reg, 0_u8)
         jump_idx = instructions.size
-        instructions << Instruction.encode_branch(Opcode::JumpIfFalse, dest, 0_i16)
+        instructions << Instruction.encode_jump_if_false(dest, 0_i16)
         right_reg = compile_node(node.right, allocator, instructions, fn)
         instructions << Instruction.encode_abc(Opcode::Move, dest, right_reg, 0_u8)
         offset = (instructions.size - jump_idx - 1).to_i16
-        instructions[jump_idx] = Instruction.encode_branch(Opcode::JumpIfFalse, dest, offset)
+        instructions[jump_idx] = Instruction.encode_jump_if_false(dest, offset)
         allocator.free_temp(left_reg)
         allocator.free_temp(right_reg)
         dest
@@ -824,11 +824,11 @@ module Citrine
         left_reg = compile_node(node.left, allocator, instructions, fn)
         instructions << Instruction.encode_abc(Opcode::Move, dest, left_reg, 0_u8)
         jump_idx = instructions.size
-        instructions << Instruction.encode_branch(Opcode::JumpIfTrue, dest, 0_i16)
+        instructions << Instruction.encode_jump_if_true(dest, 0_i16)
         right_reg = compile_node(node.right, allocator, instructions, fn)
         instructions << Instruction.encode_abc(Opcode::Move, dest, right_reg, 0_u8)
         offset = (instructions.size - jump_idx - 1).to_i16
-        instructions[jump_idx] = Instruction.encode_branch(Opcode::JumpIfTrue, dest, offset)
+        instructions[jump_idx] = Instruction.encode_jump_if_true(dest, offset)
         allocator.free_temp(left_reg)
         allocator.free_temp(right_reg)
         dest
@@ -849,7 +849,7 @@ module Citrine
         dest = allocator.alloc_temp
         cond_reg = compile_node(node.cond, allocator, instructions, fn)
         jump_else_idx = instructions.size
-        instructions << Instruction.encode_branch(Opcode::JumpIfFalse, cond_reg, 0_i16)
+        instructions << Instruction.encode_jump_if_false(cond_reg, 0_i16)
 
         # Then branch
         then_reg = compile_node(node.then, allocator, instructions, fn)
@@ -860,7 +860,7 @@ module Citrine
 
         # Patch else
         else_target_offset = (instructions.size - jump_else_idx - 1).to_i16
-        instructions[jump_else_idx] = Instruction.encode_branch(Opcode::JumpIfFalse, cond_reg, else_target_offset)
+        instructions[jump_else_idx] = Instruction.encode_jump_if_false(cond_reg, else_target_offset)
 
         # Else branch
         if node.else && !node.else.is_a?(Crystal::Nop)
@@ -880,7 +880,7 @@ module Citrine
         dest = allocator.alloc_temp
         cond_reg = compile_node(node.cond, allocator, instructions, fn)
         jump_else_idx = instructions.size
-        instructions << Instruction.encode_branch(Opcode::JumpIfTrue, cond_reg, 0_i16)
+        instructions << Instruction.encode_jump_if_true(cond_reg, 0_i16)
 
         # Then branch
         then_reg = compile_node(node.then, allocator, instructions, fn)
@@ -891,7 +891,7 @@ module Citrine
 
         # Patch else
         else_target_offset = (instructions.size - jump_else_idx - 1).to_i16
-        instructions[jump_else_idx] = Instruction.encode_branch(Opcode::JumpIfTrue, cond_reg, else_target_offset)
+        instructions[jump_else_idx] = Instruction.encode_jump_if_true(cond_reg, else_target_offset)
 
         # Else branch
         if node.else && !node.else.is_a?(Crystal::Nop)
@@ -912,7 +912,7 @@ module Citrine
         loop_start = instructions.size
         cond_reg = compile_node(node.cond, allocator, instructions, fn)
         jump_exit_idx = instructions.size
-        instructions << Instruction.encode_branch(Opcode::JumpIfFalse, cond_reg, 0_i16)
+        instructions << Instruction.encode_jump_if_false(cond_reg, 0_i16)
 
         @loop_break_jumps.push([] of Int32)
         @loop_next_jumps.push([] of Int32)
@@ -931,7 +931,7 @@ module Citrine
         instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, back_offset)
 
         exit_offset = (instructions.size - jump_exit_idx - 1).to_i16
-        instructions[jump_exit_idx] = Instruction.encode_branch(Opcode::JumpIfFalse, cond_reg, exit_offset)
+        instructions[jump_exit_idx] = Instruction.encode_jump_if_false(cond_reg, exit_offset)
 
         end_pos = instructions.size
         breaks.each do |b_idx|
@@ -948,7 +948,7 @@ module Citrine
         loop_start = instructions.size
         cond_reg = compile_node(node.cond, allocator, instructions, fn)
         jump_exit_idx = instructions.size
-        instructions << Instruction.encode_branch(Opcode::JumpIfTrue, cond_reg, 0_i16)
+        instructions << Instruction.encode_jump_if_true(cond_reg, 0_i16)
 
         @loop_break_jumps.push([] of Int32)
         @loop_next_jumps.push([] of Int32)
@@ -967,7 +967,7 @@ module Citrine
         instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, back_offset)
 
         exit_offset = (instructions.size - jump_exit_idx - 1).to_i16
-        instructions[jump_exit_idx] = Instruction.encode_branch(Opcode::JumpIfTrue, cond_reg, exit_offset)
+        instructions[jump_exit_idx] = Instruction.encode_jump_if_true(cond_reg, exit_offset)
 
         end_pos = instructions.size
         breaks.each do |b_idx|
@@ -1162,12 +1162,12 @@ module Citrine
             allocator.free_temp((seq_base + 1).to_u8)
 
             j_next = instructions.size
-            instructions << Instruction.encode_branch(Opcode::JumpIfFalse, cur_check, 0_i16)
+            instructions << Instruction.encode_jump_if_false(cur_check, 0_i16)
             instructions << Instruction.encode_ab_imm(Opcode::LoadBool, match_dest, 1_u16)
             j_end = instructions.size
             instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, 0_i16)
             jump_end_indices << j_end
-            instructions[j_next] = Instruction.encode_branch(Opcode::JumpIfFalse, cur_check, (instructions.size - j_next - 1).to_i16)
+            instructions[j_next] = Instruction.encode_jump_if_false(cur_check, (instructions.size - j_next - 1).to_i16)
             allocator.free_temp(cur_check)
           end
 
@@ -1240,13 +1240,13 @@ module Citrine
           allocator.free_temp((seq_base + 1).to_u8)
 
           jump_nil = instructions.size
-          instructions << Instruction.encode_branch(Opcode::JumpIfFalse, is_match, 0_i16)
+          instructions << Instruction.encode_jump_if_false(is_match, 0_i16)
           allocator.free_temp(is_match)
           instructions << Instruction.encode_abc(Opcode::Move, dest, obj_reg, 0_u8)
           jump_end = instructions.size
           instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, 0_i16)
 
-          instructions[jump_nil] = Instruction.encode_branch(Opcode::JumpIfFalse, is_match, (instructions.size - jump_nil - 1).to_i16)
+          instructions[jump_nil] = Instruction.encode_jump_if_false(is_match, (instructions.size - jump_nil - 1).to_i16)
           instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
           instructions[jump_end] = Instruction.encode_branch(Opcode::Jump, 0_u8, (instructions.size - jump_end - 1).to_i16)
         else
@@ -1268,14 +1268,14 @@ module Citrine
             allocator.free_temp((seq_base + 1).to_u8)
 
             j = instructions.size
-            instructions << Instruction.encode_branch(Opcode::JumpIfFalse, cur_check, 0_i16)
+            instructions << Instruction.encode_jump_if_false(cur_check, 0_i16)
             allocator.free_temp(cur_check)
 
             instructions << Instruction.encode_ab_imm(Opcode::LoadBool, match_dest, 1_u16)
             jump_end_indices << instructions.size
             instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, 0_i16)
 
-            instructions[j] = Instruction.encode_branch(Opcode::JumpIfFalse, cur_check, (instructions.size - j - 1).to_i16)
+            instructions[j] = Instruction.encode_jump_if_false(cur_check, (instructions.size - j - 1).to_i16)
           end
 
           end_pos = instructions.size
@@ -1284,13 +1284,13 @@ module Citrine
           end
 
           jump_nil = instructions.size
-          instructions << Instruction.encode_branch(Opcode::JumpIfFalse, match_dest, 0_i16)
+          instructions << Instruction.encode_jump_if_false(match_dest, 0_i16)
           allocator.free_temp(match_dest)
           instructions << Instruction.encode_abc(Opcode::Move, dest, obj_reg, 0_u8)
           jump_end = instructions.size
           instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, 0_i16)
 
-          instructions[jump_nil] = Instruction.encode_branch(Opcode::JumpIfFalse, match_dest, (instructions.size - jump_nil - 1).to_i16)
+          instructions[jump_nil] = Instruction.encode_jump_if_false(match_dest, (instructions.size - jump_nil - 1).to_i16)
           instructions << Instruction.encode_abc(Opcode::LoadNil, dest, 0_u8, 0_u8)
           instructions[jump_end] = Instruction.encode_branch(Opcode::Jump, 0_u8, (instructions.size - jump_end - 1).to_i16)
         end
@@ -1347,14 +1347,14 @@ module Citrine
               allocator.free_temp((seq_base + 1).to_u8)
 
               j = instructions.size
-              instructions << Instruction.encode_branch(Opcode::JumpIfFalse, cur_check, 0_i16)
+              instructions << Instruction.encode_jump_if_false(cur_check, 0_i16)
               allocator.free_temp(cur_check)
 
               instructions << Instruction.encode_ab_imm(Opcode::LoadBool, match_dest, 1_u16)
               jump_end_indices << instructions.size
               instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, 0_i16)
 
-              instructions[j] = Instruction.encode_branch(Opcode::JumpIfFalse, cur_check, (instructions.size - j - 1).to_i16)
+              instructions[j] = Instruction.encode_jump_if_false(cur_check, (instructions.size - j - 1).to_i16)
             end
 
             end_pos = instructions.size
@@ -1447,11 +1447,11 @@ module Citrine
 
               if is_last_cond
                 j = instructions.size
-                instructions << Instruction.encode_branch(Opcode::JumpIfFalse, range_match, 0_i16)
+                instructions << Instruction.encode_jump_if_false(range_match, 0_i16)
                 next_when_jump_patches << j
               else
                 j = instructions.size
-                instructions << Instruction.encode_branch(Opcode::JumpIfTrue, range_match, 0_i16)
+                instructions << Instruction.encode_jump_if_true(range_match, 0_i16)
                 body_jump_patches << j
               end
               allocator.free_temp(range_match)
@@ -1507,12 +1507,12 @@ module Citrine
                   allocator.free_temp((seq_base + 1).to_u8)
 
                   j_next = instructions.size
-                  instructions << Instruction.encode_branch(Opcode::JumpIfFalse, cur_check, 0_i16)
+                  instructions << Instruction.encode_jump_if_false(cur_check, 0_i16)
                   instructions << Instruction.encode_ab_imm(Opcode::LoadBool, type_match, 1_u16)
                   j_done = instructions.size
                   instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, 0_i16)
                   tid_jump_ends << j_done
-                  instructions[j_next] = Instruction.encode_branch(Opcode::JumpIfFalse, cur_check, (instructions.size - j_next - 1).to_i16)
+                  instructions[j_next] = Instruction.encode_jump_if_false(cur_check, (instructions.size - j_next - 1).to_i16)
                   allocator.free_temp(cur_check)
                 end
                 tid_end_pos = instructions.size
@@ -1523,11 +1523,11 @@ module Citrine
 
               if is_last_cond
                 j = instructions.size
-                instructions << Instruction.encode_branch(Opcode::JumpIfFalse, type_match, 0_i16)
+                instructions << Instruction.encode_jump_if_false(type_match, 0_i16)
                 next_when_jump_patches << j
               else
                 j = instructions.size
-                instructions << Instruction.encode_branch(Opcode::JumpIfTrue, type_match, 0_i16)
+                instructions << Instruction.encode_jump_if_true(type_match, 0_i16)
                 body_jump_patches << j
               end
               allocator.free_temp(type_match)
@@ -1540,11 +1540,11 @@ module Citrine
 
               if is_last_cond
                 j = instructions.size
-                instructions << Instruction.encode_branch(Opcode::JumpIfFalse, eq_reg, 0_i16)
+                instructions << Instruction.encode_jump_if_false(eq_reg, 0_i16)
                 next_when_jump_patches << j
               else
                 j = instructions.size
-                instructions << Instruction.encode_branch(Opcode::JumpIfTrue, eq_reg, 0_i16)
+                instructions << Instruction.encode_jump_if_true(eq_reg, 0_i16)
                 body_jump_patches << j
               end
               allocator.free_temp(eq_reg)
@@ -1553,7 +1553,7 @@ module Citrine
 
           cur_pos = instructions.size
           body_jump_patches.each do |bp|
-            instructions[bp] = Instruction.encode_branch(Opcode::JumpIfTrue, instructions[bp].dst, (cur_pos - bp - 1).to_i16)
+            instructions[bp] = Instruction.encode_jump_if_true(instructions[bp].dst, (cur_pos - bp - 1).to_i16)
           end
 
           body_reg = compile_node(w.body, allocator, instructions, fn)
@@ -1566,7 +1566,7 @@ module Citrine
 
           after_pos = instructions.size
           next_when_jump_patches.each do |np|
-            instructions[np] = Instruction.encode_branch(Opcode::JumpIfFalse, instructions[np].dst, (after_pos - np - 1).to_i16)
+            instructions[np] = Instruction.encode_jump_if_false(instructions[np].dst, (after_pos - np - 1).to_i16)
           end
         end
 
@@ -1582,11 +1582,11 @@ module Citrine
             cond_res = compile_node(c, allocator, instructions, fn)
             if is_last
               j = instructions.size
-              instructions << Instruction.encode_branch(Opcode::JumpIfFalse, cond_res, 0_i16)
+              instructions << Instruction.encode_jump_if_false(cond_res, 0_i16)
               next_when_jump_patches << j
             else
               j = instructions.size
-              instructions << Instruction.encode_branch(Opcode::JumpIfTrue, cond_res, 0_i16)
+              instructions << Instruction.encode_jump_if_true(cond_res, 0_i16)
               body_jump_patches << j
             end
             allocator.free_temp(cond_res)
@@ -1594,7 +1594,7 @@ module Citrine
 
           cur_pos = instructions.size
           body_jump_patches.each do |bp|
-            instructions[bp] = Instruction.encode_branch(Opcode::JumpIfTrue, instructions[bp].dst, (cur_pos - bp - 1).to_i16)
+            instructions[bp] = Instruction.encode_jump_if_true(instructions[bp].dst, (cur_pos - bp - 1).to_i16)
           end
 
           body_reg = compile_node(w.body, allocator, instructions, fn)
@@ -1607,7 +1607,7 @@ module Citrine
 
           after_pos = instructions.size
           next_when_jump_patches.each do |np|
-            instructions[np] = Instruction.encode_branch(Opcode::JumpIfFalse, instructions[np].dst, (after_pos - np - 1).to_i16)
+            instructions[np] = Instruction.encode_jump_if_false(instructions[np].dst, (after_pos - np - 1).to_i16)
           end
         end
       end
@@ -2243,7 +2243,7 @@ module Citrine
         cond_reg = allocator.alloc_temp
         instructions << Instruction.encode_abc(Opcode::Lt, cond_reg, iter_reg, count_reg)
         exit_jump_idx = instructions.size
-        instructions << Instruction.encode_branch(Opcode::JumpIfFalse, cond_reg, 0_i16)
+        instructions << Instruction.encode_jump_if_false(cond_reg, 0_i16)
 
         # Assign block arg
         instructions << Instruction.encode_abc(Opcode::Move, local_iter, iter_reg, 0_u8)
@@ -2258,7 +2258,7 @@ module Citrine
         instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, back_offset)
 
         exit_offset = (instructions.size - exit_jump_idx - 1).to_i16
-        instructions[exit_jump_idx] = Instruction.encode_branch(Opcode::JumpIfFalse, cond_reg, exit_offset)
+        instructions[exit_jump_idx] = Instruction.encode_jump_if_false(cond_reg, exit_offset)
         return dest
       end
 
@@ -2427,7 +2427,7 @@ module Citrine
           instructions << Instruction.encode_abc(Opcode::Le, cond_reg, iter_reg, to_reg)
         end
         exit_jump_idx = instructions.size
-        instructions << Instruction.encode_branch(Opcode::JumpIfFalse, cond_reg, 0_i16)
+        instructions << Instruction.encode_jump_if_false(cond_reg, 0_i16)
 
         instructions << Instruction.encode_abc(Opcode::Move, local_iter, iter_reg, 0_u8)
         compile_node(block.body, allocator, instructions, fn)
@@ -2441,7 +2441,7 @@ module Citrine
         instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, back_offset)
 
         exit_offset = (instructions.size - exit_jump_idx - 1).to_i16
-        instructions[exit_jump_idx] = Instruction.encode_branch(Opcode::JumpIfFalse, cond_reg, exit_offset)
+        instructions[exit_jump_idx] = Instruction.encode_jump_if_false(cond_reg, exit_offset)
         allocator.free_temp(from_reg)
         allocator.free_temp(to_reg)
         allocator.free_temp(iter_reg)
@@ -2469,7 +2469,7 @@ module Citrine
         cond_reg = allocator.alloc_temp
         instructions << Instruction.encode_abc(Opcode::Lt, cond_reg, iter_reg, size_reg)
         exit_jump_idx = instructions.size
-        instructions << Instruction.encode_branch(Opcode::JumpIfFalse, cond_reg, 0_i16)
+        instructions << Instruction.encode_jump_if_false(cond_reg, 0_i16)
 
         seq_base = allocator.alloc_contiguous(2)
         instructions << Instruction.encode_abc(Opcode::Move, seq_base, arr_reg, 0_u8)
@@ -2488,7 +2488,7 @@ module Citrine
 
         back_offset = (loop_start - instructions.size - 1).to_i16
         instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, back_offset)
-        instructions[exit_jump_idx] = Instruction.encode_branch(Opcode::JumpIfFalse, cond_reg, (instructions.size - exit_jump_idx - 1).to_i16)
+        instructions[exit_jump_idx] = Instruction.encode_jump_if_false(cond_reg, (instructions.size - exit_jump_idx - 1).to_i16)
         allocator.free_temp(arr_reg)
         allocator.free_temp(size_reg)
         allocator.free_temp(iter_reg)
@@ -2524,7 +2524,7 @@ module Citrine
         cond_reg = allocator.alloc_temp
         instructions << Instruction.encode_abc(Opcode::Lt, cond_reg, iter_reg, size_reg)
         exit_jump_idx = instructions.size
-        instructions << Instruction.encode_branch(Opcode::JumpIfFalse, cond_reg, 0_i16)
+        instructions << Instruction.encode_jump_if_false(cond_reg, 0_i16)
 
         # Item = arr[iter]
         seq_base = allocator.alloc_contiguous(2)
@@ -2557,7 +2557,7 @@ module Citrine
 
         back_offset = (loop_start - instructions.size - 1).to_i16
         instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, back_offset)
-        instructions[exit_jump_idx] = Instruction.encode_branch(Opcode::JumpIfFalse, cond_reg, (instructions.size - exit_jump_idx - 1).to_i16)
+        instructions[exit_jump_idx] = Instruction.encode_jump_if_false(cond_reg, (instructions.size - exit_jump_idx - 1).to_i16)
 
         allocator.free_temp(arr_reg)
         allocator.free_temp(size_reg)

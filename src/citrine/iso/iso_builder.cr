@@ -65,6 +65,7 @@ module Citrine
       total_sectors = current_sector
 
       # Open target ISO for writing
+      FileUtils.mkdir_p(File.dirname(output_path))
       File.open(output_path, "wb") do |io|
         # Sectors 0..15: System area (32768 bytes zeroes)
         (16 * SECTOR_SIZE).times { io.write_byte(0_u8) }

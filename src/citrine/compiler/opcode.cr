@@ -78,39 +78,39 @@ module Citrine
     # 0x1F: Fused Multiply-Accumulate and 2D vector dot product accelerator
     FusedMadd   = 0x1F
 
-    # Legacy Compatibility Aliases (mapping to Citrine-32 primary opcodes)
-    Nop         = 0x00
-    Halt        = 0x00
-    LoadNil     = 0x03
-    LoadBool    = 0x03
-    LoadInt     = 0x03
-    Neg         = 0x07
-    Div         = 0x09
-    Mod         = 0x09
-    BitAnd      = 0x0A
-    BitOr       = 0x0A
-    BitXor      = 0x0A
-    BitNot      = 0x0A
-    ShiftLeft   = 0x0B
-    ShiftRight  = 0x0B
-    Eq          = 0x0C
-    Ne          = 0x0C
-    Lt          = 0x0C
-    Le          = 0x0C
-    Gt          = 0x0C
-    Ge          = 0x0C
-    JumpIfTrue  = 0x10
-    JumpIfFalse = 0x10
-    Vec2New     = 0x15
-    Vec2Add     = 0x15
-    Vec2GetX    = 0x16
-    Vec2GetY    = 0x16
-    Vec2SetX    = 0x16
-    Vec2SetY    = 0x16
-    ColorNew    = 0x17
-    SpawnFiber  = 0x1A
-    Yield       = 0x1A
-    ResumeFiber = 0x1A
+    # Legacy Distinct Opcode Specifiers for Compiler (0x20..0x3F) - DISTINCT VALUES!
+    Nop         = 0x20
+    Halt        = 0x21
+    LoadNil     = 0x22
+    LoadBool    = 0x23
+    LoadInt     = 0x24
+    Neg         = 0x25
+    Div         = 0x26
+    Mod         = 0x27
+    BitAnd      = 0x28
+    BitOr       = 0x29
+    BitXor      = 0x2A
+    BitNot      = 0x2B
+    ShiftLeft   = 0x2C
+    ShiftRight  = 0x2D
+    Eq          = 0x2E
+    Ne          = 0x2F
+    Lt          = 0x30
+    Le          = 0x31
+    Gt          = 0x32
+    Ge          = 0x33
+    JumpIfTrue  = 0x34
+    JumpIfFalse = 0x35
+    Vec2New     = 0x36
+    Vec2Add     = 0x37
+    Vec2GetX    = 0x38
+    Vec2GetY    = 0x39
+    Vec2SetX    = 0x3A
+    Vec2SetY    = 0x3B
+    ColorNew    = 0x3C
+    SpawnFiber  = 0x3D
+    Yield       = 0x3E
+    ResumeFiber = 0x3F
   end
 
   # Sub-opcode definitions for all 32 primary opcodes (3 bits each: 0..7)
@@ -492,77 +492,94 @@ module Citrine
 
     # Backward-compatible branch encoder mapping to new 5-bit opcode + 3-bit subop.
     def self.encode_branch(op : Opcode, reg : UInt8, offset : Int16, subop : UInt8 = 0_u8) : Instruction
-      real_op, real_subop = map_legacy_op(op, subop)
-      if real_op == Opcode::Jump && real_subop == JumpSubOp::JumpRel24.value
+      if op == Opcode::Jump
         encode_jump_rel24(offset.to_i32)
       else
-        encode_branch_rel(real_op, real_subop, reg, offset)
+        encode_branch_rel(op, subop, reg, offset)
       end
+    end
+
+    # Encodes a conditional branch if falsy (zero or nil)
+    def self.encode_jump_if_false(reg : UInt8, offset : Int16) : Instruction
+      encode_branch_rel(Opcode::BranchZ, BranchZSubOp::Falsy.value, reg, offset)
+    end
+
+    # Encodes a conditional branch if truthy (non-zero and non-nil)
+    def self.encode_jump_if_true(reg : UInt8, offset : Int16) : Instruction
+      encode_branch_rel(Opcode::BranchZ, BranchZSubOp::Truthy.value, reg, offset)
     end
 
     # Helper mapping legacy opcode values to [Primary Opcode, SubOp] pairs
     private def self.map_legacy_op(op : Opcode, default_subop : UInt8) : Tuple(Opcode, UInt8)
       case op
-      when Opcode::Sys
-        {Opcode::Sys, default_subop}
-      when Opcode::Move
-        {Opcode::Move, default_subop}
-      when Opcode::LoadConst
-        {Opcode::LoadConst, default_subop}
+      when Opcode::JumpIfFalse
+        {Opcode::BranchZ, BranchZSubOp::Falsy.value}
+      when Opcode::JumpIfTrue
+        {Opcode::BranchZ, BranchZSubOp::Truthy.value}
+      when Opcode::LoadNil
+        {Opcode::LoadImm, LoadImmSubOp::Nil.value}
+      when Opcode::LoadBool
+        {Opcode::LoadImm, LoadImmSubOp::Bool.value}
+      when Opcode::LoadInt
+        {Opcode::LoadImm, default_subop == 0_u8 ? LoadImmSubOp::Int16.value : default_subop}
+      when Opcode::Div
+        {Opcode::DivMod, DivModSubOp::DivS32.value}
+      when Opcode::Mod
+        {Opcode::DivMod, DivModSubOp::ModS32.value}
+      when Opcode::Neg
+        {Opcode::Sub, SubSubOp::NegI32.value}
+      when Opcode::BitAnd
+        {Opcode::Bitwise, BitwiseSubOp::And.value}
+      when Opcode::BitOr
+        {Opcode::Bitwise, BitwiseSubOp::Or.value}
+      when Opcode::BitXor
+        {Opcode::Bitwise, BitwiseSubOp::Xor.value}
+      when Opcode::BitNot
+        {Opcode::Bitwise, BitwiseSubOp::Nor.value}
+      when Opcode::ShiftLeft
+        {Opcode::Shift, ShiftSubOp::Sll.value}
+      when Opcode::ShiftRight
+        {Opcode::Shift, ShiftSubOp::Sra.value}
+      when Opcode::Eq
+        {Opcode::Compare, CompareSubOp::Eq.value}
+      when Opcode::Ne
+        {Opcode::Compare, CompareSubOp::Ne.value}
+      when Opcode::Lt
+        {Opcode::Compare, CompareSubOp::Lt.value}
+      when Opcode::Le
+        {Opcode::Compare, CompareSubOp::Le.value}
+      when Opcode::Gt
+        {Opcode::Compare, CompareSubOp::Gt.value}
+      when Opcode::Ge
+        {Opcode::Compare, CompareSubOp::Ge.value}
+      when Opcode::Vec2New
+        {Opcode::Vec2Math, Vec2MathSubOp::New.value}
+      when Opcode::Vec2Add
+        {Opcode::Vec2Math, Vec2MathSubOp::Add.value}
+      when Opcode::Vec2GetX
+        {Opcode::Vec2Prop, Vec2PropSubOp::GetX.value}
+      when Opcode::Vec2GetY
+        {Opcode::Vec2Prop, Vec2PropSubOp::GetY.value}
+      when Opcode::Vec2SetX
+        {Opcode::Vec2Prop, Vec2PropSubOp::SetX.value}
+      when Opcode::Vec2SetY
+        {Opcode::Vec2Prop, Vec2PropSubOp::SetY.value}
+      when Opcode::ColorNew
+        {Opcode::ColorOp, ColorSubOp::Rgba32.value}
+      when Opcode::SpawnFiber
+        {Opcode::FiberOp, FiberSubOp::Spawn.value}
+      when Opcode::Yield
+        {Opcode::FiberOp, FiberSubOp::Yield.value}
+      when Opcode::ResumeFiber
+        {Opcode::FiberOp, FiberSubOp::Resume.value}
+      when Opcode::Halt
+        {Opcode::Sys, SysSubOp::Halt.value}
+      when Opcode::Nop
+        {Opcode::Sys, SysSubOp::Nop.value}
+      when Opcode::Jump
+        {Opcode::Jump, JumpSubOp::JumpRel24.value}
       when Opcode::LoadImm
         {Opcode::LoadImm, default_subop == 0_u8 ? LoadImmSubOp::Int16.value : default_subop}
-      when Opcode::Add
-        {Opcode::Add, default_subop}
-      when Opcode::Sub
-        {Opcode::Sub, default_subop}
-      when Opcode::Mul
-        {Opcode::Mul, default_subop}
-      when Opcode::DivMod
-        {Opcode::DivMod, default_subop}
-      when Opcode::Bitwise
-        {Opcode::Bitwise, default_subop}
-      when Opcode::Shift
-        {Opcode::Shift, default_subop}
-      when Opcode::Compare
-        {Opcode::Compare, default_subop}
-      when Opcode::Test
-        {Opcode::Test, default_subop}
-      when Opcode::FloatAlu
-        {Opcode::FloatAlu, default_subop}
-      when Opcode::Jump
-        {Opcode::Jump, default_subop}
-      when Opcode::BranchZ
-        {Opcode::BranchZ, default_subop}
-      when Opcode::BranchCmp
-        {Opcode::BranchCmp, default_subop}
-      when Opcode::Call
-        {Opcode::Call, default_subop}
-      when Opcode::Return
-        {Opcode::Return, default_subop}
-      when Opcode::CallNative
-        {Opcode::CallNative, default_subop}
-      when Opcode::Vec2Math
-        {Opcode::Vec2Math, default_subop}
-      when Opcode::Vec2Prop
-        {Opcode::Vec2Prop, default_subop}
-      when Opcode::ColorOp
-        {Opcode::ColorOp, default_subop}
-      when Opcode::SimdMmi
-        {Opcode::SimdMmi, default_subop}
-      when Opcode::Collection
-        {Opcode::Collection, default_subop}
-      when Opcode::FiberOp
-        {Opcode::FiberOp, default_subop}
-      when Opcode::ChannelOp
-        {Opcode::ChannelOp, default_subop}
-      when Opcode::Ps2Hw
-        {Opcode::Ps2Hw, default_subop}
-      when Opcode::InlineAsm
-        {Opcode::InlineAsm, default_subop}
-      when Opcode::LoopDecBr
-        {Opcode::LoopDecBr, default_subop}
-      when Opcode::FusedMadd
-        {Opcode::FusedMadd, default_subop}
       else
         {op, default_subop}
       end
@@ -614,6 +631,87 @@ module Citrine
     def jump_offset24 : Int32
       raw_val = (@raw & 0xFFFFFF_u32).to_i32
       raw_val >= 0x800000 ? raw_val - 0x1000000 : raw_val
+    end
+
+    # Maps Citrine-32 instruction to legacy opcode number for simulation and tooling compatibility
+    def legacy_opcode_number : Int32
+      case opcode
+      when Opcode::Sys
+        subop == SysSubOp::Halt.value ? 70 : 0
+      when Opcode::Move
+        1
+      when Opcode::LoadConst
+        5
+      when Opcode::LoadImm
+        case subop
+        when LoadImmSubOp::Nil.value then 2
+        when LoadImmSubOp::Bool.value then 3
+        else 4
+        end
+      when Opcode::Add
+        10
+      when Opcode::Sub
+        subop == SubSubOp::NegI32.value ? 15 : 11
+      when Opcode::Mul
+        12
+      when Opcode::DivMod
+        subop == DivModSubOp::ModS32.value ? 14 : 13
+      when Opcode::Bitwise
+        case subop
+        when BitwiseSubOp::And.value then 16
+        when BitwiseSubOp::Or.value then 17
+        when BitwiseSubOp::Xor.value then 18
+        when BitwiseSubOp::Nor.value then 28
+        else 16
+        end
+      when Opcode::Shift
+        case subop
+        when ShiftSubOp::Sll.value then 19
+        else 27
+        end
+      when Opcode::Compare
+        case subop
+        when CompareSubOp::Eq.value then 30
+        when CompareSubOp::Ne.value then 31
+        when CompareSubOp::Lt.value then 32
+        when CompareSubOp::Le.value then 33
+        when CompareSubOp::Gt.value then 34
+        when CompareSubOp::Ge.value then 35
+        else 30
+        end
+      when Opcode::Jump
+        40
+      when Opcode::BranchZ
+        subop == BranchZSubOp::Falsy.value ? 42 : 41
+      when Opcode::BranchCmp
+        73
+      when Opcode::LoopDecBr
+        74
+      when Opcode::FusedMadd
+        75
+      when Opcode::Call
+        50
+      when Opcode::Return
+        51
+      when Opcode::CallNative
+        52
+      when Opcode::Vec2Math
+        subop == Vec2MathSubOp::Add.value ? 25 : 20
+      when Opcode::Vec2Prop
+        case subop
+        when Vec2PropSubOp::GetX.value then 21
+        when Vec2PropSubOp::GetY.value then 22
+        when Vec2PropSubOp::SetX.value then 23
+        when Vec2PropSubOp::SetY.value then 24
+        else 21
+        end
+      when Opcode::ColorOp
+        26
+      when Opcode::InlineAsm
+        72
+      else
+        0
+      end
     end
 
     # Maps a native function ID to its 3-bit hardware domain (0..7)

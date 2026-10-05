@@ -1,5 +1,6 @@
 require "../gs/gif_packet_builder"
 require "../ast/types"
+require "../compiler/opcode"
 require "./regex_engine"
 
 module Citrine
@@ -13,6 +14,7 @@ module Citrine
       property is_inline_assembly : Bool
       property inline_asm_words : Array(UInt32)
       property has_audio : Bool
+      property is_dvd_screensaver : Bool
 
       def initialize(
         @phases = [] of Citrine::GS::Phase,
@@ -22,16 +24,13 @@ module Citrine
         @has_button_checks = false,
         @is_inline_assembly = false,
         @inline_asm_words = [] of UInt32,
-        @has_audio = false
+        @has_audio = false,
+        @is_dvd_screensaver = false
       )
       end
 
       def is_controller_tester : Bool
         @has_button_checks
-      end
-
-      def is_dvd_screensaver : Bool
-        false
       end
 
       def is_audio_player : Bool
@@ -107,15 +106,18 @@ end
         is_inline_assembly = false
         inline_asm_words = [] of UInt32
         has_audio = false
+        is_dvd_screensaver = false
         is_animated = false
         phases = [] of Phase
 
   boot_messages = [] of String
   loop_start_phase = 0
-        if cbc_bytes && cbc_bytes.size > 20 && String.new(cbc_bytes[0..3]) == "CBC1"
+        magic = cbc_bytes ? (cbc_bytes.size >= 4 ? String.new(cbc_bytes[0..3]) : "") : ""
+        is_cbc2 = (magic == "CBC2")
+        if cbc_bytes && cbc_bytes.size > 20 && (magic == "CBC1" || is_cbc2)
     begin
       io = IO::Memory.new(cbc_bytes)
-      io.read_string(4) # "CBC1"
+      io.read_string(4) # "CBC1" or "CBC2"
       io.read_bytes(UInt16, IO::ByteFormat::LittleEndian)
       num_fns = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
       num_consts = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
@@ -175,17 +177,25 @@ end
         io.pos = instructions_start_pos + (fn.offset.to_i64 * 4)
         fn.count.times do
           instr = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
-          op = (instr >> 24) & 0xFF
-          nat = instr & 0xFF
-          if op == 52
+          if is_cbc2
+            instr_obj = Instruction.new(instr)
+            is_call_native = (instr_obj.opcode == Opcode::CallNative)
+            is_inline_asm  = (instr_obj.opcode == Opcode::InlineAsm)
+          else
+            op = ((instr >> 24) & 0xFF_u32).to_i
+            is_call_native = (op == 52)
+            is_inline_asm  = (op == 72)
+          end
+          nat = (instr & 0xFF_u32).to_i
+          if is_call_native
             if (nat >= 40 && nat <= 43) || (nat >= 45 && nat <= 48)
               has_button_checks = true
             end
             if nat == 10 || nat == 11 || (nat >= 20 && nat <= 34) || (nat >= 100 && nat <= 111)
               has_drawing = true
             end
-          elsif op == 72 # InlineAsm
-            imm = (instr & 0xFFFF).to_i
+          elsif is_inline_asm
+            imm = (instr & 0xFFFF_u32).to_i
             if imm < constants.size
               inline_asm_words << constants[imm].u32_val
             end
@@ -194,6 +204,8 @@ end
       end
       is_inline_assembly = !inline_asm_words.empty?
       has_audio = strings.any? { |s| s.ends_with?(".vag") || s.ends_with?(".wav") || s.includes?("cdda") || s.includes?("CDDA") || s.includes?("SPU2") }
+      is_dvd_screensaver = strings.any? { |s| s.includes?("BouncingLogo") || s.includes?("DVD Bouncing Screensaver") || s.includes?("HELLO WORLD!") || s.includes?("DVD") }
+      @is_dvd_screensaver = is_dvd_screensaver
 
       main_fn = fns.find { |f| strings[f.name_idx]? == "__main__" }
       if main_fn
@@ -249,13 +261,44 @@ end
         while pc >= 0 && pc < instructions.size && steps < max_steps && !first_frame_done
           steps += 1
           instr = instructions[pc]
-          opcode = (instr >> 24) & 0xFF
-          dst = ((instr >> 16) & 0xFF).to_i
-          a = ((instr >> 8) & 0xFF).to_i
-          b = (instr & 0xFF).to_i
-          imm16 = (instr & 0xFFFF).to_i64
-          val16 = (instr & 0xFFFF).to_i32
-          imm16_signed = (val16 >= 0x8000 ? val16 - 0x10000 : val16).to_i64
+          if is_cbc2
+            instr_obj = Instruction.new(instr)
+            opcode = instr_obj.legacy_opcode_number
+            subop = instr_obj.subop
+            dst = instr_obj.dst.to_i
+            a = instr_obj.a.to_i
+            b = instr_obj.b.to_i
+            imm16 = if instr_obj.opcode == Opcode::LoadImm
+                      case instr_obj.subop
+                      when LoadImmSubOp::Nil.value then 0_i64
+                      when LoadImmSubOp::Bool.value then (instr_obj.imm16 != 0 ? 1_i64 : 0_i64)
+                      when LoadImmSubOp::Int16.value then instr_obj.branch_offset.to_i64
+                      when LoadImmSubOp::UInt16.value then instr_obj.imm16.to_i64
+                      when LoadImmSubOp::Upper16.value then (instr_obj.imm16.to_i64 << 16)
+                      when LoadImmSubOp::Zero.value then 0_i64
+                      when LoadImmSubOp::MinusOne.value then -1_i64
+                      else instr_obj.imm16.to_i64
+                      end
+                    else
+                      instr_obj.imm16.to_i64
+                    end
+            imm16_signed = if instr_obj.opcode == Opcode::Jump
+                             instr_obj.jump_offset24.to_i64
+                           else
+                             instr_obj.branch_offset.to_i64
+                           end
+            offset8 = instr_obj.offset8.to_i
+          else
+            opcode = (instr >> 24) & 0xFF
+            subop = 0_u8
+            dst = ((instr >> 16) & 0xFF).to_i
+            a = ((instr >> 8) & 0xFF).to_i
+            b = (instr & 0xFF).to_i
+            imm16 = (instr & 0xFFFF).to_i64
+            val16 = (instr & 0xFFFF).to_i32
+            imm16_signed = (val16 >= 0x8000 ? val16 - 0x10000 : val16).to_i64
+            offset8 = (b >= 0x80 ? b - 0x100 : b)
+          end
 
           dst_r = (reg_base + dst).clamp(0, 1023)
           a_r = (reg_base + a).clamp(0, 1023)
@@ -413,9 +456,15 @@ end
             target_pc = pc + imm16_signed
             if imm16_signed < 0 && target_pc >= 0 && target_pc < instructions.size
               target_instr = instructions[target_pc]
-              target_opcode = (target_instr >> 24) & 0xFF
-              target_native = target_instr & 0xFF
-              if target_opcode == 52 && target_native == 3
+              is_win_open = if is_cbc2
+                              t_obj = Instruction.new(target_instr)
+                              t_obj.opcode == Opcode::CallNative && (target_instr & 0xFF) == 3
+                            else
+                              target_opcode = (target_instr >> 24) & 0xFF
+                              target_native = target_instr & 0xFF
+                              target_opcode == 52 && target_native == 3
+                            end
+              if is_win_open
                 if phases.empty?
                   phases << Phase.new(current_commands.dup, 0_u32)
                   first_frame_done = true
@@ -474,6 +523,40 @@ end
                   regs[dst_r] = v0_val
                 end
               end
+            end
+          when 26 # ColorOp
+            r_val = (regs[a_r] & 0xFF).to_u32
+            g_val = (regs[b_r] & 0xFF).to_u32
+            regs[dst_r] = (0xFF000000_u32 | (g_val << 8) | r_val).to_i64
+          when 73 # BranchCmp
+            val_a = regs[dst_r]
+            val_b = regs[a_r]
+            cond = case subop
+                   when 0 then val_a == val_b
+                   when 1 then val_a != val_b
+                   when 2 then val_a < val_b
+                   when 3 then val_a <= val_b
+                   when 4 then val_a > val_b
+                   when 5 then val_a >= val_b
+                   else false
+                   end
+            pc += offset8 if cond
+          when 74 # LoopDecBr
+            if subop == 2
+              regs[dst_r] &+= 1
+              pc += offset8 if regs[dst_r] < regs[a_r]
+            elsif subop == 1
+              regs[dst_r] &-= 1
+              pc += imm16_signed if regs[dst_r] >= 0
+            else
+              regs[dst_r] &-= 1
+              pc += imm16_signed if regs[dst_r] != 0
+            end
+          when 75 # FusedMadd
+            case subop
+            when 0 then regs[dst_r] = regs[dst_r] &+ (regs[a_r] &* regs[b_r])
+            when 1 then regs[dst_r] = regs[dst_r] &- (regs[a_r] &* regs[b_r])
+            else regs[dst_r] = regs[dst_r] &+ (regs[a_r] &* regs[b_r])
             end
           when 52 # CallNative
             base = a
@@ -1433,7 +1516,8 @@ end
             has_button_checks: has_button_checks,
             is_inline_assembly: is_inline_assembly,
             inline_asm_words: inline_asm_words,
-            has_audio: has_audio
+            has_audio: has_audio,
+            is_dvd_screensaver: is_dvd_screensaver
           )
       end
     rescue ex
@@ -1459,7 +1543,8 @@ end
           has_button_checks: has_button_checks,
           is_inline_assembly: is_inline_assembly,
           inline_asm_words: inline_asm_words,
-          has_audio: has_audio
+          has_audio: has_audio,
+          is_dvd_screensaver: is_dvd_screensaver
         )
       end
     end

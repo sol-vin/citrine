@@ -62,6 +62,7 @@ module Citrine
       @is_inline_assembly = profile.is_inline_assembly
       @inline_asm_words = profile.inline_asm_words
       @is_controller_tester = profile.has_button_checks
+      @is_dvd_screensaver = profile.is_dvd_screensaver
 
       # 1. Build .rodata Segment
       rodata = RodataSegmentBuilder.build(profile, input_schedule)
@@ -146,6 +147,7 @@ module Citrine
       @is_inline_assembly = profile.is_inline_assembly
       @inline_asm_words = profile.inline_asm_words
       @is_controller_tester = profile.has_button_checks
+      @is_dvd_screensaver = profile.is_dvd_screensaver
       {profile.phases, profile.boot_messages, profile.loop_start_phase, profile.is_animated}
     end
   end
