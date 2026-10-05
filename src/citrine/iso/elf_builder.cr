@@ -118,6 +118,13 @@ module Citrine
         symbols << SymbolEntry.new("Citrine_InlineAsm_Block", emitter.labels["Citrine_InlineAsm_Block"], (@inline_asm_words.size.to_u32 * 4) + 8, STT_FUNC, STB_GLOBAL, 1_u16)
       end
 
+      if emitter.labels.has_key?("rng_next_int")
+        symbols << SymbolEntry.new("rng_next_int", emitter.labels["rng_next_int"], 80_u32, STT_FUNC, STB_GLOBAL, 1_u16)
+      end
+      if emitter.labels.has_key?("emit_quad_s0")
+        symbols << SymbolEntry.new("emit_quad_s0", emitter.labels["emit_quad_s0"], 108_u32, STT_FUNC, STB_GLOBAL, 1_u16)
+      end
+
       ElfWriter.write(text_data, rodata.data, data_data, symbols, 0x00100000_u32, rodata_vaddr: RODATA_VADDR)
     end
 

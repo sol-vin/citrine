@@ -21,7 +21,7 @@ EXAMPLES = [
   {"07_primitives_2d_3d", "examples/07_primitives_2d_3d/main.cr", "example_07_primitives_2d_3d.png"},
   {"08_controller_tester", "examples/08_controller_tester/main.cr", "example_08_controller_tester.png"},
   {"09_concurrency_showcase", "examples/09_concurrency_showcase/main.cr", "example_09_concurrency_showcase.png"},
-  {"10_video_and_audio", "examples/10_video_and_audio/main.cr", "example_10_video_and_audio.png"},
+  {"10_cd_player", "examples/10_cd_player/main.cr", "example_10_cd_player.png"},
   {"11_macro_ecs_showcase", "examples/11_macro_ecs_showcase/main.cr", "example_11_macro_ecs_showcase.png"},
   {"12_immediate_ui", "examples/12_immediate_ui/main.cr", "example_12_immediate_ui.png"},
   {"13_physics_and_particles", "examples/13_physics_and_particles/main.cr", "example_13_physics_and_particles.png"},

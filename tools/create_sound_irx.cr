@@ -5,7 +5,7 @@
 # Configures SPU2 ADPCM loop flags: Block 0 = 0x06 (Start), Blocks 1..35434 = 0x02 (Repeat), Block 35435 = 0x03 (End+Repeat).
 
 orig_elf = File.read("scratch/TESTSPU.irx").to_slice
-vag_bytes = File.read("examples/10_video_and_audio/theme.vag").to_slice
+vag_bytes = File.read("examples/10_cd_player/theme.vag").to_slice
 
 puts "Original ELF size: #{orig_elf.size}"
 puts "VAG file size: #{vag_bytes.size}"

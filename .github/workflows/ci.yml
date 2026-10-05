@@ -180,7 +180,7 @@ jobs:
           ./bin/citrine compile examples/07_primitives_2d_3d/main.cr -o examples/07_primitives_2d_3d/game.cbc
           ./bin/citrine compile examples/08_controller_tester/main.cr -o examples/08_controller_tester/game.cbc
           ./bin/citrine compile examples/09_concurrency_showcase/main.cr -o examples/09_concurrency_showcase/game.cbc
-          ./bin/citrine compile examples/10_video_and_audio/main.cr -o examples/10_video_and_audio/game.cbc
+          ./bin/citrine compile examples/10_cd_player/main.cr -o examples/10_cd_player/game.cbc
           ./bin/citrine compile examples/11_macro_ecs_showcase/main.cr -o examples/11_macro_ecs_showcase/game.cbc
           ./bin/citrine compile examples/12_immediate_ui/main.cr -o examples/12_immediate_ui/game.cbc
           ./bin/citrine compile examples/13_physics_and_particles/main.cr -o examples/13_physics_and_particles/game.cbc

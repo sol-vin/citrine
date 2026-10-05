@@ -40,6 +40,11 @@ module Citrine
       property frame_digit_positions : Array(UInt32)
       property frame_text_scale : Int32
       property time_text_scale : Int32
+      property static_dvd_addr : UInt32
+      property static_dvd_qwc : UInt16
+      property font_quad_addr : UInt32
+      property font_quad_count : UInt16
+      property color_palette_addr : UInt32
 
       def initialize(
         @data = Bytes.empty,
@@ -72,7 +77,12 @@ module Citrine
         @frame_digit_offsets = [] of UInt32,
         @frame_digit_positions = [] of UInt32,
         @frame_text_scale = 1,
-        @time_text_scale = 1
+        @time_text_scale = 1,
+        @static_dvd_addr = 0_u32,
+        @static_dvd_qwc = 0_u16,
+        @font_quad_addr = 0_u32,
+        @font_quad_count = 0_u16,
+        @color_palette_addr = 0_u32
       )
       end
     end
@@ -82,6 +92,7 @@ module Citrine
     class RodataSegmentBuilder
       alias GifPacketBuilder = Citrine::GS::GifPacketBuilder
       alias Phase = Citrine::GS::Phase
+      alias DrawCommand = Citrine::GS::DrawCommand
 
       RODATA_VADDR = 0x00500000_u32
 
@@ -107,7 +118,52 @@ module Citrine
         out_mem.write(env_packet)
         curr_addr += env_packet.size.to_u32
 
-        # 2. Primary Phase Draw Packets
+        # 2. DVD Screensaver Static Packets & Font Quads
+        static_dvd_addr = 0_u32
+        static_dvd_qwc = 0_u16
+        font_quad_addr = 0_u32
+        font_quad_count = 0_u16
+        color_palette_addr = 0_u32
+
+        if @profile.is_dvd_screensaver
+          static_cmds = [
+            DrawCommand.new(DrawCommand::Type::Clear, color: 0xFF000000_u32),
+            DrawCommand.new(DrawCommand::Type::Rect, 0, 0, 640, 6, color: 0xFF808080_u32),
+            DrawCommand.new(DrawCommand::Type::Rect, 0, 442, 640, 6, color: 0xFF808080_u32),
+            DrawCommand.new(DrawCommand::Type::Rect, 0, 0, 6, 448, color: 0xFF808080_u32),
+            DrawCommand.new(DrawCommand::Type::Rect, 634, 0, 6, 448, color: 0xFF808080_u32),
+            DrawCommand.new(DrawCommand::Type::Text, 60, 420, 14, 0, color: 0xFF00FFFF_u32, text: "CROSS: +1 | R1: +10 | TRIANGLE: RESET | STRESS TEST")
+          ]
+          static_dvd_packet = GifPacketBuilder.build_draw_packet(static_cmds)
+          static_dvd_qwc = (static_dvd_packet.size // 16).to_u16
+          static_dvd_addr = curr_addr
+          out_mem.write(static_dvd_packet)
+          curr_addr += static_dvd_packet.size.to_u32
+
+          raw_fq = GifPacketBuilder.extract_text_glyph_quads("HELLO WORLD!", 2)
+          fq_pad = (16 - (raw_fq.size % 16)) % 16
+          font_quad_count = (raw_fq.size // 4).to_u16
+          font_quad_addr = curr_addr
+          out_mem.write(raw_fq)
+          fq_pad.times { out_mem.write_byte(0_u8) }
+          curr_addr += (raw_fq.size + fq_pad).to_u32
+
+          c_mem = IO::Memory.new(64)
+          c_mem.write_bytes(0x3F800000_800000FF_u64, IO::ByteFormat::LittleEndian) # 0: Red
+          c_mem.write_bytes(0x3F800000_8000FF00_u64, IO::ByteFormat::LittleEndian) # 1: Green
+          c_mem.write_bytes(0x3F800000_80FF0000_u64, IO::ByteFormat::LittleEndian) # 2: Blue
+          c_mem.write_bytes(0x3F800000_8000FFFF_u64, IO::ByteFormat::LittleEndian) # 3: Yellow
+          c_mem.write_bytes(0x3F800000_80FFFF00_u64, IO::ByteFormat::LittleEndian) # 4: Cyan
+          c_mem.write_bytes(0x3F800000_80FF00FF_u64, IO::ByteFormat::LittleEndian) # 5: Magenta
+          c_mem.write_bytes(0x3F800000_80FFFFFF_u64, IO::ByteFormat::LittleEndian) # 6: White
+          c_mem.write_bytes(0x3F800000_80000000_u64, IO::ByteFormat::LittleEndian) # 7: Black
+          color_palette_slice = c_mem.to_slice
+          color_palette_addr = curr_addr
+          out_mem.write(color_palette_slice)
+          curr_addr += color_palette_slice.size.to_u32
+        end
+
+        # 3. Primary Phase Draw Packets
         phase_addrs = [] of UInt32
         phase_qwcs = [] of UInt16
 
@@ -420,7 +476,12 @@ module Citrine
           frame_digit_offsets: frame_digit_offsets,
           frame_digit_positions: frame_digit_positions,
           frame_text_scale: frame_text_scale,
-          time_text_scale: time_text_scale
+          time_text_scale: time_text_scale,
+          static_dvd_addr: static_dvd_addr,
+          static_dvd_qwc: static_dvd_qwc,
+          font_quad_addr: font_quad_addr,
+          font_quad_count: font_quad_count,
+          color_palette_addr: color_palette_addr
         )
       end
     end

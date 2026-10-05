@@ -1,4 +1,4 @@
-bytes = File.read("examples/10_video_and_audio/game.iso").to_slice
+bytes = File.read("examples/10_cd_player/game.iso").to_slice
 # Extract CITRINE.ELF (sector 22, size 716516)
 elf = bytes[22 * 2048, 716516]
 # In elf_writer:

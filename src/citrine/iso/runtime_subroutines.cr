@@ -555,6 +555,64 @@ module Citrine
         emitter.jr(RA)
         emitter.nop
       end
+
+      # Subroutine rng_next_int:
+      # a0 = min, a1 = max, returns v0
+      def self.emit_rng_next_int(emitter : MipsEmitter)
+        emitter.label("rng_next_int")
+        emitter.lui(T8, 0x7000)
+        emitter.lw(T0, 0x98, T8)      # rng_seed at 0x70000098
+        emitter.lui(T1, 0x41C6)
+        emitter.ori(T1, T1, 0x4E6D)  # 1103515245
+        emitter.multu(T0, T1)
+        emitter.mflo(T0)
+        emitter.addiu(T0, T0, 12345)
+        emitter.lui(T2, 0x7FFF)
+        emitter.ori(T2, T2, 0xFFFF)  # 0x7FFFFFFF
+        emitter.and_(T0, T0, T2)
+        emitter.sw(T0, 0x98, T8)      # store new seed
+        emitter.subu(T3, A1, A0)     # max - min
+        emitter.addiu(T3, T3, 1)     # range = max - min + 1
+        emitter.divu(T0, T3)
+        emitter.mfhi(V0)             # seed % range
+        emitter.addu(V0, V0, A0)     # min + (seed % range)
+        emitter.jr(RA)
+        emitter.nop
+      end
+
+      # Subroutine emit_quad_s0:
+      # s0 = write pointer in RAM (advanced by 64 bytes)
+      # a0 = x1, a1 = y1, a2 = x2, a3 = y2, t4 = rgbaq (lower 64 bits)
+      def self.emit_quad_s0(emitter : MipsEmitter)
+        emitter.label("emit_quad_s0")
+        emitter.ori(T6, ZERO, 6)
+        emitter.sd(T6, 0, S0)
+        emitter.sd(ZERO, 8, S0)
+
+        emitter.sd(T4, 16, S0)
+        emitter.ori(T6, ZERO, 1)
+        emitter.sd(T6, 24, S0)
+
+        emitter.sll(T6, A0, 4)
+        emitter.andi(T6, T6, 0xFFFF)
+        emitter.sll(T7, A1, 20)
+        emitter.or_(T6, T6, T7)
+        emitter.sd(T6, 32, S0)
+        emitter.ori(T7, ZERO, 0x0d)
+        emitter.sd(T7, 40, S0)
+
+        emitter.sll(T6, A2, 4)
+        emitter.andi(T6, T6, 0xFFFF)
+        emitter.sll(T7, A3, 20)
+        emitter.or_(T6, T6, T7)
+        emitter.sd(T6, 48, S0)
+        emitter.ori(T7, ZERO, 5)
+        emitter.sd(T7, 56, S0)
+
+        emitter.addiu(S0, S0, 64)
+        emitter.jr(RA)
+        emitter.nop
+      end
     end
   end
 end

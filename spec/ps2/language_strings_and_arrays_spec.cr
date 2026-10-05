@@ -150,7 +150,7 @@ describe "Citrine PS2 Language Parity: Strings, Arrays & Multi-Frame Transport" 
 
   it "verifies code-first album metadata loading, constant folding, and string upcase on PS2 hardware" do
     tc = Citrine::Spec::Ps2TestCase.new("lang_album_metadata_test")
-    tc.target("examples/10_video_and_audio/test_album_meta.cr")
+    tc.target("examples/10_cd_player/test_album_meta.cr")
     tc.source(<<-CR
       TRACK_TITLES = Citrine.album_track_titles
       TRACK_DURATIONS = Citrine.album_track_durations

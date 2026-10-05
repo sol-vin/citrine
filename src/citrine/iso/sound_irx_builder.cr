@@ -22,29 +22,9 @@ module Citrine
           # TestThread (0x4dc): jr $ra, nop
           out_bytes[text_off + 0x4dc, 4].copy_from(Bytes[0x08, 0x00, 0xE0, 0x03])
           out_bytes[text_off + 0x4e0, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
-          # Disable thid1 creation: sw zero, 56(sp); nop; nop
-          out_bytes[text_off + 0x0d94, 4].copy_from(Bytes[0x38, 0x00, 0xA0, 0xAF])
-          out_bytes[text_off + 0x0d98, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
-          out_bytes[text_off + 0x0d9c, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
-          # Zero relocation at 0x0d94 in .rel.text
-          orig_shoff = IO::ByteFormat::LittleEndian.decode(UInt32, orig_elf[0x20, 4])
-          e_shentsize = 40_u32
-          13.times do |i|
-            hdr = orig_shoff + i.to_u32 * e_shentsize
-            sh_type = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[hdr + 0x04, 4])
-            sh_info = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[hdr + 0x1C, 4])
-            if sh_type == 9_u32 && sh_info == 2_u32
-              rel_off = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[hdr + 0x10, 4])
-              rel_sz = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[hdr + 0x14, 4])
-              (rel_sz // 8).times do |ri|
-                r_entry = rel_off + ri * 8
-                r_tgt = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[r_entry, 4])
-                if r_tgt == 0x0d94_u32
-                  IO::ByteFormat::LittleEndian.encode(0_u32, out_bytes[r_entry + 4, 4])
-                end
-              end
-            end
-          end
+          # Skip thid1 (TestThread) start: at 0x0e90, branch to 0x0ea8 (b 0x0ea8, nop)
+          out_bytes[text_off + 0x0e90, 4].copy_from(Bytes[0x05, 0x00, 0x00, 0x10])
+          out_bytes[text_off + 0x0e94, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
           out_bytes
         }
 
@@ -156,6 +136,9 @@ module Citrine
         out_bytes[text_off + 0x0d94, 4].copy_from(Bytes[0x38, 0x00, 0xA0, 0xAF])
         out_bytes[text_off + 0x0d98, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
         out_bytes[text_off + 0x0d9c, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
+        # Skip thid1 start: at 0x0e90, branch to 0x0ea8 (b 0x0ea8, nop)
+        out_bytes[text_off + 0x0e90, 4].copy_from(Bytes[0x05, 0x00, 0x00, 0x10])
+        out_bytes[text_off + 0x0e94, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
 
         # Patch PlaySound: point wavBuffer to 0x1900
         out_bytes[text_off + 0x194, 4].copy_from(Bytes[0x00, 0x19, 0x42, 0x24]) # addiu v0, v0, 0x1900

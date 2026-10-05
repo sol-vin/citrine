@@ -1,4 +1,4 @@
-bytes = File.read("examples/10_video_and_audio/game.iso").to_slice
+bytes = File.read("examples/10_cd_player/game.iso").to_slice
 # Extract S.IRX (sector 376, size 26943)
 s_irx = bytes[376 * 2048, 26943]
 # Check .text+0x260 (offset 0x90 + 0x260 = 0x2F0)

@@ -1,4 +1,4 @@
-bytes = File.read("examples/10_video_and_audio/theme.vag").to_slice
+bytes = File.read("examples/10_cd_player/theme.vag").to_slice
 puts "Total size: #{bytes.size}"
 
 (1..4).each do |b|

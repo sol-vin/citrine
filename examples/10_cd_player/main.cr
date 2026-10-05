@@ -1,6 +1,6 @@
 require "citrine"
 
-# 10 Video & Audio Showcase: Night Tempo - Moonrise CD-DA Album Player
+# 10 CD Player: Night Tempo - Moonrise CD-DA Album Player
 # Demonstrates Red Book CD-DA multi-track optical playback on PlayStation 2.
 # All 13 tracks from "Moonrise" (Track 02..14 on mixed-mode disc).
 #

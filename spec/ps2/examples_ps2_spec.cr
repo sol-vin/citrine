@@ -109,9 +109,9 @@ describe "Citrine PS2 Examples Runner Suite" do
     result.should_preserve_spram
   end
 
-  it "boots and verifies Example 10: Video and Audio Showcase" do
-    tc = Citrine::Spec::Ps2TestCase.new("10_video_and_audio")
-    tc.target("examples/10_video_and_audio/main.cr")
+  it "boots and verifies Example 10: CD Player" do
+    tc = Citrine::Spec::Ps2TestCase.new("10_cd_player")
+    tc.target("examples/10_cd_player/main.cr")
     bytes, sm = tc.compile
     bytes.size.should be > 18
     tc.max_registers.should be <= 1024

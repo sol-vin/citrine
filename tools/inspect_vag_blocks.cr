@@ -1,4 +1,4 @@
-bytes = File.read("examples/10_video_and_audio/theme.vag").to_slice
+bytes = File.read("examples/10_cd_player/theme.vag").to_slice
 puts "If data starts at 44 (0x2c):"
 5.times do |i|
   blk = bytes[44 + i * 16, 16]

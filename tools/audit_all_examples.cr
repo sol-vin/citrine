@@ -10,7 +10,7 @@ examples = [
   "examples/07_primitives_2d_3d/main.cr",
   "examples/08_controller_tester/main.cr",
   "examples/09_concurrency_showcase/main.cr",
-  "examples/10_video_and_audio/main.cr",
+  "examples/10_cd_player/main.cr",
   "examples/11_macro_ecs_showcase/main.cr",
   "examples/12_immediate_ui/main.cr",
   "examples/13_physics_and_particles/main.cr",

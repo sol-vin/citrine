@@ -204,7 +204,7 @@ end
       end
       is_inline_assembly = !inline_asm_words.empty?
       has_audio = strings.any? { |s| s.ends_with?(".vag") || s.ends_with?(".wav") || s.includes?("cdda") || s.includes?("CDDA") || s.includes?("SPU2") }
-      is_dvd_screensaver = strings.any? { |s| s.includes?("BouncingLogo") || s.includes?("DVD Bouncing Screensaver") || s.includes?("HELLO WORLD!") || s.includes?("DVD") }
+      is_dvd_screensaver = strings.any? { |s| s.includes?("BouncingLogo") || s.includes?("DVD Bouncing Screensaver") }
       @is_dvd_screensaver = is_dvd_screensaver
 
       main_fn = fns.find { |f| strings[f.name_idx]? == "__main__" }
@@ -632,6 +632,9 @@ end
                     current_loop_message = nil
                     current_commands = [] of DrawCommand
                     simulated_button_press = false
+                    if is_dvd_screensaver
+                      first_frame_done = true
+                    end
                   else
                     # Frame 1: check if scene is moving autonomously (animation!)
                     animation_checked = true

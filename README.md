@@ -190,7 +190,7 @@ Check the `examples/` directory:
 - [`07_primitives_2d_3d`](examples/07_primitives_2d_3d/main.cr): Combined 2D rasterization and 3D wireframe rendering.
 - [`08_controller_tester`](examples/08_controller_tester/main.cr): Full DualShock 2 hardware pad diagnostic suite (pressure buttons, analog sticks, vibration motors).
 - [`09_concurrency_showcase`](examples/09_concurrency_showcase/main.cr): CSP channels, wait groups, and fiber scheduling.
-- [`10_video_and_audio`](examples/10_video_and_audio/main.cr): Fluorite video playback and SPU2 audio effects.
+- [`10_cd_player`](examples/10_cd_player/main.cr): Night Tempo - Moonrise CD-DA multi-track optical playback and SPU2 audio.
 - [`11_macro_ecs_showcase`](examples/11_macro_ecs_showcase/main.cr): High-performance macro-driven Entity Component System.
 - [`12_immediate_ui`](examples/12_immediate_ui/main.cr): Immediate-mode GUI controls, sliders, and button widgets.
 - [`13_physics_and_particles`](examples/13_physics_and_particles/main.cr): Particle systems and 2D physics integration.

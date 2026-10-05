@@ -1,4 +1,4 @@
-bytes = File.read("examples/10_video_and_audio/theme.vag").to_slice
+bytes = File.read("examples/10_cd_player/theme.vag").to_slice
 puts "Magic: #{String.new(bytes[0, 4])}"
 puts "Version: #{IO::ByteFormat::BigEndian.decode(UInt32, bytes[4, 4])}"
 puts "Data size: #{IO::ByteFormat::BigEndian.decode(UInt32, bytes[12, 4])}"

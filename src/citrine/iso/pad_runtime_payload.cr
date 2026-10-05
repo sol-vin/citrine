@@ -26,8 +26,6 @@ module Citrine
         decoded[0x3c, 4].copy_from(Bytes[0x21, 0x38, 0x00, 0x00])
         # Patch 0x345c: move a2, a3 (passes cmd to SIF packet [a0 + 0xc])
         decoded[0x345c, 4].copy_from(Bytes[0x21, 0x30, 0xe0, 0x00])
-        # Patch cdrom0:\S.IRX;1 back to rom0:TESTSPU
-        decoded[0x3898, 16].copy_from("rom0:TESTSPU\0\0\0\0".to_slice)
         @@cached_bytes = decoded
       end
     end
