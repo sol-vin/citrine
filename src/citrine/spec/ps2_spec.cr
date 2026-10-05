@@ -227,8 +227,12 @@ module Citrine
           snap_path = out_p
           target_frame = @screenshot_frame.not_nil!
           spawn do
-            delay = 4.0 + (target_frame.to_f / 60.0)
-            sleep delay.seconds
+            start_t = Time.instant
+            while (Time.instant - start_t) < 9.seconds
+              break if bridge.log_history.any? { |l| l.includes?("PS2 EE Engine Initialized") }
+              sleep 0.1.seconds
+            end
+            sleep (target_frame.to_f / 60.0).seconds
             bridge.capture_screenshot(out_p)
             bridge.copy_to_artifacts(out_p, "screen.png") rescue nil
           end

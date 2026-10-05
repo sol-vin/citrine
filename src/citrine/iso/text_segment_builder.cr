@@ -283,6 +283,7 @@ module Citrine
             # S6 = uncached GIF packet base (0x20000000 | T7)
             emitter.lui(S6, 0x2000)
             emitter.or_(S6, T7, S6)
+            emitter.ori(A3, ZERO, @rodata.time_text_scale == 2 ? 1 : 0)
 
             # Digit 0: Minute tens
             emitter.move(A0, S2)
@@ -349,76 +350,107 @@ module Citrine
             emitter.mflo(S4)
             emitter.mfhi(S5)
 
-            # Blank leading zeroes:
-            # S1: if S1 == 0 -> S1 = 10 (blank)
-            emitter.bnez(S1, "fr_d1_keep")
+            # Left-aligned digit assignment:
+            # Check T5 < 10 (1 digit)
+            emitter.ori(T1, ZERO, 10)
+            emitter.sltu(T2, T5, T1)
+            emitter.bnez(T2, "fr_len_1")
             emitter.nop
-            emitter.ori(S1, ZERO, 10)
 
-            # S2: if S1 was blank and S2 == 0 -> S2 = 10
-            emitter.bnez(S2, "fr_d2_keep")
+            # Check T5 < 100 (2 digits)
+            emitter.ori(T1, ZERO, 100)
+            emitter.sltu(T2, T5, T1)
+            emitter.bnez(T2, "fr_len_2")
             emitter.nop
+
+            # Check T5 < 1000 (3 digits)
+            emitter.li(T1, 1000)
+            emitter.sltu(T2, T5, T1)
+            emitter.bnez(T2, "fr_len_3")
+            emitter.nop
+
+            # Check T5 < 10000 (4 digits)
+            emitter.li(T1, 10000)
+            emitter.sltu(T2, T5, T1)
+            emitter.bnez(T2, "fr_len_4")
+            emitter.nop
+
+            # 5 digits: S1..S5 remain as D0..D4
+            emitter.jump("fr_digits_ready")
+            emitter.nop
+
+            # 1 digit: Slot 0 = S5 (1s), Slots 1..4 = 10 (blank)
+            emitter.label("fr_len_1")
+            emitter.move(S1, S5)
             emitter.ori(S2, ZERO, 10)
-
-            # S3: if S2 was blank and S3 == 0 -> S3 = 10
-            emitter.bnez(S3, "fr_d3_keep")
-            emitter.nop
             emitter.ori(S3, ZERO, 10)
-
-            # S4: if S3 was blank and S4 == 0 -> S4 = 10
-            emitter.bnez(S4, "fr_d4_keep")
-            emitter.nop
             emitter.ori(S4, ZERO, 10)
-
+            emitter.ori(S5, ZERO, 10)
             emitter.jump("fr_digits_ready")
             emitter.nop
 
-            emitter.label("fr_d1_keep")
+            # 2 digits: Slot 0 = S4 (10s), Slot 1 = S5 (1s), Slots 2..4 = 10 (blank)
+            emitter.label("fr_len_2")
+            emitter.move(S1, S4)
+            emitter.move(S2, S5)
+            emitter.ori(S3, ZERO, 10)
+            emitter.ori(S4, ZERO, 10)
+            emitter.ori(S5, ZERO, 10)
             emitter.jump("fr_digits_ready")
             emitter.nop
 
-            emitter.label("fr_d2_keep")
+            # 3 digits: Slot 0 = S3 (100s), Slot 1 = S4 (10s), Slot 2 = S5 (1s), Slots 3..4 = 10 (blank)
+            emitter.label("fr_len_3")
+            emitter.move(S1, S3)
+            emitter.move(S2, S4)
+            emitter.move(S3, S5)
+            emitter.ori(S4, ZERO, 10)
+            emitter.ori(S5, ZERO, 10)
             emitter.jump("fr_digits_ready")
             emitter.nop
 
-            emitter.label("fr_d3_keep")
-            emitter.jump("fr_digits_ready")
-            emitter.nop
-
-            emitter.label("fr_d4_keep")
-            # S4 is kept
+            # 4 digits: Slot 0 = S2 (1000s), Slot 1 = S3 (100s), Slot 2 = S4 (10s), Slot 3 = S5 (1s), Slot 4 = 10 (blank)
+            emitter.label("fr_len_4")
+            emitter.move(S1, S2)
+            emitter.move(S2, S3)
+            emitter.move(S3, S4)
+            emitter.move(S4, S5)
+            emitter.ori(S5, ZERO, 10)
 
             emitter.label("fr_digits_ready")
 
-            # Digit 0: 10,000s
+            # Pass scale_shift in A3: 1 for scale=2, 0 for scale=1
+            emitter.ori(A3, ZERO, @rodata.frame_text_scale == 2 ? 1 : 0)
+
+            # Digit 0: Leftmost active slot
             emitter.move(A0, S1)
             emitter.li(A1, @rodata.frame_digit_positions[0])
             emitter.li(T1, @rodata.frame_digit_offsets[0])
             emitter.addu(A2, S6, T1)
             emitter.call("update_digit_quads")
 
-            # Digit 1: 1,000s
+            # Digit 1
             emitter.move(A0, S2)
             emitter.li(A1, @rodata.frame_digit_positions[1])
             emitter.li(T1, @rodata.frame_digit_offsets[1])
             emitter.addu(A2, S6, T1)
             emitter.call("update_digit_quads")
 
-            # Digit 2: 100s
+            # Digit 2
             emitter.move(A0, S3)
             emitter.li(A1, @rodata.frame_digit_positions[2])
             emitter.li(T1, @rodata.frame_digit_offsets[2])
             emitter.addu(A2, S6, T1)
             emitter.call("update_digit_quads")
 
-            # Digit 3: 10s
+            # Digit 3
             emitter.move(A0, S4)
             emitter.li(A1, @rodata.frame_digit_positions[3])
             emitter.li(T1, @rodata.frame_digit_offsets[3])
             emitter.addu(A2, S6, T1)
             emitter.call("update_digit_quads")
 
-            # Digit 4: 1s
+            # Digit 4
             emitter.move(A0, S5)
             emitter.li(A1, @rodata.frame_digit_positions[4])
             emitter.li(T1, @rodata.frame_digit_offsets[4])

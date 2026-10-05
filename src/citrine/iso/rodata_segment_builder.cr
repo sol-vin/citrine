@@ -38,6 +38,8 @@ module Citrine
       property frame_text_present : Bool
       property frame_digit_offsets : Array(UInt32)
       property frame_digit_positions : Array(UInt32)
+      property frame_text_scale : Int32
+      property time_text_scale : Int32
 
       def initialize(
         @data = Bytes.empty,
@@ -68,7 +70,9 @@ module Citrine
         @scrub_y2 = 214_u16,
         @frame_text_present = false,
         @frame_digit_offsets = [] of UInt32,
-        @frame_digit_positions = [] of UInt32
+        @frame_digit_positions = [] of UInt32,
+        @frame_text_scale = 1,
+        @time_text_scale = 1
       )
       end
     end
@@ -216,6 +220,8 @@ module Citrine
         frame_text_present = false
         frame_digit_offsets = [] of UInt32
         frame_digit_positions = [] of UInt32
+        frame_text_scale = 1
+        time_text_scale = 1
 
         scrubber_present = false
         scrub_quad_offset = 0_u32
@@ -259,6 +265,7 @@ module Citrine
               scale = cmd.x2 >= 20 ? 2 : 1
               if md = cmd.text.match(/Frame:\s*(\d{5})/i)
                 frame_text_present = true
+                frame_text_scale = scale
                 frame_pkt_offset = 16_u32 + cmd_body_start
                 char_w = 5 * scale
                 spacing = 2 * scale
@@ -304,6 +311,7 @@ module Citrine
                 end
               elsif md = cmd.text.match(/(\d\d):(\d\d)/)
                 time_text_present = true
+                time_text_scale = scale
                 time_pkt_offset = 16_u32 + cmd_body_start
                 char_w = 5 * scale
                 spacing = 2 * scale
@@ -405,7 +413,9 @@ module Citrine
           scrub_y2: scrub_y2,
           frame_text_present: frame_text_present,
           frame_digit_offsets: frame_digit_offsets,
-          frame_digit_positions: frame_digit_positions
+          frame_digit_positions: frame_digit_positions,
+          frame_text_scale: frame_text_scale,
+          time_text_scale: time_text_scale
         )
       end
     end

@@ -32,7 +32,7 @@ describe "Citrine PS2 Example 01: Hello World & Live Telemetry" do
     tc = Citrine::Spec::Ps2TestCase.new("01_hello_world_hw_spec")
     tc.target("examples/01_hello_world/main.cr")
 
-    result = tc.boot_pcsx2(timeout: 5.0.seconds)
+    result = tc.boot_pcsx2(timeout: 10.0.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE] PS2 EE Engine Initialized")
@@ -46,6 +46,7 @@ describe "Citrine PS2 Example 01: Hello World & Live Telemetry" do
     profile = Citrine::ISO::PhaseExtractor.extract(bytes)
     rodata = Citrine::ISO::RodataSegmentBuilder.build(profile)
     rodata.frame_text_present.should be_true
+    rodata.frame_text_scale.should eq(2)
     rodata.frame_digit_offsets.size.should eq(5)
     rodata.digit_table_addr.should be > 0_u32
   end

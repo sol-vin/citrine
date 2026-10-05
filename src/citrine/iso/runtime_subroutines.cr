@@ -527,6 +527,8 @@ module Citrine
         emitter.lw(T2, 4, T4) # XYZ2_delta
         emitter.beqz(T1, "udq_empty")
         emitter.nop
+        emitter.sllv(T1, T1, A3) # Scale delta: << 1 for scale=2, << 0 for scale=1
+        emitter.sllv(T2, T2, A3)
         emitter.addu(T1, T1, A1) # XYZ3 = base_pos + delta
         emitter.addu(T2, T2, A1) # XYZ2 = base_pos + delta
         emitter.sw(T1, 32, A2)  # Store XYZ3 at quad + 32

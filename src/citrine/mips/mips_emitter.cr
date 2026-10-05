@@ -69,6 +69,10 @@ module Citrine
         emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x27_u32)
       end
 
+      def sllv(rd : Int32, rt : Int32, rs : Int32)
+        emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x04_u32)
+      end
+
       def srlv(rd : Int32, rt : Int32, rs : Int32)
         emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x06_u32)
       end
