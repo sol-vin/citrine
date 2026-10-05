@@ -364,47 +364,41 @@ module Citrine
           when "Citrine_PlaySound", "Citrine_PlayCDDA"
             emitter.addiu(SP, SP, -32)
             emitter.sw(RA, 28, SP)
+            emitter.li(A0, 1) # cmd 1 = Play
             emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
             emitter.jalr(T9)
             emitter.nop
+            emitter.ori(V0, ZERO, 1) # Return success (1)
             emitter.lw(RA, 28, SP)
-            emitter.addiu(SP, SP, 32)
-            emitter.ori(V0, ZERO, 1)
             emitter.jr(RA)
-            emitter.nop
+            emitter.addiu(SP, SP, 32)
           when "Citrine_StopSound", "Citrine_StopCDDA"
             emitter.addiu(SP, SP, -32)
             emitter.sw(RA, 28, SP)
             emitter.li(T9, PadRuntimePayload::SOUND_STOP_ENTRY)
             emitter.jalr(T9)
             emitter.nop
+            emitter.ori(V0, ZERO, 0) # Return stopped (0)
             emitter.lw(RA, 28, SP)
-            emitter.addiu(SP, SP, 32)
-            emitter.ori(V0, ZERO, 0)
             emitter.jr(RA)
-            emitter.nop
+            emitter.addiu(SP, SP, 32)
           when "Citrine_GetCDDAStatus"
-            emitter.ori(V0, ZERO, 1)
+            emitter.ori(V0, ZERO, 1) # Return playing / ready (1)
             emitter.jr(RA)
             emitter.nop
           when "Citrine_SetVolume"
             emitter.addiu(SP, SP, -32)
             emitter.sw(RA, 28, SP)
             emitter.sw(A0, 24, SP)
+            emitter.andi(A0, A0, 0xFF)
+            emitter.ori(A0, A0, 0x1000) # cmd 0x1000 | vol
             emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
-            emitter.ori(A0, A0, 0x1000)
             emitter.jalr(T9)
             emitter.nop
-            emitter.lw(A0, 24, SP)
-            emitter.lui(T0, 0xBF90)
-            emitter.sll(T1, A0, 7) # scale 0..255 to 0..32640 (0x7F80)
-            emitter.sh(T1, 0x0748, T0)
-            emitter.sh(T1, 0x074A, T0)
-            emitter.move(V0, A0)
+            emitter.lw(V0, 24, SP) # Return set volume (A0)
             emitter.lw(RA, 28, SP)
-            emitter.addiu(SP, SP, 32)
             emitter.jr(RA)
-            emitter.nop
+            emitter.addiu(SP, SP, 32)
 
           else
             emitter.addiu(SP, SP, -32)
@@ -424,6 +418,50 @@ module Citrine
         words.each do |w|
           emitter.emit(w)
         end
+        emitter.jr(RA)
+        emitter.nop
+      end
+
+      # Dynamically updates 13 font quads for a single digit slot in uncached GIF packet memory
+      def self.emit_digit_quad_updater(emitter : MipsEmitter, digit_table_addr : UInt32)
+        return if digit_table_addr == 0_u32
+        emitter.label("update_digit_quads")
+        # a0 = digit (0..9)
+        # a1 = base_pos ((y << 4 << 16) | (x << 4))
+        # a2 = dst_quad_ptr (uncached address of first quad)
+        # src_ptr = digit_table_addr + digit * 104
+        emitter.sll(T1, A0, 6) # d * 64
+        emitter.sll(T2, A0, 5) # d * 32
+        emitter.sll(T3, A0, 3) # d * 8
+        emitter.addu(T1, T1, T2)
+        emitter.addu(T1, T1, T3) # T1 = d * 104
+        emitter.li(T4, digit_table_addr)
+        emitter.addu(T4, T4, T1) # T4 = src_ptr in digit table
+        emitter.ori(T5, ZERO, 13) # 13 quads per digit slot
+
+        emitter.label("udq_loop")
+        emitter.lw(T1, 0, T4) # XYZ3_delta
+        emitter.lw(T2, 4, T4) # XYZ2_delta
+        emitter.beqz(T1, "udq_empty")
+        emitter.nop
+        emitter.addu(T1, T1, A1) # XYZ3 = base_pos + delta
+        emitter.addu(T2, T2, A1) # XYZ2 = base_pos + delta
+        emitter.sw(T1, 32, A2)  # Store XYZ3 at quad + 32
+        emitter.sw(T2, 48, A2)  # Store XYZ2 at quad + 48
+        emitter.jump("udq_next")
+        emitter.nop
+
+        emitter.label("udq_empty")
+        emitter.sw(ZERO, 32, A2) # Empty quad: XYZ3 = 0
+        emitter.sw(ZERO, 48, A2) # Empty quad: XYZ2 = 0
+
+        emitter.label("udq_next")
+        emitter.addiu(T4, T4, 8)  # Next entry in digit table (8 bytes)
+        emitter.addiu(A2, A2, 64) # Next quad in GIF packet (64 bytes)
+        emitter.addiu(T5, T5, -1)
+        emitter.bnez(T5, "udq_loop")
+        emitter.nop
+
         emitter.jr(RA)
         emitter.nop
       end

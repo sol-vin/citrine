@@ -477,7 +477,8 @@ module Citrine
 
       # Copies a captured screenshot to the Antigravity conversation artifact directory for inline viewing.
       def copy_to_artifacts(src_png : String, artifact_name : String = "screen.png") : String?
-        artifact_dir = "C:/Users/Ian/.gemini/antigravity/brain/800ae8f6-80d0-4428-93ad-3dc0043d07e3"
+        artifact_dir = ENV["ANTIGRAVITY_ARTIFACT_DIR"]? ||
+                       "C:/Users/Ian/.gemini/antigravity/brain/6d2cfb99-03d5-4b98-a12a-f5c4df90f68d"
         if Dir.exists?(artifact_dir) && File.exists?(src_png)
           dest = File.join(artifact_dir, artifact_name)
           FileUtils.cp(src_png, dest) rescue nil

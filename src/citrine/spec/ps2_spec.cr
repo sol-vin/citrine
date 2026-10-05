@@ -249,9 +249,6 @@ module Citrine
 
         target_image = temp_iso
         temp_cue = temp_iso.sub(/\.iso$/i, ".cue")
-        if File.exists?(temp_cue) && !audio_tracks.empty?
-          target_image = temp_cue
-        end
 
         nogui_mode = @screenshot_frame.nil?
         begin

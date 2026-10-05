@@ -26,6 +26,25 @@ module Citrine
           out_bytes[text_off + 0x0d94, 4].copy_from(Bytes[0x38, 0x00, 0xA0, 0xAF])
           out_bytes[text_off + 0x0d98, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
           out_bytes[text_off + 0x0d9c, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
+          # Zero relocation at 0x0d94 in .rel.text
+          orig_shoff = IO::ByteFormat::LittleEndian.decode(UInt32, orig_elf[0x20, 4])
+          e_shentsize = 40_u32
+          13.times do |i|
+            hdr = orig_shoff + i.to_u32 * e_shentsize
+            sh_type = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[hdr + 0x04, 4])
+            sh_info = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[hdr + 0x1C, 4])
+            if sh_type == 9_u32 && sh_info == 2_u32
+              rel_off = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[hdr + 0x10, 4])
+              rel_sz = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[hdr + 0x14, 4])
+              (rel_sz // 8).times do |ri|
+                r_entry = rel_off + ri * 8
+                r_tgt = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[r_entry, 4])
+                if r_tgt == 0x0d94_u32
+                  IO::ByteFormat::LittleEndian.encode(0_u32, out_bytes[r_entry + 4, 4])
+                end
+              end
+            end
+          end
           out_bytes
         }
 
@@ -106,22 +125,27 @@ module Citrine
           sh_offset = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[hdr + 0x10, 4])
           sh_size = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[hdr + 0x14, 4])
           sh_type = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[hdr + 0x04, 4])
+          sh_info = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[hdr + 0x1C, 4])
           if sh_offset >= orig_data_end
             sh_offset += shift
             IO::ByteFormat::LittleEndian.encode(sh_offset, out_bytes[hdr + 0x10, 4])
           end
-          if sh_type == 9_u32 # SHT_REL
+          if sh_type == 9_u32 && sh_info == 2_u32 # SHT_REL targeting .text (section 2)
             rel_text_sh_off = sh_offset
             rel_text_size = sh_size
           end
         end
 
-        # Zero out old relocations in .rel.text that fall in our patched dispatcher range (0x4dc..0x0c50)
+        # Zero out old relocations in .rel.text that fall in our patched dispatcher range (0x4dc..0x0c54),
+        # auto-play / hooks (0x0c64..0x0c78, 0x0c90..0x0cc0), and startup hook (0x0d90..0x0da0)
         if rel_text_sh_off > 0
           (rel_text_size // 8).times do |ri|
             r_off = rel_text_sh_off + ri * 8
             r_offset = IO::ByteFormat::LittleEndian.decode(UInt32, out_bytes[r_off, 4])
-            if r_offset >= 0x4dc && r_offset < 0x0c50
+            if (r_offset >= 0x4dc && r_offset < 0x0c54) ||
+               (r_offset >= 0x0c64 && r_offset < 0x0c78) ||
+               (r_offset >= 0x0c90 && r_offset < 0x0cc0) ||
+               (r_offset >= 0x0d90 && r_offset <= 0x0da0)
               IO::ByteFormat::LittleEndian.encode(0_u32, out_bytes[r_off + 4, 4]) # r_info = R_MIPS_NONE (0)
             end
           end
@@ -148,6 +172,10 @@ module Citrine
         out_bytes[text_off + 0x26c, 4].copy_from(Bytes[0x40, 0x00, 0x62, 0x24]) # addiu v0, v1, 0x40
         IO::ByteFormat::LittleEndian.encode(ori_at, out_bytes[text_off + 0x270, 4])
         IO::ByteFormat::LittleEndian.encode(sw_at, out_bytes[text_off + 0x274, 4])
+
+        # Patch voice volumes in PlaySound at 0x20c and 0x22c to 0x2000 (comfortable level)
+        out_bytes[text_off + 0x20c, 4].copy_from(Bytes[0x00, 0x20, 0x05, 0x24])
+        out_bytes[text_off + 0x22c, 4].copy_from(Bytes[0x00, 0x20, 0x05, 0x24])
 
         # Patch pitch at .text+0x434: li a1, 0x075A (exact 22,050 Hz on 48.0 kHz SPU2 core: 22050 * 4096 / 48000 = 1881.6 ~= 1882)
         out_bytes[text_off + 0x434, 4].copy_from(Bytes[0x5A, 0x07, 0x05, 0x24])
@@ -183,12 +211,12 @@ module Citrine
         disp.addiu(T8, S0, 0x0170) # PlaySound
         disp.jalr(T8)
         disp.nop
-        disp.lw(A1, 0x17D8, S0)
-        disp.bnez(A1, "disp_exit")
+        disp.lw(S1, 0x17D8, S0)
+        disp.bnez(S1, "apply_vols")
         disp.nop
-        disp.ori(A1, ZERO, 0x3C00)
-        disp.sw(A1, 0x17D8, S0)
-        disp.beq(ZERO, ZERO, "disp_exit")
+        disp.ori(S1, ZERO, 0x2000)
+        disp.sw(S1, 0x17D8, S0)
+        disp.beq(ZERO, ZERO, "apply_vols")
         disp.nop
 
         # Case 0: Stop (v0 == 0)
@@ -304,14 +332,26 @@ module Citrine
         disp_bytes = disp.to_slice
         out_bytes[text_off + 0x4dc, disp_bytes.size].copy_from(disp_bytes)
 
+        # Auto-play on IRX boot at 0x0c64:
+        # 0x0c64: ori v0, zero, 1      # v0 = 1 (Play)
+        # 0x0c68: bal 0x04dc           # call dispatcher at 0x4dc (0x0411FE1C)
+        # 0x0c6c: nop
+        # 0x0c70: b 0x0c78             # branch to WaitSema loop (0x10000001)
+        # 0x0c74: nop
+        out_bytes[text_off + 0x0c64, 4].copy_from(Bytes[0x01, 0x00, 0x02, 0x34])
+        out_bytes[text_off + 0x0c68, 4].copy_from(Bytes[0x1C, 0xFE, 0x11, 0x04])
+        out_bytes[text_off + 0x0c6c, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
+        out_bytes[text_off + 0x0c70, 4].copy_from(Bytes[0x01, 0x00, 0x00, 0x10])
+        out_bytes[text_off + 0x0c74, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
+
         # Hook SoundThread at 0xc90 via bal to 0x4dc:
         # 0x0c90: bal 0x4dc (0x0411FE12)
         # 0x0c94: nop
-        # 0x0c98: b 0xcb4 (0x10000006)
+        # 0x0c98: b 0x0c78 (0x1000FFF7)
         # 0x0c9c: nop
         out_bytes[text_off + 0xc90, 4].copy_from(Bytes[0x12, 0xFE, 0x11, 0x04])
         out_bytes[text_off + 0xc94, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
-        out_bytes[text_off + 0xc98, 4].copy_from(Bytes[0x06, 0x00, 0x00, 0x10])
+        out_bytes[text_off + 0xc98, 4].copy_from(Bytes[0xF7, 0xFF, 0x00, 0x10])
         out_bytes[text_off + 0xc9c, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
 
         out_bytes

@@ -81,18 +81,17 @@ module Citrine
           emitter.sw(T1, 0x7C, T0)    # 0x7000007C: total_tracks = 13
           emitter.sw(ZERO, 0x80, T0)  # 0x70000080: elapsed_sec = 0
 
-          # Kick off audio playback via Sound IRX RPC
+          # Start audio playback via SPU2 (cmd 1 = Play)
+          emitter.li(A0, 1)
           emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
-          emitter.ori(A0, ZERO, 1)
           emitter.jalr(T9)
           emitter.nop
 
-          # Set initial volume (240)
+          # Set initial volume (0x1000 | 240)
+          emitter.li(A0, 0x10F0)
           emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
-          emitter.ori(A0, ZERO, 0x1000 | 240)
           emitter.jalr(T9)
           emitter.nop
-          emitter.lui(T0, 0x7000)
         end
 
         # Reset DMAC
@@ -116,10 +115,10 @@ module Citrine
         emitter.syscall_inst
         emitter.nop
 
-        # Syscall 0x02: _SetGsCrt(interlace=0, mode=2 [NTSC], field=1)
-        emitter.move(A0, ZERO)
+        # Syscall 0x02: _SetGsCrt(interlace=1, mode=2 [NTSC], frame=0 [FIELD])
+        emitter.ori(A0, ZERO, 1)
         emitter.ori(A1, ZERO, 2)
-        emitter.ori(A2, ZERO, 1)
+        emitter.move(A2, ZERO)
         emitter.ori(V1, ZERO, 2)
         emitter.syscall_inst
         emitter.nop
@@ -186,6 +185,136 @@ module Citrine
           emitter.addu(T8, T8, T3)
           emitter.lw(T7, 0, T8) # MADR
           emitter.lw(T6, 4, T8) # QWC
+
+          if @profile.has_audio
+            # Update elapsed frames if playing (0x7000003C == 1)
+            emitter.lw(T5, 60, T0)
+            emitter.ori(T4, ZERO, 1)
+            emitter.bne(T5, T4, "skip_elapsed_inc")
+            emitter.nop
+
+            # Check if fast-forwarding (R2 held) or rewinding (L2 held)
+            emitter.lw(T4, 16, T0) # port 0 current buttons
+            emitter.andi(T1, T4, 0x0200) # R2
+            emitter.bnez(T1, "elapsed_fast_fwd")
+            emitter.nop
+            emitter.andi(T1, T4, 0x0100) # L2
+            emitter.bnez(T1, "elapsed_rewind")
+            emitter.nop
+
+            # Normal 1x playback: +1 frame
+            emitter.lw(T5, 0x80, T0)
+            emitter.addiu(T5, T5, 1)
+            emitter.sw(T5, 0x80, T0)
+            emitter.jump("skip_elapsed_inc")
+
+            emitter.label("elapsed_fast_fwd")
+            emitter.lw(T5, 0x80, T0)
+            emitter.addiu(T5, T5, 4) # 4x speed
+            emitter.sw(T5, 0x80, T0)
+            emitter.jump("skip_elapsed_inc")
+
+            emitter.label("elapsed_rewind")
+            emitter.lw(T5, 0x80, T0)
+            emitter.addiu(T5, T5, -4)
+            emitter.bgez(T5, "rewind_ok")
+            emitter.nop
+            emitter.move(T5, ZERO)
+            emitter.label("rewind_ok")
+            emitter.sw(T5, 0x80, T0)
+
+            emitter.label("skip_elapsed_inc")
+
+          if @rodata.scrubber_present
+            # Update progress scrubber quad XYZ2 at uncached MADR + scrub_quad_offset + 48
+            emitter.lui(T4, 0x2000)
+            emitter.or_(T4, T7, T4)
+            emitter.li(T3, @rodata.scrub_quad_offset + 48_u32)
+            emitter.addu(T4, T4, T3)
+            emitter.lw(T1, 0, T4)
+            emitter.srl(T2, T1, 16)
+            emitter.ori(T3, ZERO, (@rodata.scrub_y2.to_i32 << 4))
+            emitter.bne(T2, T3, "skip_scrub_update")
+            emitter.nop
+            # scrub_x = min_x + (elapsed_frames / 16), clamped to max_x
+            emitter.lw(T5, 0x80, T0)
+            emitter.srl(T2, T5, 4)
+            emitter.addiu(T2, T2, @rodata.scrub_min_x.to_i32)
+            emitter.ori(T3, ZERO, @rodata.scrub_max_x.to_i32)
+            emitter.sltu(T1, T3, T2)
+            emitter.beqz(T1, "scrub_clamp_ok")
+            emitter.nop
+            emitter.ori(T2, ZERO, @rodata.scrub_max_x.to_i32)
+            emitter.label("scrub_clamp_ok")
+            emitter.sll(T2, T2, 4)
+            emitter.lui(T3, (@rodata.scrub_y2.to_i32 << 4))
+            emitter.or_(T3, T3, T2)
+            emitter.sw(T3, 0, T4)
+            emitter.label("skip_scrub_update")
+          end
+
+          # Live Dynamic Time Digits (MM:SS) in uncached GIF packet RAM
+          if @rodata.time_text_present
+            emitter.lui(T0, 0x7000)
+            emitter.lw(T5, 0x80, T0) # elapsed_frames
+
+            # total_sec = elapsed_frames / 60
+            emitter.ori(T1, ZERO, 60)
+            emitter.divu(T5, T1)
+            emitter.mflo(T2) # T2 = total_sec
+
+            # min = total_sec / 60, sec = total_sec % 60
+            emitter.divu(T2, T1)
+            emitter.mflo(T3) # T3 = min
+            emitter.mfhi(T4) # T4 = sec
+
+            # m1 = min / 10, m2 = min % 10
+            emitter.ori(T1, ZERO, 10)
+            emitter.divu(T3, T1)
+            emitter.mflo(S2) # S2 = min_tens
+            emitter.mfhi(S3) # S3 = min_ones
+
+            # s1 = sec / 10, s2 = sec % 10
+            emitter.divu(T4, T1)
+            emitter.mflo(S4) # S4 = sec_tens
+            emitter.mfhi(S5) # S5 = sec_ones
+
+            # S6 = uncached GIF packet base (0x20000000 | T7)
+            emitter.lui(S6, 0x2000)
+            emitter.or_(S6, T7, S6)
+
+            # Digit 0: Minute tens
+            emitter.move(A0, S2)
+            emitter.li(A1, @rodata.min_tens_pos)
+            emitter.li(T1, @rodata.min_tens_offset)
+            emitter.addu(A2, S6, T1)
+            emitter.call("update_digit_quads")
+
+            # Digit 1: Minute ones
+            emitter.move(A0, S3)
+            emitter.li(A1, @rodata.min_ones_pos)
+            emitter.li(T1, @rodata.min_ones_offset)
+            emitter.addu(A2, S6, T1)
+            emitter.call("update_digit_quads")
+
+            # Digit 2: Second tens
+            emitter.move(A0, S4)
+            emitter.li(A1, @rodata.sec_tens_pos)
+            emitter.li(T1, @rodata.sec_tens_offset)
+            emitter.addu(A2, S6, T1)
+            emitter.call("update_digit_quads")
+
+            # Digit 3: Second ones
+            emitter.move(A0, S5)
+            emitter.li(A1, @rodata.sec_ones_pos)
+            emitter.li(T1, @rodata.sec_ones_offset)
+            emitter.addu(A2, S6, T1)
+            emitter.call("update_digit_quads")
+
+            emitter.lui(T0, 0x7000)
+          end
+        end
+
           emitter.dma02_kick_reg(T7, T6)
         else
           # Multi-phase branch lookup
@@ -403,7 +532,7 @@ module Citrine
           emitter.call("Citrine_InlineAsm_Block")
         end
         if @profile.has_audio
-          # Toggle audio playback with true pause (cmd 2), resume (cmd 3), and play (cmd 1)
+          # Toggle audio playback with true pause (2), resume (3), and play (1)
           emitter.lui(T0, 0x7000)
           emitter.lw(T5, 60, T0) # 0x7000003C: 1=playing, 2=paused, 0=stopped
           emitter.ori(T6, ZERO, 1)
@@ -416,34 +545,36 @@ module Citrine
           emitter.nop
 
           # If stopped (0): start playback from start
-          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
-          emitter.ori(A0, ZERO, 1) # cmd 1 = Play
-          emitter.jalr(T9)
-          emitter.nop
           emitter.lui(T0, 0x7000)
           emitter.ori(T5, ZERO, 1)
           emitter.sw(T5, 60, T0)
+          emitter.li(A0, 1) # cmd 1 = Play
+          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+          emitter.jalr(T9)
+          emitter.nop
           emitter.jump("audio_done")
 
           emitter.label("audio_resume")
-          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
-          emitter.ori(A0, ZERO, 3) # cmd 3 = Resume (preserves position, un-mutes pitch/vol)
-          emitter.jalr(T9)
-          emitter.nop
           emitter.lui(T0, 0x7000)
           emitter.ori(T5, ZERO, 1)
           emitter.sw(T5, 60, T0)
+          emitter.li(A0, 3) # cmd 3 = Resume
+          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+          emitter.jalr(T9)
+          emitter.nop
           emitter.jump("audio_done")
 
           emitter.label("audio_pause")
-          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
-          emitter.ori(A0, ZERO, 2) # cmd 2 = Pause (preserves position, mutes pitch/vol)
-          emitter.jalr(T9)
-          emitter.nop
           emitter.lui(T0, 0x7000)
           emitter.ori(T5, ZERO, 2)
           emitter.sw(T5, 60, T0)
+          emitter.li(A0, 2) # cmd 2 = Pause
+          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+          emitter.jalr(T9)
+          emitter.nop
+
           emitter.label("audio_done")
+          emitter.lui(T0, 0x7000)
         end
 
         if addr = @rodata.button_msg_addrs["cross"]?
@@ -471,11 +602,13 @@ module Citrine
         emitter.beqz(T7, "chk_btn_square")
         emitter.nop
         if @profile.has_audio
+          emitter.lui(T0, 0x7000)
+          emitter.sw(ZERO, 60, T0)
+          emitter.sw(ZERO, 0x80, T0)
           emitter.li(T9, PadRuntimePayload::SOUND_STOP_ENTRY)
           emitter.jalr(T9)
           emitter.nop
           emitter.lui(T0, 0x7000)
-          emitter.sw(ZERO, 60, T0)
         end
         if addr = @rodata.button_msg_addrs["circle"]?
           emitter.li(A0, addr)
@@ -508,9 +641,9 @@ module Citrine
         emitter.beqz(T7, "chk_btn_l1")
         emitter.nop
         if @profile.has_audio
-          # Jump forward 10 seconds (+10s)
+          # Jump forward 10 seconds (+600 frames)
           emitter.lw(T5, 0x80, T0)
-          emitter.addiu(T5, T5, 10)
+          emitter.addiu(T5, T5, 600)
           emitter.sw(T5, 0x80, T0)
         end
         if addr = @rodata.button_msg_addrs["r1"]?
@@ -526,9 +659,9 @@ module Citrine
         emitter.beqz(T7, "chk_btn_r2")
         emitter.nop
         if @profile.has_audio
-          # Jump backward 10 seconds (-10s)
+          # Jump backward 10 seconds (-600 frames)
           emitter.lw(T5, 0x80, T0)
-          emitter.addiu(T5, T5, -10)
+          emitter.addiu(T5, T5, -600)
           emitter.bgez(T5, "l1_sub_ok")
           emitter.nop
           emitter.move(T5, ZERO)
@@ -547,14 +680,6 @@ module Citrine
         emitter.andi(T7, T8, 0x0200)
         emitter.beqz(T7, "chk_btn_l2")
         emitter.nop
-        if @profile.has_audio
-          # Fast Forward: set pitch to 3x rate
-          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
-          emitter.ori(A0, ZERO, 4) # cmd 4 = Fast Forward
-          emitter.jalr(T9)
-          emitter.nop
-          emitter.lui(T0, 0x7000)
-        end
         if addr = @rodata.button_msg_addrs["r2"]?
           emitter.li(A0, addr)
           emitter.call("debug_puts")
@@ -567,14 +692,6 @@ module Citrine
         emitter.andi(T7, T8, 0x0100)
         emitter.beqz(T7, "chk_btn_start")
         emitter.nop
-        if @profile.has_audio
-          # Rewind: mute audio while rewinding
-          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
-          emitter.ori(A0, ZERO, 2) # cmd 2 = Pause/mute
-          emitter.jalr(T9)
-          emitter.nop
-          emitter.lui(T0, 0x7000)
-        end
         if addr = @rodata.button_msg_addrs["l2"]?
           emitter.li(A0, addr)
           emitter.call("debug_puts")
@@ -622,8 +739,9 @@ module Citrine
           emitter.ori(T5, ZERO, 255)
           emitter.label("vol_up_store")
           emitter.sw(T5, 0x70, T0)
+          emitter.andi(A0, T5, 0xFF)
+          emitter.ori(A0, A0, 0x1000) # cmd 0x1000 | vol
           emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
-          emitter.ori(A0, T5, 0x1000) # cmd = 0x1000 | master_vol
           emitter.jalr(T9)
           emitter.nop
           emitter.lui(T0, 0x7000)
@@ -652,15 +770,13 @@ module Citrine
           emitter.label("next_trk_ok")
           emitter.sw(T5, 0x78, T0)
           emitter.sw(ZERO, 0x80, T0)  # reset elapsed_sec
-
-          # Restart track playback from start
+          emitter.ori(T5, ZERO, 1)
+          emitter.sw(T5, 60, T0)
+          emitter.li(A0, 1)           # restart audio playback
           emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
-          emitter.ori(A0, ZERO, 1)
           emitter.jalr(T9)
           emitter.nop
           emitter.lui(T0, 0x7000)
-          emitter.ori(T5, ZERO, 1)
-          emitter.sw(T5, 60, T0)
         end
         if addr = @rodata.button_msg_addrs["right"]?
           emitter.li(A0, addr)
@@ -683,8 +799,9 @@ module Citrine
           emitter.move(T5, ZERO)
           emitter.label("vol_down_store")
           emitter.sw(T5, 0x70, T0)
+          emitter.andi(A0, T5, 0xFF)
+          emitter.ori(A0, A0, 0x1000) # cmd 0x1000 | vol
           emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
-          emitter.ori(A0, T5, 0x1000)
           emitter.jalr(T9)
           emitter.nop
           emitter.lui(T0, 0x7000)
@@ -712,15 +829,13 @@ module Citrine
           emitter.addiu(T5, T5, -1)
           emitter.sw(T5, 0x78, T0)
           emitter.sw(ZERO, 0x80, T0)  # reset elapsed_sec
-
-          # Restart track playback from start
+          emitter.ori(T5, ZERO, 1)
+          emitter.sw(T5, 60, T0)
+          emitter.li(A0, 1)           # restart audio playback
           emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
-          emitter.ori(A0, ZERO, 1)
           emitter.jalr(T9)
           emitter.nop
           emitter.lui(T0, 0x7000)
-          emitter.ori(T5, ZERO, 1)
-          emitter.sw(T5, 60, T0)
         end
         if addr = @rodata.button_msg_addrs["left"]?
           emitter.li(A0, addr)
@@ -753,36 +868,6 @@ module Citrine
         end
 
         emitter.label("btn_chk_done")
-
-        if @profile.has_audio
-          # Check R2 released (0x0200 in released edges at 0x7000001C): restore normal speed
-          emitter.lw(T7, 28, T0)
-          emitter.andi(T6, T7, 0x0200)
-          emitter.beqz(T6, "chk_l2_rel")
-          emitter.nop
-          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
-          emitter.ori(A0, ZERO, 5) # cmd 5 = Normal Speed (pitch = 0x075A)
-          emitter.jalr(T9)
-          emitter.nop
-          emitter.lui(T0, 0x7000)
-
-          # Check L2 released (0x0100 in released edges at 0x7000001C): resume playback
-          emitter.label("chk_l2_rel")
-          emitter.lw(T7, 28, T0)
-          emitter.andi(T6, T7, 0x0100)
-          emitter.beqz(T6, "chk_rel_done")
-          emitter.nop
-          emitter.lw(T5, 60, T0)
-          emitter.ori(T6, ZERO, 1)
-          emitter.bne(T5, T6, "chk_rel_done")
-          emitter.nop
-          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
-          emitter.ori(A0, ZERO, 3) # cmd 3 = Resume
-          emitter.jalr(T9)
-          emitter.nop
-          emitter.lui(T0, 0x7000)
-          emitter.label("chk_rel_done")
-        end
 
         # -------------------------------------------------------------
         # 4. General Phase Sequencing
@@ -892,6 +977,7 @@ module Citrine
         RuntimeSubroutines.emit_debug_puts(emitter)
         RuntimeSubroutines.emit_native_stubs(emitter)
         RuntimeSubroutines.emit_inline_asm(emitter, @profile.inline_asm_words)
+        RuntimeSubroutines.emit_digit_quad_updater(emitter, @rodata.digit_table_addr)
 
         # Pad .text to 16,384 bytes
         emitter.pad_to(TEXT_SIZE.to_i32)

@@ -1,6 +1,8 @@
 require "../gs/gif_packet_builder"
 require "./phase_extractor"
 
+require "./digit_quad_table"
+
 module Citrine
   module ISO
     record VirtualInput, start_frame : UInt32, duration_frames : UInt16, button_mask : UInt16, port : UInt8 = 0_u8
@@ -18,6 +20,21 @@ module Citrine
       property boot_msg_addrs : Array(UInt32)
       property button_msg_addrs : Hash(String, UInt32)
       property phase_msg_addrs : Hash(Int32, UInt32)
+      property digit_table_addr : UInt32
+      property time_text_present : Bool
+      property min_tens_offset : UInt32
+      property min_ones_offset : UInt32
+      property sec_tens_offset : UInt32
+      property sec_ones_offset : UInt32
+      property min_tens_pos : UInt32
+      property min_ones_pos : UInt32
+      property sec_tens_pos : UInt32
+      property sec_ones_pos : UInt32
+      property scrubber_present : Bool
+      property scrub_quad_offset : UInt32
+      property scrub_min_x : UInt16
+      property scrub_max_x : UInt16
+      property scrub_y2 : UInt16
 
       def initialize(
         @data = Bytes.empty,
@@ -30,7 +47,22 @@ module Citrine
         @banner_addr = 0_u32,
         @boot_msg_addrs = [] of UInt32,
         @button_msg_addrs = Hash(String, UInt32).new,
-        @phase_msg_addrs = Hash(Int32, UInt32).new
+        @phase_msg_addrs = Hash(Int32, UInt32).new,
+        @digit_table_addr = 0_u32,
+        @time_text_present = false,
+        @min_tens_offset = 0_u32,
+        @min_ones_offset = 0_u32,
+        @sec_tens_offset = 0_u32,
+        @sec_ones_offset = 0_u32,
+        @min_tens_pos = 0_u32,
+        @min_ones_pos = 0_u32,
+        @sec_tens_pos = 0_u32,
+        @sec_ones_pos = 0_u32,
+        @scrubber_present = false,
+        @scrub_quad_offset = 0_u32,
+        @scrub_min_x = 62_u16,
+        @scrub_max_x = 578_u16,
+        @scrub_y2 = 214_u16
       )
       end
     end
@@ -163,6 +195,126 @@ module Citrine
         out_mem.write("Citrine PS2 Virtual Machine runtime v0.1.0\0".to_slice)
         out_mem.write("Emotion Engine R5900 / Graphic Synthesizer\0".to_slice)
 
+        # 6. Scan phase 0 commands to discover dynamic time text and scrubber rect
+        digit_table_addr = 0_u32
+        time_text_present = false
+        min_tens_offset = 0_u32
+        min_ones_offset = 0_u32
+        sec_tens_offset = 0_u32
+        sec_ones_offset = 0_u32
+        min_tens_pos = 0_u32
+        min_ones_pos = 0_u32
+        sec_tens_pos = 0_u32
+        sec_ones_pos = 0_u32
+
+        scrubber_present = false
+        scrub_quad_offset = 0_u32
+        scrub_min_x = 62_u16
+        scrub_max_x = 578_u16
+        scrub_y2 = 214_u16
+
+        if first_phase = @profile.phases.first?
+          body_pos = 0_u32
+          prev_cmd : Citrine::GS::DrawCommand? = nil
+
+          first_phase.commands.each do |cmd|
+            r = (cmd.color & 0xFF).to_u8
+            g = ((cmd.color >> 8) & 0xFF).to_u8
+            b = ((cmd.color >> 16) & 0xFF).to_u8
+            cmd_body_start = body_pos
+
+            case cmd.type
+            when Citrine::GS::DrawCommand::Type::Clear
+              body_pos += 64_u32
+            when Citrine::GS::DrawCommand::Type::Rect
+              if prev = prev_cmd
+                if prev.type == Citrine::GS::DrawCommand::Type::Rect && cmd.y1 == prev.y1 && cmd.x1 == prev.x1 && prev.x2 > cmd.x1 + 100
+                  scrubber_present = true
+                  scrub_quad_offset = 16_u32 + cmd_body_start
+                  scrub_min_x = cmd.x1.to_u16
+                  scrub_max_x = prev.x2.to_u16
+                  scrub_y2 = cmd.y2.to_u16
+                end
+              end
+              body_pos += 64_u32
+            when Citrine::GS::DrawCommand::Type::Circle
+              body_pos += 24_u32 * 64_u32
+            when Citrine::GS::DrawCommand::Type::Line
+              body_pos += 128_u32
+            when Citrine::GS::DrawCommand::Type::Triangle
+              body_pos += 64_u32
+            when Citrine::GS::DrawCommand::Type::Quad
+              body_pos += 128_u32
+            when Citrine::GS::DrawCommand::Type::Text
+              scale = cmd.x2 >= 20 ? 2 : 1
+              if md = cmd.text.match(/(\d\d):(\d\d)/)
+                time_text_present = true
+                time_pkt_offset = 16_u32 + cmd_body_start
+                char_w = 5 * scale
+                spacing = 2 * scale
+                match_start = md.begin(0).not_nil!
+                cum_quads = 0_u32
+                cx = cmd.x1
+                cy = cmd.y1
+
+                cmd.text.each_char_with_index do |ch, ci|
+                  char_quads = 0_u32
+                  if ch != ' '
+                    glyph = GifPacketBuilder::FONT_5X7[ch.upcase]? || GifPacketBuilder::FONT_5X7['?']
+                    7.times do |row|
+                      in_run = false
+                      5.times do |col|
+                        pixel = ((glyph[col] >> row) & 1) == 1
+                        if pixel && !in_run
+                          in_run = true
+                        elsif !pixel && in_run
+                          in_run = false
+                          char_quads += 1
+                        end
+                      end
+                      char_quads += 1 if in_run
+                    end
+                  end
+
+                  pos_fixed = ((cy.to_u32 << 4) << 16) | (cx.to_u32 << 4)
+
+                  case ci
+                  when match_start
+                    min_tens_offset = time_pkt_offset + cum_quads * 64_u32
+                    min_tens_pos = pos_fixed
+                  when match_start + 1
+                    min_ones_offset = time_pkt_offset + cum_quads * 64_u32
+                    min_ones_pos = pos_fixed
+                  when match_start + 3
+                    sec_tens_offset = time_pkt_offset + cum_quads * 64_u32
+                    sec_tens_pos = pos_fixed
+                  when match_start + 4
+                    sec_ones_offset = time_pkt_offset + cum_quads * 64_u32
+                    sec_ones_pos = pos_fixed
+                  end
+
+                  cum_quads += char_quads
+                  cx += char_w + spacing
+                end
+              end
+              tmp_mem = IO::Memory.new
+              quad_count = GifPacketBuilder.emit_text(tmp_mem, cmd.text, cmd.x1, cmd.y1, scale, r, g, b)
+              body_pos += quad_count.to_u32 * 64_u32
+            end
+            prev_cmd = cmd
+          end
+        end
+
+        # 7. Digit Quad Table (1040 bytes)
+        if time_text_present
+          curr_addr = (curr_addr + 15_u32) & ~15_u32
+          digit_table_addr = curr_addr
+          DigitQuadTable::DATA.each do |w|
+            out_mem.write_bytes(w, IO::ByteFormat::LittleEndian)
+          end
+          curr_addr += (DigitQuadTable::DATA.size * 4).to_u32
+        end
+
         RodataResult.new(
           data: out_mem.to_slice,
           env_packet_addr: env_packet_addr,
@@ -174,7 +326,22 @@ module Citrine
           banner_addr: banner_addr,
           boot_msg_addrs: boot_msg_addrs,
           button_msg_addrs: button_msg_addrs,
-          phase_msg_addrs: phase_msg_addrs
+          phase_msg_addrs: phase_msg_addrs,
+          digit_table_addr: digit_table_addr,
+          time_text_present: time_text_present,
+          min_tens_offset: min_tens_offset,
+          min_ones_offset: min_ones_offset,
+          sec_tens_offset: sec_tens_offset,
+          sec_ones_offset: sec_ones_offset,
+          min_tens_pos: min_tens_pos,
+          min_ones_pos: min_ones_pos,
+          sec_tens_pos: sec_tens_pos,
+          sec_ones_pos: sec_ones_pos,
+          scrubber_present: scrubber_present,
+          scrub_quad_offset: scrub_quad_offset,
+          scrub_min_x: scrub_min_x,
+          scrub_max_x: scrub_max_x,
+          scrub_y2: scrub_y2
         )
       end
     end
