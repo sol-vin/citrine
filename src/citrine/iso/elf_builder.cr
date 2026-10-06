@@ -64,7 +64,7 @@ module Citrine
       @has_button_checks = profile.has_button_checks
       @is_inline_assembly = profile.is_inline_assembly
       @inline_asm_words = profile.inline_asm_words
-      @is_controller_tester = profile.has_button_checks
+      @is_controller_tester = profile.is_controller_tester
 
       # 1. Build .rodata Segment
       rodata = RodataSegmentBuilder.build(profile, input_schedule)
@@ -148,7 +148,7 @@ module Citrine
       @has_button_checks = profile.has_button_checks
       @is_inline_assembly = profile.is_inline_assembly
       @inline_asm_words = profile.inline_asm_words
-      @is_controller_tester = profile.has_button_checks
+      @is_controller_tester = profile.is_controller_tester
       @is_dvd_screensaver = profile.is_dvd_screensaver
       @is_audio_player = profile.is_audio_player
       {profile.phases, profile.boot_messages, profile.loop_start_phase, profile.is_animated}

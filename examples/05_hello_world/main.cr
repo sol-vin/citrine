@@ -116,8 +116,10 @@ Citrine.main_loop do
   if (Action.is_pressed?(Actions::SpawnOne) || pad.button_pressed?(Button::Cross)) && logos.size < 128
     rx = rng.rand(40, 400)
     ry = rng.rand(40, 320)
-    dir_x = (rng.rand(0, 1) == 0) ? -rng.rand(4, 7) : rng.rand(4, 7)
-    dir_y = (rng.rand(0, 1) == 0) ? -rng.rand(3, 6) : rng.rand(3, 6)
+    sx = rng.rand(4, 7)
+    sy = rng.rand(3, 6)
+    dir_x = (((rng.next_u32 >> 16) & 1) == 0 ? -1 : 1) * sx
+    dir_y = (((rng.next_u32 >> 24) & 1) == 0 ? -1 : 1) * sy
     rt_col = rng.rand(0, 5)
     rbg_col = (rt_col + rng.rand(1, 5)) % 6
     logos << BouncingLogo.new(rx, ry, dir_x, dir_y, rt_col, rbg_col)
@@ -129,8 +131,10 @@ Citrine.main_loop do
       if logos.size < 128
         rx = rng.rand(40, 400)
         ry = rng.rand(40, 320)
-        dir_x = (rng.rand(0, 1) == 0) ? -rng.rand(4, 7) : rng.rand(4, 7)
-        dir_y = (rng.rand(0, 1) == 0) ? -rng.rand(3, 6) : rng.rand(3, 6)
+        sx = rng.rand(4, 7)
+        sy = rng.rand(3, 6)
+        dir_x = (((rng.next_u32 >> 16) & 1) == 0 ? -1 : 1) * sx
+        dir_y = (((rng.next_u32 >> 24) & 1) == 0 ? -1 : 1) * sy
         rt_col = rng.rand(0, 5)
         rbg_col = (rt_col + rng.rand(1, 5)) % 6
         logos << BouncingLogo.new(rx, ry, dir_x, dir_y, rt_col, rbg_col)

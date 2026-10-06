@@ -804,6 +804,17 @@ module Citrine
           return val_reg
         end
 
+        if node.target.is_a?(Crystal::Call)
+          target_call = node.target.as(Crystal::Call)
+          if target_call.name == "[]"
+            set_call = Crystal::Call.new(target_call.obj, "[]=", target_call.args + [node.value])
+            return compile_node(set_call, allocator, instructions, fn)
+          else
+            set_call = Crystal::Call.new(target_call.obj, "#{target_call.name}=", [node.value])
+            return compile_node(set_call, allocator, instructions, fn)
+          end
+        end
+
         target_name = node.target.to_s
         val_type : String? = nil
         if node.value.is_a?(Crystal::Call)
@@ -2067,7 +2078,11 @@ module Citrine
       # Number conversions: .to_i, .to_i32, .to_i64, .to_u8, .to_u16, .to_u32, .to_u64, .to_f, .to_f32, .to_f64
       if ["to_i", "to_i32", "to_i64", "to_u8", "to_u16", "to_u32", "to_u64", "to_f", "to_f32", "to_f64"].includes?(node.name) && node.obj && node.args.empty?
         obj_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        instructions << Instruction.encode_abc(Opcode::Move, dest, obj_reg, 0_u8)
+        if ["to_i", "to_i32", "to_i64", "to_u8", "to_u16", "to_u32", "to_u64"].includes?(node.name)
+          instructions << Instruction.encode_abc(Opcode::FloatAlu, dest, obj_reg, 0_u8, subop: FloatAluSubOp::FcvtSW.value)
+        else
+          instructions << Instruction.encode_abc(Opcode::Move, dest, obj_reg, 0_u8)
+        end
         allocator.free_temp(obj_reg)
         return dest
       end
@@ -2444,8 +2459,8 @@ module Citrine
         return dest
       end
 
-      # Array index read: arr[idx] or custom #[] method dispatch
-      if node.name == "[]" && node.obj && node.args.size == 1
+      # Array index read: arr[idx], arr[idx]? or custom #[] / #[]? method dispatch
+      if (node.name == "[]" || node.name == "[]?") && node.obj && node.args.size == 1
         custom_bracket_method = nil
         bracket_recv_type = if node.obj.is_a?(Crystal::Var)
                               @var_types[node.obj.as(Crystal::Var).name]?
@@ -2461,8 +2476,8 @@ module Citrine
           if !clean_vtype.starts_with?("Array") && !clean_vtype.starts_with?("StaticArray")
             cands = [clean_vtype, clean_vtype.split("::").last]
             cands.each do |c|
-              if @functions.any? { |f| f.name == "#{c}#[]" }
-                custom_bracket_method = "#{c}#[]"
+              if @functions.any? { |f| f.name == "#{c}##{node.name}" }
+                custom_bracket_method = "#{c}##{node.name}"
                 break
               end
             end
@@ -3581,6 +3596,61 @@ module Citrine
       ret_reg
     end
 
+    private def collect_free_vars(node : Crystal::ASTNode?, outer_allocator : RegisterAllocator, bound_vars : Set(String), result : Array(String))
+      return unless node
+      case node
+      when Crystal::Var
+        name = node.name
+        if outer_allocator.get_local(name) && !bound_vars.includes?(name) && !result.includes?(name)
+          result << name
+        end
+      when Crystal::Expressions
+        node.expressions.each { |e| collect_free_vars(e, outer_allocator, bound_vars, result) }
+      when Crystal::Call
+        if obj = node.obj
+          collect_free_vars(obj, outer_allocator, bound_vars, result)
+        elsif outer_allocator.get_local(node.name) && node.args.empty? && node.block.nil? && !bound_vars.includes?(node.name) && !result.includes?(node.name)
+          result << node.name
+        end
+        node.args.each { |a| collect_free_vars(a, outer_allocator, bound_vars, result) }
+        if b = node.block
+          inner_bound = bound_vars.dup
+          b.args.each { |ba| inner_bound.add(ba.name) }
+          collect_free_vars(b.body, outer_allocator, inner_bound, result)
+        end
+      when Crystal::Assign
+        if node.target.is_a?(Crystal::Var)
+          t_name = node.target.as(Crystal::Var).name
+          if outer_allocator.get_local(t_name) && !bound_vars.includes?(t_name) && !result.includes?(t_name)
+            result << t_name
+          end
+        else
+          collect_free_vars(node.target, outer_allocator, bound_vars, result)
+        end
+        collect_free_vars(node.value, outer_allocator, bound_vars, result)
+      when Crystal::OpAssign
+        collect_free_vars(node.target, outer_allocator, bound_vars, result)
+        collect_free_vars(node.value, outer_allocator, bound_vars, result)
+      when Crystal::If
+        collect_free_vars(node.cond, outer_allocator, bound_vars, result)
+        collect_free_vars(node.then, outer_allocator, bound_vars, result)
+        collect_free_vars(node.else, outer_allocator, bound_vars, result)
+      when Crystal::Unless
+        collect_free_vars(node.cond, outer_allocator, bound_vars, result)
+        collect_free_vars(node.then, outer_allocator, bound_vars, result)
+        collect_free_vars(node.else, outer_allocator, bound_vars, result)
+      when Crystal::While
+        collect_free_vars(node.cond, outer_allocator, bound_vars, result)
+        collect_free_vars(node.body, outer_allocator, bound_vars, result)
+      when Crystal::Until
+        collect_free_vars(node.cond, outer_allocator, bound_vars, result)
+        collect_free_vars(node.body, outer_allocator, bound_vars, result)
+      when Crystal::BinaryOp
+        collect_free_vars(node.left, outer_allocator, bound_vars, result)
+        collect_free_vars(node.right, outer_allocator, bound_vars, result)
+      end
+    end
+
     private def compile_spawn(
       node : Crystal::Call,
       allocator : RegisterAllocator,
@@ -3594,13 +3664,16 @@ module Citrine
         return dest
       end
 
-      arg_names = block.args.map(&.name)
+      captured_vars = [] of String
+      collect_free_vars(block.body, allocator, Set(String).new, captured_vars)
+
+      all_arg_names = block.args.map(&.name) + captured_vars
       fiber_fn_name = "__fiber_#{@functions.size}"
-      fiber_fn = CompiledFunction.new(fiber_fn_name, arg_names.size.to_u8)
-      fiber_allocator = RegisterAllocator.new(arg_names)
+      fiber_fn = CompiledFunction.new(fiber_fn_name, all_arg_names.size.to_u8)
+      fiber_allocator = RegisterAllocator.new(all_arg_names)
       fiber_instructions = [] of Instruction
 
-      arg_names.each_with_index do |name, idx|
+      all_arg_names.each_with_index do |name, idx|
         @source_map.record_register(fiber_fn_name, idx, name)
       end
 
@@ -3613,12 +3686,23 @@ module Citrine
       func_idx = @functions.size
       @functions << fiber_fn
 
-      # Evaluate arguments to pass into the fiber (sequential registers after dest)
+      # Evaluate explicit arguments first
+      arg_offset = 0
       node.args.each_with_index do |arg, i|
         reg = compile_node(arg, allocator, instructions, fn)
-        target_reg = dest + 1_u8 + i.to_u8
+        target_reg = dest + 1_u8 + arg_offset.to_u8
         instructions << Instruction.encode_abc(Opcode::Move, target_reg, reg, 0_u8)
         allocator.free_temp(reg)
+        arg_offset += 1
+      end
+
+      # Pass captured outer variables
+      captured_vars.each do |cvar|
+        if outer_reg = allocator.get_local(cvar)
+          target_reg = dest + 1_u8 + arg_offset.to_u8
+          instructions << Instruction.encode_abc(Opcode::Move, target_reg, outer_reg, 0_u8)
+          arg_offset += 1
+        end
       end
 
       instructions << Instruction.encode_spawn_fiber(dest, func_idx.to_u16)

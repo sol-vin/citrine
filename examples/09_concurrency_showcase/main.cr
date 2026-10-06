@@ -45,9 +45,12 @@ player_x = 320.0_f32
 player_y = 260.0_f32
 total_dispatched = 0
 total_processed = 0
+auto_timer = 0
+packet_step = 0
 
 Citrine.main_loop do
   pad = Citrine.player(0)
+  packet_step = (packet_step + 3) % 200
 
   # Interactive Avatar Navigation
   if pad.button_down?(Button::Up)
@@ -63,7 +66,14 @@ Citrine.main_loop do
     player_x = Math.min(player_x + 3.5_f32, 580.0_f32)
   end
 
-  # Burst Work Tasks through Bounded Channel
+  # Autonomous background task generation (continuous concurrency pipeline)
+  auto_timer = (auto_timer + 1) % 18
+  if auto_timer == 0 && work_channel.count < work_channel.capacity
+    work_channel.send(total_dispatched + 1)
+    total_dispatched += 1
+  end
+
+  # Burst Work Tasks through Bounded Channel on Cross
   if Action.is_pressed?(Actions::BurstJobs) || pad.button_pressed?(Button::Cross)
     5.times do |i|
       if work_channel.count < work_channel.capacity
@@ -114,19 +124,37 @@ Citrine.main_loop do
   Citrine.draw_rectangle(40, 160, 560, 220, Color::DarkGray)
   Citrine.draw_rectangle(42, 162, 556, 216, Color::Black)
 
-  # Worker Nodes
-  Citrine.draw_rectangle(100, 190, 120, 48, Color::Cyan)
+  # Worker Nodes with activity glow
+  w1_active = work_channel.count > 0 || (packet_step % 40 < 20)
+  w1_col = w1_active ? Color::Cyan : Color.new(0_u8, 120_u8, 160_u8, 255_u8)
+  Citrine.draw_rectangle(100, 190, 120, 48, w1_col)
   Citrine.draw_text("WORKER 1", 120, 206, 13, Color::Black)
+  Citrine.draw_circle(112, 198, 4.0_f32, w1_active ? Color::Green : Color::DarkGray)
 
-  Citrine.draw_rectangle(420, 190, 120, 48, Color::Magenta)
+  w2_active = result_channel.count > 0 || ((packet_step + 20) % 40 < 20)
+  w2_col = w2_active ? Color::Magenta : Color.new(140_u8, 0_u8, 140_u8, 255_u8)
+  Citrine.draw_rectangle(420, 190, 120, 48, w2_col)
   Citrine.draw_text("WORKER 2", 440, 206, 13, Color::Black)
+  Citrine.draw_circle(432, 198, 4.0_f32, w2_active ? Color::Green : Color::DarkGray)
 
   # Connecting Channel Bus Lines
   Citrine.draw_line(220, 214, 420, 214, Color::Gray)
+  Citrine.draw_line(160, 238, 160, 280, Color::DarkGray)
+  Citrine.draw_line(480, 238, 480, 280, Color::DarkGray)
+  Citrine.draw_line(160, 280, 480, 280, Color::DarkGray)
 
-  # Interactive Dispatcher Avatar
+  # Animated Traveling Task Packets along the bus lines
+  pkt1_x = 220 + ((packet_step * 2) % 200)
+  Citrine.draw_circle(pkt1_x, 214, 4.0_f32, Color::Yellow)
+  pkt2_x = 480 - ((packet_step * 2) % 320)
+  if pkt2_x >= 160
+    Citrine.draw_circle(pkt2_x, 280, 4.0_f32, Color::Green)
+  end
+
+  # Interactive Dispatcher Avatar with subtle idle hover
+  bob = (packet_step % 30 < 15 ? 1 : -1)
   ix = player_x.to_i32
-  iy = player_y.to_i32
+  iy = player_y.to_i32 + bob
   Citrine.draw_rectangle(ix - 16, iy - 16, 32, 32, Color::Yellow)
   Citrine.draw_circle(ix, iy, 6.0_f32, Color::Red)
   Citrine.draw_text("DISPATCHER", ix - 32, iy + 20, 10, Color::White)

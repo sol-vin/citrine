@@ -18,6 +18,7 @@ module Citrine
       property is_dvd_screensaver : Bool
       property bank_dur_ms : UInt32
       property frames_per_bank : UInt32
+      property is_controller_tester : Bool
 
       def initialize(
         @phases = [] of Citrine::GS::Phase,
@@ -31,12 +32,13 @@ module Citrine
         @num_tracks = 1,
         @is_dvd_screensaver = false,
         @bank_dur_ms = 1195_u32,
-        @frames_per_bank = 72_u32
+        @frames_per_bank = 72_u32,
+        @is_controller_tester = false
       )
       end
 
       def is_controller_tester : Bool
-        @has_button_checks
+        @is_controller_tester
       end
 
       def is_audio_player : Bool
@@ -105,11 +107,256 @@ module Citrine
       end
 
 
+      CT_BUTTONS = [
+        14_u32, # 1: Cross
+        13_u32, # 2: Circle
+        12_u32, # 3: Triangle
+        15_u32, # 4: Square
+        4_u32,  # 5: Up
+        6_u32,  # 6: Down
+        7_u32,  # 7: Left
+        5_u32,  # 8: Right
+        10_u32, # 9: L1
+        11_u32, # 10: R1
+        8_u32,  # 11: L2
+        9_u32,  # 12: R2
+        0_u32,  # 13: Select
+        3_u32,  # 14: Start
+        1_u32,  # 15: L3
+        2_u32,  # 16: R3
+      ]
+
+      def self.decode_coord(val : Int64?) : Float32
+        return 0.0_f32 unless val
+        u = (val & 0xFFFFFFFF_i64).to_u32
+        return 0.0_f32 if u == 0_u32
+        bytes = Bytes[(u & 0xFF).to_u8, ((u >> 8) & 0xFF).to_u8, ((u >> 16) & 0xFF).to_u8, ((u >> 24) & 0xFF).to_u8]
+        f = IO::ByteFormat::LittleEndian.decode(Float32, bytes) rescue 0.0_f32
+        if !f.nan? && !f.infinite? && f.abs < 2000.0_f32 && f.abs > 0.001_f32
+          f
+        else
+          val.to_f32
+        end
+      end
+
+      def self.encode_f32(f : Float32) : Int64
+        bytes = Bytes.new(4)
+        IO::ByteFormat::LittleEndian.encode(f, bytes)
+        IO::ByteFormat::LittleEndian.decode(UInt32, bytes).to_i64
+      end
+
+      def self.project_3d_point(
+        px : Float32, py : Float32, pz : Float32,
+        cam_pos : Tuple(Float32, Float32, Float32),
+        cam_tgt : Tuple(Float32, Float32, Float32),
+        cam_up : Tuple(Float32, Float32, Float32)
+      ) : Tuple(Int32, Int32)?
+        fx = cam_tgt[0] - cam_pos[0]
+        fy = cam_tgt[1] - cam_pos[1]
+        fz = cam_tgt[2] - cam_pos[2]
+        len_f = Math.sqrt(fx * fx + fy * fy + fz * fz)
+        len_f = 1.0_f32 if len_f == 0.0_f32
+        fx /= len_f; fy /= len_f; fz /= len_f
+
+        rx = fy * cam_up[2] - fz * cam_up[1]
+        ry = fz * cam_up[0] - fx * cam_up[2]
+        rz = fx * cam_up[1] - fy * cam_up[0]
+        len_r = Math.sqrt(rx * rx + ry * ry + rz * rz)
+        len_r = 1.0_f32 if len_r == 0.0_f32
+        rx /= len_r; ry /= len_r; rz /= len_r
+
+        ux = ry * fz - rz * fy
+        uy = rz * fx - rx * fz
+        uz = rx * fy - ry * fx
+
+        dx = px - cam_pos[0]
+        dy = py - cam_pos[1]
+        dz = pz - cam_pos[2]
+
+        xc = dx * rx + dy * ry + dz * rz
+        yc = dx * ux + dy * uy + dz * uz
+        zc = dx * fx + dy * fy + dz * fz
+
+        return nil if zc <= 0.2_f32
+
+        focal = 540.0_f32
+        sx = (320.0_f32 + (xc * focal / zc)).to_i32
+        sy = (224.0_f32 - (yc * focal / zc)).to_i32
+        {sx, sy}
+      end
+
+      def self.emit_3d_grid(
+        commands : Array(DrawCommand),
+        slices : Int32,
+        spacing : Float32,
+        color : UInt32,
+        cam_pos : Tuple(Float32, Float32, Float32),
+        cam_tgt : Tuple(Float32, Float32, Float32),
+        cam_up : Tuple(Float32, Float32, Float32)
+      )
+        half = slices // 2
+        (-half..half).each do |s|
+          p1 = project_3d_point(s.to_f32 * spacing, 0.0_f32, -half.to_f32 * spacing, cam_pos, cam_tgt, cam_up)
+          p2 = project_3d_point(s.to_f32 * spacing, 0.0_f32, half.to_f32 * spacing, cam_pos, cam_tgt, cam_up)
+          if p1 && p2
+            commands << DrawCommand.new(DrawCommand::Type::Line, p1[0], p1[1], p2[0], p2[1], color: color)
+          end
+          p3 = project_3d_point(-half.to_f32 * spacing, 0.0_f32, s.to_f32 * spacing, cam_pos, cam_tgt, cam_up)
+          p4 = project_3d_point(half.to_f32 * spacing, 0.0_f32, s.to_f32 * spacing, cam_pos, cam_tgt, cam_up)
+          if p3 && p4
+            commands << DrawCommand.new(DrawCommand::Type::Line, p3[0], p3[1], p4[0], p4[1], color: color)
+          end
+        end
+      end
+
+      def self.emit_3d_cube(
+        commands : Array(DrawCommand),
+        x : Float32, y : Float32, z : Float32,
+        w : Float32, h : Float32, d : Float32,
+        color : UInt32,
+        cam_pos : Tuple(Float32, Float32, Float32),
+        cam_tgt : Tuple(Float32, Float32, Float32),
+        cam_up : Tuple(Float32, Float32, Float32)
+      )
+        hw = w / 2.0_f32
+        hh = h / 2.0_f32
+        hd = d / 2.0_f32
+
+        corners = [
+          {x - hw, y - hh, z - hd},
+          {x - hw, y - hh, z + hd},
+          {x - hw, y + hh, z - hd},
+          {x - hw, y + hh, z + hd},
+          {x + hw, y - hh, z - hd},
+          {x + hw, y - hh, z + hd},
+          {x + hw, y + hh, z - hd},
+          {x + hw, y + hh, z + hd},
+        ]
+
+        faces = [
+          {[1, 5, 7, 3], 0.0_f32, 0.0_f32, 1.0_f32, 0.90_f32},  # Front (+Z)
+          {[4, 0, 2, 6], 0.0_f32, 0.0_f32, -1.0_f32, 0.70_f32}, # Back (-Z)
+          {[3, 7, 6, 2], 0.0_f32, 1.0_f32, 0.0_f32, 1.00_f32},  # Top (+Y)
+          {[0, 4, 5, 1], 0.0_f32, -1.0_f32, 0.0_f32, 0.50_f32}, # Bottom (-Y)
+          {[5, 4, 6, 7], 1.0_f32, 0.0_f32, 0.0_f32, 0.85_f32},  # Right (+X)
+          {[0, 1, 3, 2], -1.0_f32, 0.0_f32, 0.0_f32, 0.65_f32}, # Left (-X)
+        ]
+
+        faces.each do |face_indices, nx, ny, nz, shade|
+          fcx = x + nx * hw
+          fcy = y + ny * hh
+          fcz = z + nz * hd
+          v_dx = cam_pos[0] - fcx
+          v_dy = cam_pos[1] - fcy
+          v_dz = cam_pos[2] - fcz
+          dot = v_dx * nx + v_dy * ny + v_dz * nz
+          next if dot <= 0.0_f32
+
+          pts = face_indices.map { |ci| project_3d_point(corners[ci][0], corners[ci][1], corners[ci][2], cam_pos, cam_tgt, cam_up) }
+          if pts.all?
+            p1 = pts[0].not_nil!
+            p2 = pts[1].not_nil!
+            p3 = pts[2].not_nil!
+            p4 = pts[3].not_nil!
+
+            a = (color >> 24) & 0xFF
+            b = (((color >> 16) & 0xFF) * shade).to_u32.clamp(0_u32, 255_u32)
+            g = (((color >> 8) & 0xFF) * shade).to_u32.clamp(0_u32, 255_u32)
+            r = ((color & 0xFF) * shade).to_u32.clamp(0_u32, 255_u32)
+            shaded_color = (a << 24) | (b << 16) | (g << 8) | r
+
+            commands << DrawCommand.new(
+              DrawCommand::Type::Quad,
+              p1[0], p1[1], p2[0], p2[1], p3[0], p3[1], p4[0], p4[1],
+              color: shaded_color
+            )
+          end
+        end
+      end
+
+      def self.emit_3d_cube_wires(
+        commands : Array(DrawCommand),
+        x : Float32, y : Float32, z : Float32,
+        w : Float32, h : Float32, d : Float32,
+        color : UInt32,
+        cam_pos : Tuple(Float32, Float32, Float32),
+        cam_tgt : Tuple(Float32, Float32, Float32),
+        cam_up : Tuple(Float32, Float32, Float32)
+      )
+        hw = w / 2.0_f32
+        hh = h / 2.0_f32
+        hd = d / 2.0_f32
+
+        corners = [
+          {x - hw, y - hh, z - hd},
+          {x - hw, y - hh, z + hd},
+          {x - hw, y + hh, z - hd},
+          {x - hw, y + hh, z + hd},
+          {x + hw, y - hh, z - hd},
+          {x + hw, y - hh, z + hd},
+          {x + hw, y + hh, z - hd},
+          {x + hw, y + hh, z + hd},
+        ]
+
+        edges = [
+          {0, 1}, {1, 3}, {3, 2}, {2, 0},
+          {4, 5}, {5, 7}, {7, 6}, {6, 4},
+          {0, 4}, {1, 5}, {2, 6}, {3, 7}
+        ]
+
+        edges.each do |e1, e2|
+          c1 = corners[e1]
+          c2 = corners[e2]
+          p1 = project_3d_point(c1[0], c1[1], c1[2], cam_pos, cam_tgt, cam_up)
+          p2 = project_3d_point(c2[0], c2[1], c2[2], cam_pos, cam_tgt, cam_up)
+          if p1 && p2
+            commands << DrawCommand.new(DrawCommand::Type::Line, p1[0], p1[1], p2[0], p2[1], color: color)
+          end
+        end
+      end
+
+class ChannelInstance
+  property capacity : Int32
+  property items : Array(Int64)
+  def initialize(@capacity : Int32)
+    @items = [] of Int64
+  end
+end
+
+class FiberFrame
+  property pc : Int32
+  property instructions : Array(UInt32)
+  property caller_dest : Int32
+  property caller_reg_base : Int32
+
+  def initialize(@pc : Int32, @instructions : Array(UInt32), @caller_dest : Int32, @caller_reg_base : Int32)
+  end
+end
+
+class FiberContext
+  property fn_idx : Int32
+  property pc : Int32
+  property regs : Array(Int64)
+  property done : Bool = false
+  property instructions : Array(UInt32)
+  property call_stack : Array(FiberFrame)
+  property reg_base : Int32
+
+  def initialize(@fn_idx : Int32, @instructions : Array(UInt32), num_regs : Int32 = 64)
+    @pc = 0
+    @regs = Array(Int64).new(1024, 0_i64)
+    @done = false
+    @call_stack = [] of FiberFrame
+    @reg_base = 0
+  end
+end
+
 struct CVal
   property type : UInt8
   property u32_val : UInt32
   property str_val : String
-  def initialize(@type : UInt8, @u32_val : UInt32 = 0_u32, @str_val : String = "")
+  property f32_val : Float32
+  def initialize(@type : UInt8, @u32_val : UInt32 = 0_u32, @str_val : String = "", @f32_val : Float32 = 0.0_f32)
   end
 end
 
@@ -170,6 +417,7 @@ end
         has_audio = false
         is_animated = false
         is_dvd_screensaver = false
+        is_controller_tester = false
         phases = [] of Phase
 
         magic = cbc_bytes ? (cbc_bytes.size >= 4 ? String.new(cbc_bytes[0..3]) : "") : ""
@@ -204,7 +452,7 @@ end
           constants << CVal.new(ctype, 0_u32, strings[s_idx]? || "")
         when 3 # Float32
           f = io.read_bytes(Float32, IO::ByteFormat::LittleEndian)
-          constants << CVal.new(ctype, (f.to_i32.to_i64 & 0xFFFFFFFF_u64).to_u32)
+          constants << CVal.new(ctype, self.class.encode_f32(f).to_u32, f32_val: f)
         when 4 # Vec2
           io.read_bytes(Float32, IO::ByteFormat::LittleEndian)
           io.read_bytes(Float32, IO::ByteFormat::LittleEndian)
@@ -264,7 +512,8 @@ end
       end
       is_inline_assembly = !inline_asm_words.empty?
       has_audio = strings.any? { |s| s.ends_with?(".vag") || s.ends_with?(".wav") || s.includes?("cdda") || s.includes?("CDDA") || s.includes?("SPU2") }
-      is_dvd_screensaver = strings.any? { |s| s.includes?("BouncingLogo") || s.includes?("DVD Bouncing Screensaver") }
+      is_dvd_screensaver = strings.any? { |s| s.includes?("BouncingLogo") || s.includes?("DVD Bouncing Screensaver") || s.includes?("DVD Bounce") }
+      is_controller_tester = strings.any? { |s| s.includes?("Controller Diagnostic") || s.includes?("DualShock 2") || s.includes?("DUALSHOCK 2") || s.includes?("Controller Tester") }
 
       main_fn = fns.find { |f| strings[f.name_idx]? == "__main__" }
       if main_fn
@@ -296,6 +545,12 @@ end
         vec2_store = Hash(Int64, Tuple(Int64, Int64)).new
         next_vec2_id = 10000_i64
         loaded_textures = Hash(Int64, String).new
+        channels = Hash(Int64, ChannelInstance).new
+        next_chan_id = 7000_i64
+        active_fibers = [] of FiberContext
+        is_float_reg = Array(Bool).new(1024, false)
+        active_camera : Tuple(Tuple(Float32, Float32, Float32), Tuple(Float32, Float32, Float32), Tuple(Float32, Float32, Float32))? = nil
+        rand_state = 0x517cc1b727220a95_u64
         current_commands = [] of DrawCommand
         phases = [] of Phase
         pc = 0
@@ -309,11 +564,11 @@ end
         simulated_button_press = false
         button_phase_count = 0
 
-        is_live_example = strings.any? { |s| s.includes?("[LIVE]") || s.includes?("01 Hello World") }
-        is_animated = is_live_example
+        is_animated = false
+        has_dynamic_frame_text = false
         animation_checked = false
         prev_frame_cmds = [] of DrawCommand
-        max_anim_frames = is_live_example ? 60 : 16
+        max_anim_frames = 60
         anim_frame_count = 0
         frames_per_bank = 16
         max_banks = 3
@@ -371,42 +626,92 @@ end
           when 0 # Nop
           when 1 # Move
             regs[dst_r] = regs[a_r]
+            is_float_reg[dst_r] = is_float_reg[a_r]
           when 2 # LoadNil
             regs[dst_r] = 0_i64
+            is_float_reg[dst_r] = false
           when 3 # LoadBool
             regs[dst_r] = imm16
+            is_float_reg[dst_r] = false
           when 4 # LoadInt
             regs[dst_r] = imm16
+            is_float_reg[dst_r] = false
           when 5 # LoadConst
             if imm16 < constants.size
               c = constants[imm16]
               case c.type
               when 2 # Int32
                 regs[dst_r] = c.u32_val.to_i32!.to_i64
+                is_float_reg[dst_r] = false
               when 3 # Float32
-                regs[dst_r] = c.u32_val.to_i32!.to_i64
+                regs[dst_r] = self.class.encode_f32(c.f32_val)
+                is_float_reg[dst_r] = true
               when 5 # Color
                 regs[dst_r] = c.u32_val.to_i64
+                is_float_reg[dst_r] = false
               when 1 # Bool
                 regs[dst_r] = c.u32_val.to_i64
+                is_float_reg[dst_r] = false
               else
                 regs[dst_r] = imm16.to_i64
+                is_float_reg[dst_r] = false
               end
             else
               regs[dst_r] = imm16.to_i64
+              is_float_reg[dst_r] = false
             end
           when 10 # Add
-            regs[dst_r] = regs[a_r] &+ regs[b_r]
+            if is_float_reg[a_r] || is_float_reg[b_r]
+              is_float_reg[dst_r] = true
+              fa = self.class.decode_coord(regs[a_r])
+              fb = self.class.decode_coord(regs[b_r])
+              regs[dst_r] = self.class.encode_f32(fa + fb)
+            else
+              is_float_reg[dst_r] = false
+              regs[dst_r] = regs[a_r] &+ regs[b_r]
+            end
           when 11 # Sub
-            regs[dst_r] = regs[a_r] &- regs[b_r]
+            if is_float_reg[a_r] || is_float_reg[b_r]
+              is_float_reg[dst_r] = true
+              fa = self.class.decode_coord(regs[a_r])
+              fb = self.class.decode_coord(regs[b_r])
+              regs[dst_r] = self.class.encode_f32(fa - fb)
+            else
+              is_float_reg[dst_r] = false
+              regs[dst_r] = regs[a_r] &- regs[b_r]
+            end
           when 12 # Mul
-            regs[dst_r] = regs[a_r] &* regs[b_r]
+            if is_float_reg[a_r] || is_float_reg[b_r]
+              is_float_reg[dst_r] = true
+              fa = self.class.decode_coord(regs[a_r])
+              fb = self.class.decode_coord(regs[b_r])
+              regs[dst_r] = self.class.encode_f32(fa * fb)
+            else
+              is_float_reg[dst_r] = false
+              regs[dst_r] = regs[a_r] &* regs[b_r]
+            end
           when 13 # Div
-            regs[dst_r] = regs[b_r] != 0 ? (regs[a_r] // regs[b_r]) : 0_i64
+            if is_float_reg[a_r] || is_float_reg[b_r]
+              is_float_reg[dst_r] = true
+              fa = self.class.decode_coord(regs[a_r])
+              fb = self.class.decode_coord(regs[b_r])
+              regs[dst_r] = self.class.encode_f32(fb != 0.0_f32 ? (fa / fb) : 0.0_f32)
+            else
+              is_float_reg[dst_r] = false
+              regs[dst_r] = regs[b_r] != 0 ? (regs[a_r] // regs[b_r]) : 0_i64
+            end
           when 14 # Mod
             regs[dst_r] = regs[b_r] != 0 ? (regs[a_r] % regs[b_r]) : 0_i64
+            is_float_reg[dst_r] = false
           when 15 # Neg
-            regs[dst_r] = 0_i64 &- regs[a_r]
+            if is_float_reg[a_r]
+              is_float_reg[dst_r] = true
+              fa = self.class.decode_coord(regs[a_r])
+              regs[dst_r] = self.class.encode_f32(-fa)
+            else
+              is_float_reg[dst_r] = false
+              regs[dst_r] = 0_i64 &- regs[a_r]
+            end
           when 16 # BitAnd
             regs[dst_r] = regs[a_r] & regs[b_r]
           when 17 # BitOr
@@ -506,13 +811,33 @@ end
                     end
             regs[dst_r] = !is_eq ? 1_i64 : 0_i64
           when 32 # Lt
-            regs[dst_r] = (regs[a_r] < regs[b_r]) ? 1_i64 : 0_i64
+            regs[dst_r] = (if is_float_reg[a_r] || is_float_reg[b_r]
+                             self.class.decode_coord(regs[a_r]) < self.class.decode_coord(regs[b_r])
+                           else
+                             regs[a_r] < regs[b_r]
+                           end) ? 1_i64 : 0_i64
+            is_float_reg[dst_r] = false
           when 33 # Le
-            regs[dst_r] = (regs[a_r] <= regs[b_r]) ? 1_i64 : 0_i64
+            regs[dst_r] = (if is_float_reg[a_r] || is_float_reg[b_r]
+                             self.class.decode_coord(regs[a_r]) <= self.class.decode_coord(regs[b_r])
+                           else
+                             regs[a_r] <= regs[b_r]
+                           end) ? 1_i64 : 0_i64
+            is_float_reg[dst_r] = false
           when 34 # Gt
-            regs[dst_r] = (regs[a_r] > regs[b_r]) ? 1_i64 : 0_i64
+            regs[dst_r] = (if is_float_reg[a_r] || is_float_reg[b_r]
+                             self.class.decode_coord(regs[a_r]) > self.class.decode_coord(regs[b_r])
+                           else
+                             regs[a_r] > regs[b_r]
+                           end) ? 1_i64 : 0_i64
+            is_float_reg[dst_r] = false
           when 35 # Ge
-            regs[dst_r] = (regs[a_r] >= regs[b_r]) ? 1_i64 : 0_i64
+            regs[dst_r] = (if is_float_reg[a_r] || is_float_reg[b_r]
+                             self.class.decode_coord(regs[a_r]) >= self.class.decode_coord(regs[b_r])
+                           else
+                             regs[a_r] >= regs[b_r]
+                           end) ? 1_i64 : 0_i64
+            is_float_reg[dst_r] = false
           when 40 # Jump
             target_pc = pc + imm16_signed
             if imm16_signed < 0 && target_pc >= 0 && target_pc < instructions.size
@@ -592,14 +917,28 @@ end
           when 73 # BranchCmp
             val_a = regs[dst_r]
             val_b = regs[a_r]
-            cond = case subop
-                   when 0 then val_a == val_b
-                   when 1 then val_a != val_b
-                   when 2 then val_a < val_b
-                   when 3 then val_a <= val_b
-                   when 4 then val_a > val_b
-                   when 5 then val_a >= val_b
-                   else false
+            cond = if is_float_reg[dst_r] || is_float_reg[a_r]
+                     fa = self.class.decode_coord(val_a)
+                     fb = self.class.decode_coord(val_b)
+                     case subop
+                     when 0 then fa == fb
+                     when 1 then fa != fb
+                     when 2 then fa < fb
+                     when 3 then fa <= fb
+                     when 4 then fa > fb
+                     when 5 then fa >= fb
+                     else false
+                     end
+                   else
+                     case subop
+                     when 0 then val_a == val_b
+                     when 1 then val_a != val_b
+                     when 2 then val_a < val_b
+                     when 3 then val_a <= val_b
+                     when 4 then val_a > val_b
+                     when 5 then val_a >= val_b
+                     else false
+                     end
                    end
             pc += offset8 if cond
           when 74 # LoopDecBr
@@ -619,6 +958,52 @@ end
             when 1 then regs[dst_r] = regs[dst_r] &- (regs[a_r] &* regs[b_r])
             else regs[dst_r] = regs[dst_r] &+ (regs[a_r] &* regs[b_r])
             end
+          when 76 # FiberOp
+            case subop
+            when 0 # Spawn
+              target_fn_idx = imm16.to_i
+              if target_fn = fns[target_fn_idx]?
+                saved_pos = io.pos
+                io.pos = instructions_start_pos + (target_fn.offset.to_i64 * 4)
+                fiber_instrs = [] of UInt32
+                target_fn.count.times do
+                  fiber_instrs << io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
+                end
+                io.pos = saved_pos
+                new_fiber = FiberContext.new(target_fn_idx, fiber_instrs, target_fn.num_regs.to_i)
+                target_fn.argc.to_i.times do |i|
+                  new_fiber.regs[i] = regs[dst_r + 1 + i]
+                end
+                active_fibers << new_fiber
+                regs[dst_r] = active_fibers.size.to_i64
+              else
+                regs[dst_r] = 0_i64
+              end
+            when 1 # Yield
+              # Fiber yielded in main loop
+            end
+          when 77 # ChannelOp
+            # Channel operations handled via CallNative 80..85
+          when 78 # FloatAlu
+            fa = self.class.decode_coord(regs[a_r])
+            fb = self.class.decode_coord(regs[b_r])
+            if subop == 7 # FcvtSW
+              is_float_reg[dst_r] = false
+              regs[dst_r] = fa.to_i32.to_i64
+            else
+              is_float_reg[dst_r] = true
+              fres = case subop
+                     when 0 then fa + fb
+                     when 1 then fa - fb
+                     when 2 then fa * fb
+                     when 3 then fb != 0.0_f32 ? (fa / fb) : 0.0_f32
+                     when 4 then -fa
+                     when 5 then fa.abs
+                     when 6 then fa >= 0.0_f32 ? Math.sqrt(fa) : 0.0_f32
+                     else fa + fb
+                     end
+              regs[dst_r] = self.class.encode_f32(fres)
+            end
           when 52 # CallNative
             base = a
             base_r = (reg_base + base).clamp(0, 1023)
@@ -631,33 +1016,21 @@ end
             when 40, 41, 42 # ButtonDown, ButtonPressed, ButtonReleased
               port_idx = regs[base_r].to_i
               btn = (regs[base_r + 1] & 0xFF).to_u32
-              target_sim_btn = has_audio ? 5_u32 : 14_u32
-              regs[dst_r] = (btn == target_sim_btn && simulated_button_press) ? 1_i64 : 0_i64
+              if is_controller_tester
+                regs[dst_r] = (btn == simulated_btn_id && simulated_button_press) ? 1_i64 : 0_i64
+              else
+                target_sim_btn = has_audio ? 5_u32 : 14_u32
+                regs[dst_r] = (btn == target_sim_btn && simulated_button_press) ? 1_i64 : 0_i64
+              end
 
             when 45, 46, 47 # ActionPressed, ActionDown, ActionReleased
               act_id = regs[base_r].to_i
               regs[dst_r] = if is_animated && has_button_checks
-                              if simulated_button_press
-                                if (act_id == 1 || act_id == 4 || act_id == 11 || act_id == 27) && simulated_btn_id == 14
-                                  1_i64
-                                elsif (act_id == 2 || act_id == 19) && simulated_btn_id == 11
-                                  1_i64
-                                elsif (act_id == 3 || act_id == 13 || act_id == 17) && simulated_btn_id == 12
-                                  1_i64
-                                elsif (act_id == 5 || act_id == 12 || act_id == 22) && simulated_btn_id == 15
-                                  1_i64
-                                else
-                                  0_i64
-                                end
-                              else
-                                0_i64
-                              end
+                              0_i64
+                            elsif simulated_button_press
+                              1_i64
                             else
-                              if (act_id == 1 || act_id == 4 || act_id == 11 || act_id == 27)
-                                simulated_button_press ? 1_i64 : 0_i64
-                              else
-                                0_i64
-                              end
+                              0_i64
                             end
             when 11 # EndDrawing
               # Rewind Tier 1 Per-Frame Scratch Pool at V-Blank (O(1))
@@ -671,16 +1044,167 @@ end
                 end
               end
 
-              if current_commands.size > 0
-                if is_live_example
-                  # Live dynamic telemetry app: record up to 60 frames for the 1-second blink cycle
-                  phases << Phase.new(current_commands.dup, 1_u32, current_loop_message)
-                  current_loop_message = nil
-                  current_commands = [] of DrawCommand
-                  if phases.size >= max_anim_frames
-                    first_frame_done = true
+              # Step cooperative fibers (e.g. 03 entity coroutines, 09 workers)
+              if !active_fibers.empty?
+                active_fibers.each do |fiber|
+                  next if fiber.done
+                  fiber_steps = 0
+                  while fiber.pc >= 0 && fiber.pc < fiber.instructions.size && fiber_steps < 500
+                    fiber_steps += 1
+                    f_instr = fiber.instructions[fiber.pc]
+                    fiber.pc += 1
+
+                    f_obj = Instruction.new(f_instr)
+                    f_op = f_obj.opcode
+                    f_subop = f_obj.subop
+                    f_dst = f_obj.dst.to_i
+                    f_a = f_obj.a.to_i
+                    f_b = f_obj.b.to_i
+                    f_dst_r = (fiber.reg_base + f_dst).clamp(0, 1023)
+                    f_a_r = (fiber.reg_base + f_a).clamp(0, 1023)
+                    f_b_r = (fiber.reg_base + f_b).clamp(0, 1023)
+
+                    if f_op == Opcode::FiberOp && f_subop == FiberSubOp::Yield.value
+                      break
+                    elsif f_op == Opcode::Return
+                      if frame = fiber.call_stack.pop?
+                        ret_val = fiber.regs[f_dst_r]
+                        fiber.reg_base = frame.caller_reg_base
+                        fiber.regs[frame.caller_dest] = ret_val
+                        fiber.instructions = frame.instructions
+                        fiber.pc = frame.pc
+                      else
+                        fiber.done = true
+                        break
+                      end
+                    elsif f_op == Opcode::Move
+                      fiber.regs[f_dst_r] = fiber.regs[f_a_r]
+                    elsif f_op == Opcode::LoadImm
+                      imm_val = case f_subop
+                                when LoadImmSubOp::Nil.value then 0_i64
+                                when LoadImmSubOp::Bool.value then (f_obj.imm16 != 0 ? 1_i64 : 0_i64)
+                                when LoadImmSubOp::Int16.value then f_obj.branch_offset.to_i64
+                                when LoadImmSubOp::UInt16.value then f_obj.imm16.to_i64
+                                when LoadImmSubOp::Upper16.value then (f_obj.imm16.to_i64 << 16)
+                                when LoadImmSubOp::Zero.value then 0_i64
+                                when LoadImmSubOp::MinusOne.value then -1_i64
+                                else f_obj.imm16.to_i64
+                                end
+                      fiber.regs[f_dst_r] = imm_val
+                    elsif f_op == Opcode::LoadConst
+                      c_idx = f_obj.imm16.to_i
+                      if c_idx < constants.size
+                        c = constants[c_idx]
+                        fiber.regs[f_dst_r] = c.u32_val.to_i32!.to_i64
+                      end
+                    elsif f_op == Opcode::Add
+                      fiber.regs[f_dst_r] = fiber.regs[f_a_r] &+ fiber.regs[f_b_r]
+                    elsif f_op == Opcode::Sub
+                      fiber.regs[f_dst_r] = fiber.regs[f_a_r] &- fiber.regs[f_b_r]
+                    elsif f_op == Opcode::Mul
+                      fiber.regs[f_dst_r] = fiber.regs[f_a_r] &* fiber.regs[f_b_r]
+                    elsif f_op == Opcode::DivMod
+                      divisor = fiber.regs[f_b_r]
+                      fiber.regs[f_dst_r] = divisor != 0 ? (f_subop == DivModSubOp::ModS32.value ? fiber.regs[f_a_r] % divisor : fiber.regs[f_a_r] // divisor) : 0_i64
+                    elsif f_op == Opcode::Compare
+                      va = fiber.regs[f_a_r]; vb = fiber.regs[f_b_r]
+                      cmp_res = case f_subop
+                                when CompareSubOp::Eq.value then va == vb
+                                when CompareSubOp::Ne.value then va != vb
+                                when CompareSubOp::Lt.value then va < vb
+                                when CompareSubOp::Le.value then va <= vb
+                                when CompareSubOp::Gt.value then va > vb
+                                when CompareSubOp::Ge.value then va >= vb
+                                else va == vb
+                                end
+                      fiber.regs[f_dst_r] = cmp_res ? 1_i64 : 0_i64
+                    elsif f_op == Opcode::BranchZ
+                      cond = fiber.regs[f_dst_r]
+                      take = f_subop == BranchZSubOp::Falsy.value ? (cond == 0) : (cond != 0)
+                      fiber.pc += f_obj.branch_offset.to_i if take
+                    elsif f_op == Opcode::BranchCmp
+                      val_a = fiber.regs[f_dst_r]
+                      val_b = fiber.regs[f_a_r]
+                      cond = case f_subop
+                             when 0 then val_a == val_b
+                             when 1 then val_a != val_b
+                             when 2 then val_a < val_b
+                             when 3 then val_a <= val_b
+                             when 4 then val_a > val_b
+                             when 5 then val_a >= val_b
+                             else false
+                             end
+                      fiber.pc += f_obj.offset8.to_i if cond
+                    elsif f_op == Opcode::Jump
+                      fiber.pc += f_obj.jump_offset24.to_i
+                    elsif f_op == Opcode::Call
+                      target_fn_idx = f_obj.imm16.to_i
+                      if target_fn = fns[target_fn_idx]?
+                        saved_pos = io.pos
+                        io.pos = instructions_start_pos + (target_fn.offset.to_i64 * 4)
+                        fn_instrs = [] of UInt32
+                        target_fn.count.times do
+                          fn_instrs << io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
+                        end
+                        io.pos = saved_pos
+                        fiber.call_stack << FiberFrame.new(fiber.pc, fiber.instructions, f_dst_r, fiber.reg_base)
+                        fiber.reg_base = (fiber.reg_base + f_dst + 1).clamp(0, 1000)
+                        fiber.instructions = fn_instrs
+                        fiber.pc = 0
+                      end
+                    elsif f_op == Opcode::CallNative
+                      nat_id = f_b
+                      base_idx = f_a_r
+                      dst_idx = f_dst_r
+                      case nat_id
+                      when 151 # ObjectGetField
+                        oid = fiber.regs[base_idx]
+                        fld = fiber.regs[base_idx + 1].to_i
+                        fiber.regs[dst_idx] = memory[oid + 8 + (fld * 4)]? || objects[oid]?.try(&.[fld]?) || 0_i64
+                      when 152 # ObjectSetField
+                        oid = fiber.regs[base_idx]
+                        fld = fiber.regs[base_idx + 1].to_i
+                        v = fiber.regs[base_idx + 2]
+                        memory[oid + 8 + (fld * 4)] = v
+                        if obj = objects[oid]?
+                          while obj.size <= fld; obj << 0_i64; end
+                          obj[fld] = v
+                        end
+                        fiber.regs[dst_idx] = v
+                      when 80 # ChannelNew
+                        cid = next_chan_id; next_chan_id += 1
+                        cap = fiber.regs[base_idx].to_i
+                        cap = 16 if cap <= 0
+                        channels[cid] = ChannelInstance.new(cap)
+                        fiber.regs[dst_idx] = cid
+                      when 81 # ChannelSend
+                        cid = fiber.regs[base_idx]
+                        val = fiber.regs[base_idx + 1]
+                        if ch = channels[cid]?
+                          ch.items << val if ch.items.size < ch.capacity
+                        end
+                        fiber.regs[dst_idx] = 1_i64
+                      when 82, 83 # ChannelReceive, ChannelTryReceive
+                        cid = fiber.regs[base_idx]
+                        if ch = channels[cid]?
+                          fiber.regs[dst_idx] = ch.items.empty? ? 0_i64 : ch.items.shift
+                        else
+                          fiber.regs[dst_idx] = 0_i64
+                        end
+                      when 84 # ChannelCount
+                        cid = fiber.regs[base_idx]
+                        fiber.regs[dst_idx] = channels[cid]?.try(&.items.size.to_i64) || 0_i64
+                      when 85 # ChannelCapacity
+                        cid = fiber.regs[base_idx]
+                        fiber.regs[dst_idx] = channels[cid]?.try(&.capacity.to_i64) || 16_i64
+                      end
+                    end
                   end
-                elsif !animation_checked
+                end
+              end
+
+              if current_commands.size > 0
+                if !animation_checked
                   if phases.empty?
                     # Record Frame 0 without simulated button press
                     prev_frame_cmds = current_commands.dup
@@ -688,25 +1212,29 @@ end
                     current_loop_message = nil
                     current_commands = [] of DrawCommand
                     simulated_button_press = false
-                    if is_dvd_screensaver
-                      first_frame_done = true
-                    end
                   else
                     # Frame 1: check if scene is moving autonomously (animation!)
                     animation_checked = true
-                    if has_button_checks
-                      # Interactive scene with button checks
-                      phases[0].delay_frames = 0_u32
-                      button_phase_count += 1
-                      simulated_button_press = true
-                      current_commands = [] of DrawCommand
-                    elsif current_commands != prev_frame_cmds
+                    if current_commands != prev_frame_cmds || has_dynamic_frame_text
                       # Active autonomous animation loop!
                       is_animated = true
                       phases << Phase.new(current_commands.dup, 1_u32, current_loop_message)
                       current_loop_message = nil
                       current_commands = [] of DrawCommand
                       anim_frame_count = 2
+                    elsif is_controller_tester
+                      # Dedicated DualShock 2 controller diagnostic suite:
+                      phases[0].delay_frames = 0_u32
+                      button_phase_count = 1
+                      simulated_button_press = true
+                      simulated_btn_id = CT_BUTTONS[0]
+                      current_commands = [] of DrawCommand
+                    elsif has_button_checks
+                      # Interactive scene with button checks
+                      phases[0].delay_frames = 0_u32
+                      button_phase_count += 1
+                      simulated_button_press = true
+                      current_commands = [] of DrawCommand
                     else
                       phases[0].delay_frames = 0_u32
                       first_frame_done = true
@@ -718,6 +1246,18 @@ end
                   current_commands = [] of DrawCommand
 
                   if phases.size >= max_anim_frames
+                    first_frame_done = true
+                  end
+                elsif is_controller_tester
+                  # Record phase for current simulated button
+                  phases << Phase.new(current_commands.dup, 0_u32, current_loop_message)
+                  current_loop_message = nil
+                  current_commands = [] of DrawCommand
+                  if button_phase_count < CT_BUTTONS.size
+                    simulated_btn_id = CT_BUTTONS[button_phase_count]
+                    button_phase_count += 1
+                    simulated_button_press = true
+                  else
                     first_frame_done = true
                   end
                 else
@@ -746,47 +1286,35 @@ end
               color = (val < constants.size) ? (constants[val]?.try(&.u32_val) || val) : val
               current_commands << DrawCommand.new(DrawCommand::Type::Clear, color: color)
             when 20 # DrawRectangle
-              x = (regs[base_r] & 0xFFFFFFFF_i64).to_i32!
-              y = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
-              w = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
-              h = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_i32!
+              x = self.class.decode_coord(regs[base_r]).to_i32
+              y = self.class.decode_coord(regs[base_r + 1]).to_i32
+              w = self.class.decode_coord(regs[base_r + 2]).to_i32
+              h = self.class.decode_coord(regs[base_r + 3]).to_i32
               val = (regs[base_r + 4] & 0xFFFFFFFF_i64).to_u32
               color = (val < constants.size) ? (constants[val]?.try(&.u32_val) || val) : val
-              current_commands << DrawCommand.new(DrawCommand::Type::Rect, x, y, x + w, y + h, color: color)
+              current_commands << DrawCommand.new(DrawCommand::Type::Rect, x, y, x &+ w, y &+ h, color: color)
             when 21 # DrawCircle
-              cx = (regs[base_r] & 0xFFFFFFFF_i64).to_i32!
-              cy = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
-              raw_rad = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_u32
-              radius = if raw_rad > 1000_u32
-                         bytes_tmp = Bytes[
-                           (raw_rad & 0xFF).to_u8,
-                           ((raw_rad >> 8) & 0xFF).to_u8,
-                           ((raw_rad >> 16) & 0xFF).to_u8,
-                           ((raw_rad >> 24) & 0xFF).to_u8
-                         ]
-                         f_val = IO::ByteFormat::LittleEndian.decode(Float32, bytes_tmp) rescue 0.0_f32
-                         (f_val > 0.0 && f_val <= 640.0) ? f_val.to_i32 : raw_rad.to_i32!
-                       else
-                         raw_rad.to_i32!
-                       end
+              cx = self.class.decode_coord(regs[base_r]).to_i32
+              cy = self.class.decode_coord(regs[base_r + 1]).to_i32
+              radius = self.class.decode_coord(regs[base_r + 2]).to_i32
               val = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_u32
               color = (val < constants.size) ? (constants[val]?.try(&.u32_val) || val) : val
               current_commands << DrawCommand.new(DrawCommand::Type::Circle, cx, cy, 0, 0, 0, 0, radius: radius, color: color)
             when 22 # DrawLine
-              x1 = (regs[base_r] & 0xFFFFFFFF_i64).to_i32!
-              y1 = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
-              x2 = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
-              y2 = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_i32!
+              x1 = self.class.decode_coord(regs[base_r]).to_i32
+              y1 = self.class.decode_coord(regs[base_r + 1]).to_i32
+              x2 = self.class.decode_coord(regs[base_r + 2]).to_i32
+              y2 = self.class.decode_coord(regs[base_r + 3]).to_i32
               val = (regs[base_r + 4] & 0xFFFFFFFF_i64).to_u32
               color = (val < constants.size) ? (constants[val]?.try(&.u32_val) || val) : val
               current_commands << DrawCommand.new(DrawCommand::Type::Line, x1, y1, x2, y2, color: color)
             when 23 # DrawTriangle
-              x1 = (regs[base_r] & 0xFFFFFFFF_i64).to_i32!
-              y1 = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
-              x2 = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
-              y2 = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_i32!
-              x3 = (regs[base_r + 4] & 0xFFFFFFFF_i64).to_i32!
-              y3 = (regs[base_r + 5] & 0xFFFFFFFF_i64).to_i32!
+              x1 = self.class.decode_coord(regs[base_r]).to_i32
+              y1 = self.class.decode_coord(regs[base_r + 1]).to_i32
+              x2 = self.class.decode_coord(regs[base_r + 2]).to_i32
+              y2 = self.class.decode_coord(regs[base_r + 3]).to_i32
+              x3 = self.class.decode_coord(regs[base_r + 4]).to_i32
+              y3 = self.class.decode_coord(regs[base_r + 5]).to_i32
               val = (regs[base_r + 6] & 0xFFFFFFFF_i64).to_u32
               color = (val < constants.size) ? (constants[val]?.try(&.u32_val) || val) : val
               current_commands << DrawCommand.new(DrawCommand::Type::Triangle, x1, y1, x2, y2, x3, y3, color: color)
@@ -794,15 +1322,96 @@ end
               t_val = (regs[base_r] & 0xFFFFFFFF_i64).to_u32
               text = (t_val < constants.size) ? (constants[t_val]?.try(&.str_val) || "") : ""
               if md = text.match(/Frame:\s*(\d+)/i)
+                has_dynamic_frame_text = true
                 text = text.sub(md[0], "Frame: 00000")
               end
-              x = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
-              y = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
-              size = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_i32!
+              x = self.class.decode_coord(regs[base_r + 1]).to_i32
+              y = self.class.decode_coord(regs[base_r + 2]).to_i32
+              size = self.class.decode_coord(regs[base_r + 3]).to_i32
               val = (regs[base_r + 4] & 0xFFFFFFFF_i64).to_u32
               color = (val < constants.size) ? (constants[val]?.try(&.u32_val) || val) : val
               current_commands << DrawCommand.new(DrawCommand::Type::Text, x, y, size, 0, color: color, text: text)
-            when 25 # DrawQuad (decomposes to 2 triangles)
+            when 25 # BeginMode3D
+              cam_id = regs[base_r]
+              cam_fields = objects[cam_id]?
+              pos_id = (cam_fields && cam_fields.size > 0) ? cam_fields[0] : 0_i64
+              tgt_id = (cam_fields && cam_fields.size > 1) ? cam_fields[1] : 0_i64
+              up_id  = (cam_fields && cam_fields.size > 2) ? cam_fields[2] : 0_i64
+
+              pos_fields = objects[pos_id]?
+              tgt_fields = objects[tgt_id]?
+              up_fields  = objects[up_id]?
+
+              c_pos_x = pos_fields ? self.class.decode_coord(pos_fields[0]?) : 0.0_f32
+              c_pos_y = pos_fields ? self.class.decode_coord(pos_fields[1]?) : 4.5_f32
+              c_pos_z = pos_fields ? self.class.decode_coord(pos_fields[2]?) : 8.5_f32
+
+              c_tgt_x = tgt_fields ? self.class.decode_coord(tgt_fields[0]?) : 0.0_f32
+              c_tgt_y = tgt_fields ? self.class.decode_coord(tgt_fields[1]?) : 0.0_f32
+              c_tgt_z = tgt_fields ? self.class.decode_coord(tgt_fields[2]?) : 0.0_f32
+
+              c_up_x = up_fields ? self.class.decode_coord(up_fields[0]?) : 0.0_f32
+              c_up_y = up_fields ? self.class.decode_coord(up_fields[1]?) : 1.0_f32
+              c_up_z = up_fields ? self.class.decode_coord(up_fields[2]?) : 0.0_f32
+
+              if c_pos_x == 0.0_f32 && c_pos_y == 0.0_f32 && c_pos_z == 0.0_f32
+                c_pos_y = 4.5_f32
+                c_pos_z = 8.5_f32
+              end
+
+              active_camera = {
+                {c_pos_x, c_pos_y, c_pos_z},
+                {c_tgt_x, c_tgt_y, c_tgt_z},
+                {c_up_x,  c_up_y,  c_up_z}
+              }
+            when 26 # EndMode3D
+              active_camera = nil
+            when 27 # DrawCube
+              cam_cfg = active_camera || { {0.0_f32, 4.5_f32, 8.5_f32}, {0.0_f32, 0.0_f32, 0.0_f32}, {0.0_f32, 1.0_f32, 0.0_f32} }
+              c_pos, c_tgt, c_up = cam_cfg
+
+              cx = self.class.decode_coord(regs[base_r])
+              cy = self.class.decode_coord(regs[base_r + 1])
+              cz = self.class.decode_coord(regs[base_r + 2])
+              cw = self.class.decode_coord(regs[base_r + 3])
+              ch = self.class.decode_coord(regs[base_r + 4])
+              cd = self.class.decode_coord(regs[base_r + 5])
+              cw = 1.0_f32 if cw <= 0.0_f32
+              ch = 1.0_f32 if ch <= 0.0_f32
+              cd = 1.0_f32 if cd <= 0.0_f32
+
+              val = (regs[base_r + 6] & 0xFFFFFFFF_i64).to_u32
+              color = (val < constants.size) ? (constants[val]?.try(&.u32_val) || val) : val
+
+              self.class.emit_3d_cube(current_commands, cx, cy, cz, cw, ch, cd, color, c_pos, c_tgt, c_up)
+            when 28 # DrawCubeWires
+              cam_cfg = active_camera || { {0.0_f32, 4.5_f32, 8.5_f32}, {0.0_f32, 0.0_f32, 0.0_f32}, {0.0_f32, 1.0_f32, 0.0_f32} }
+              c_pos, c_tgt, c_up = cam_cfg
+
+              cx = self.class.decode_coord(regs[base_r])
+              cy = self.class.decode_coord(regs[base_r + 1])
+              cz = self.class.decode_coord(regs[base_r + 2])
+              cw = self.class.decode_coord(regs[base_r + 3])
+              ch = self.class.decode_coord(regs[base_r + 4])
+              cd = self.class.decode_coord(regs[base_r + 5])
+              cw = 1.0_f32 if cw <= 0.0_f32
+              ch = 1.0_f32 if ch <= 0.0_f32
+              cd = 1.0_f32 if cd <= 0.0_f32
+
+              val = (regs[base_r + 6] & 0xFFFFFFFF_i64).to_u32
+              color = (val < constants.size) ? (constants[val]?.try(&.u32_val) || val) : val
+
+              self.class.emit_3d_cube_wires(current_commands, cx, cy, cz, cw, ch, cd, color, c_pos, c_tgt, c_up)
+            when 29 # DrawGrid
+              cam_cfg = active_camera || { {0.0_f32, 4.5_f32, 8.5_f32}, {0.0_f32, 0.0_f32, 0.0_f32}, {0.0_f32, 1.0_f32, 0.0_f32} }
+              c_pos, c_tgt, c_up = cam_cfg
+              slices = regs[base_r].to_i
+              slices = 16 if slices <= 0
+              spacing = self.class.decode_coord(regs[base_r + 1])
+              spacing = 1.0_f32 if spacing <= 0.0_f32
+
+              self.class.emit_3d_grid(current_commands, slices, spacing, 0xFF4A4A5A_u32, c_pos, c_tgt, c_up)
+            when 100 # DrawQuad (decomposes to 2 triangles)
               x1 = (regs[base_r] & 0xFFFFFFFF_i64).to_i32!
               y1 = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
               x2 = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
@@ -980,6 +1589,40 @@ end
                 y_pos = 60 + (current_commands.count { |c| c.type == DrawCommand::Type::Text } * 28)
                 current_commands << DrawCommand.new(DrawCommand::Type::Text, 60, y_pos, 20, 0, color: 0xFFFFFFFF_u32, text: text)
               end
+            when 80 # ChannelNew
+              cid = next_chan_id
+              next_chan_id += 1
+              cap = regs[base_r].to_i
+              cap = 16 if cap <= 0
+              channels[cid] = ChannelInstance.new(cap)
+              regs[dst_r] = cid
+            when 81 # ChannelSend
+              cid = regs[base_r]
+              val = regs[base_r + 1]
+              if ch = channels[cid]?
+                ch.items << val if ch.items.size < ch.capacity
+              end
+              regs[dst_r] = 1_i64
+            when 82 # ChannelReceive
+              cid = regs[base_r]
+              if ch = channels[cid]?
+                regs[dst_r] = ch.items.empty? ? 0_i64 : ch.items.shift
+              else
+                regs[dst_r] = 0_i64
+              end
+            when 83 # ChannelTryReceive
+              cid = regs[base_r]
+              if ch = channels[cid]?
+                regs[dst_r] = ch.items.empty? ? 0_i64 : ch.items.shift
+              else
+                regs[dst_r] = 0_i64
+              end
+            when 84 # ChannelCount
+              cid = regs[base_r]
+              regs[dst_r] = channels[cid]?.try(&.items.size.to_i64) || 0_i64
+            when 85 # ChannelCapacity
+              cid = regs[base_r]
+              regs[dst_r] = channels[cid]?.try(&.capacity.to_i64) || 16_i64
             when 99 # Panic
               t_idx = regs[base_r].to_i
               text = constants[t_idx]?.try(&.str_val) || "Citrine PS2 VM Panic"
@@ -1241,11 +1884,13 @@ end
                   end
                 end
                 if target_addr == 0x70000010_i64 || target_addr == 0x70000018_i64
-                regs[dst_r] = simulated_button_press ? 0x4000_i64 : 0_i64
-              elsif target_addr == 0x10000800_i64
-                regs[dst_r] = (steps * 13) & 0xFFFF_i64
-              elsif target_addr == 0x12001000_i64
-                regs[dst_r] = (steps * 7) & 0xFFFF_i64
+                  regs[dst_r] = simulated_button_press ? 0x4000_i64 : 0_i64
+                elsif target_addr == 0x10000800_i64
+                  rand_state = (rand_state &* 6364136223846793005_u64) &+ 1442695040888963407_u64
+                  regs[dst_r] = (((rand_state >> 32) ^ (steps * 13)) & 0xFFFF_u64).to_i64
+                elsif target_addr == 0x12001000_i64
+                  rand_state = (rand_state &* 6364136223846793005_u64) &+ 1442695040888963407_u64
+                  regs[dst_r] = (((rand_state >> 16) ^ (steps * 7)) & 0xFFFF_u64).to_i64
               elsif arr = arrays[addr]?
                 if idx < 0 || idx >= arr.size
                   boot_messages << "[CITRINE PANIC] Array index out of bounds: #{idx}"
@@ -1708,7 +2353,8 @@ end
           has_audio: has_audio,
           is_dvd_screensaver: is_dvd_screensaver,
           bank_dur_ms: bank_dur,
-          frames_per_bank: frames_bank
+          frames_per_bank: frames_bank,
+          is_controller_tester: is_controller_tester
         )
       end
     rescue ex
@@ -1734,7 +2380,8 @@ end
           is_inline_assembly: is_inline_assembly,
           inline_asm_words: inline_asm_words,
           has_audio: has_audio,
-          is_dvd_screensaver: is_dvd_screensaver
+          is_dvd_screensaver: is_dvd_screensaver,
+          is_controller_tester: is_controller_tester
         )
       end
     end

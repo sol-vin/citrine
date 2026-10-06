@@ -777,6 +777,12 @@ module Citrine
         26
       when Opcode::InlineAsm
         72
+      when Opcode::FiberOp
+        76
+      when Opcode::ChannelOp
+        77
+      when Opcode::FloatAlu
+        78
       else
         0
       end

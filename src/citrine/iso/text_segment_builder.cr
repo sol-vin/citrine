@@ -1435,6 +1435,151 @@ module Citrine
             emitter.label("skip_phase_advance")
           end
         elsif phases.size > 1 && !@profile.has_audio
+          if @profile.is_controller_tester && phases.size >= 17
+            # DualShock 2 Controller Diagnostic Suite button-to-phase mapping:
+            # Phase 0: Idle (no buttons)
+            # Phases 1..16: Cross, Circle, Triangle, Square, Up, Down, Left, Right,
+            #               L1, R1, L2, R2, Select, Start, L3, R3
+            emitter.lw(T5, 16, T0)       # current buttons Port 0 (0x70000010)
+            emitter.lw(T6, 36, T0)       # current buttons Port 1 (0x70000024)
+            emitter.or_(T8, T5, T6)
+            emitter.lw(T5, 24, T0)       # pressed buttons Port 0 (0x70000018)
+            emitter.lw(T6, 44, T0)       # pressed buttons Port 1 (0x7000002C)
+            emitter.or_(T8, T8, T5)
+            emitter.or_(T8, T8, T6)
+
+            emitter.move(T2, ZERO)
+
+            # Check Cross (0x4000) -> Phase 1
+            emitter.andi(T7, T8, 0x4000)
+            emitter.beqz(T7, "ct_chk_circle")
+            emitter.nop
+            emitter.ori(T2, ZERO, 1)
+            emitter.jump("ct_done")
+
+            emitter.label("ct_chk_circle")
+            # Check Circle (0x2000) -> Phase 2
+            emitter.andi(T7, T8, 0x2000)
+            emitter.beqz(T7, "ct_chk_triangle")
+            emitter.nop
+            emitter.ori(T2, ZERO, 2)
+            emitter.jump("ct_done")
+
+            emitter.label("ct_chk_triangle")
+            # Check Triangle (0x1000) -> Phase 3
+            emitter.andi(T7, T8, 0x1000)
+            emitter.beqz(T7, "ct_chk_square")
+            emitter.nop
+            emitter.ori(T2, ZERO, 3)
+            emitter.jump("ct_done")
+
+            emitter.label("ct_chk_square")
+            # Check Square (0x8000) -> Phase 4
+            emitter.andi(T7, T8, 0x8000)
+            emitter.beqz(T7, "ct_chk_up")
+            emitter.nop
+            emitter.ori(T2, ZERO, 4)
+            emitter.jump("ct_done")
+
+            emitter.label("ct_chk_up")
+            # Check Up (0x0010) -> Phase 5
+            emitter.andi(T7, T8, 0x0010)
+            emitter.beqz(T7, "ct_chk_down")
+            emitter.nop
+            emitter.ori(T2, ZERO, 5)
+            emitter.jump("ct_done")
+
+            emitter.label("ct_chk_down")
+            # Check Down (0x0040) -> Phase 6
+            emitter.andi(T7, T8, 0x0040)
+            emitter.beqz(T7, "ct_chk_left")
+            emitter.nop
+            emitter.ori(T2, ZERO, 6)
+            emitter.jump("ct_done")
+
+            emitter.label("ct_chk_left")
+            # Check Left (0x0080) -> Phase 7
+            emitter.andi(T7, T8, 0x0080)
+            emitter.beqz(T7, "ct_chk_right")
+            emitter.nop
+            emitter.ori(T2, ZERO, 7)
+            emitter.jump("ct_done")
+
+            emitter.label("ct_chk_right")
+            # Check Right (0x0020) -> Phase 8
+            emitter.andi(T7, T8, 0x0020)
+            emitter.beqz(T7, "ct_chk_l1")
+            emitter.nop
+            emitter.ori(T2, ZERO, 8)
+            emitter.jump("ct_done")
+
+            emitter.label("ct_chk_l1")
+            # Check L1 (0x0400) -> Phase 9
+            emitter.andi(T7, T8, 0x0400)
+            emitter.beqz(T7, "ct_chk_r1")
+            emitter.nop
+            emitter.ori(T2, ZERO, 9)
+            emitter.jump("ct_done")
+
+            emitter.label("ct_chk_r1")
+            # Check R1 (0x0800) -> Phase 10
+            emitter.andi(T7, T8, 0x0800)
+            emitter.beqz(T7, "ct_chk_l2")
+            emitter.nop
+            emitter.ori(T2, ZERO, 10)
+            emitter.jump("ct_done")
+
+            emitter.label("ct_chk_l2")
+            # Check L2 (0x0100) -> Phase 11
+            emitter.andi(T7, T8, 0x0100)
+            emitter.beqz(T7, "ct_chk_r2")
+            emitter.nop
+            emitter.ori(T2, ZERO, 11)
+            emitter.jump("ct_done")
+
+            emitter.label("ct_chk_r2")
+            # Check R2 (0x0200) -> Phase 12
+            emitter.andi(T7, T8, 0x0200)
+            emitter.beqz(T7, "ct_chk_select")
+            emitter.nop
+            emitter.ori(T2, ZERO, 12)
+            emitter.jump("ct_done")
+
+            emitter.label("ct_chk_select")
+            # Check Select (0x0001) -> Phase 13
+            emitter.andi(T7, T8, 0x0001)
+            emitter.beqz(T7, "ct_chk_start")
+            emitter.nop
+            emitter.ori(T2, ZERO, 13)
+            emitter.jump("ct_done")
+
+            emitter.label("ct_chk_start")
+            # Check Start (0x0008) -> Phase 14
+            emitter.andi(T7, T8, 0x0008)
+            emitter.beqz(T7, "ct_chk_l3")
+            emitter.nop
+            emitter.ori(T2, ZERO, 14)
+            emitter.jump("ct_done")
+
+            emitter.label("ct_chk_l3")
+            # Check L3 (0x0002) -> Phase 15
+            emitter.andi(T7, T8, 0x0002)
+            emitter.beqz(T7, "ct_chk_r3")
+            emitter.nop
+            emitter.ori(T2, ZERO, 15)
+            emitter.jump("ct_done")
+
+            emitter.label("ct_chk_r3")
+            # Check R3 (0x0004) -> Phase 16
+            emitter.andi(T7, T8, 0x0004)
+            emitter.beqz(T7, "ct_done")
+            emitter.nop
+            emitter.ori(T2, ZERO, 16)
+
+            emitter.label("ct_done")
+            emitter.sw(T2, 8, T0)
+            emitter.jump("apply_phase_update")
+          else
           # Check Triangle (0x1000): reset to phase 0
           emitter.lw(T5, 24, T0)
           emitter.lw(T6, 44, T0)
@@ -1499,6 +1644,7 @@ module Citrine
 
           emitter.label("phase_in_range")
           emitter.sw(T2, 8, T0)
+        end
 
           emitter.label("apply_phase_update")
           phases.each_with_index do |phase, i|
