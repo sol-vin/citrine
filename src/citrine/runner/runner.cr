@@ -114,134 +114,160 @@ module Citrine
         end
       end
 
-      # 2. Check if CD-DA album tracks need transcoding
-      needs_import = false
-      if !File.exists?(metadata_file) || !File.exists?(track02_file)
-        needs_import = true
-      else
-        meta_mtime = File.info(metadata_file).modification_time
-        if album_audio_files.any? { |f| File.info(File.join(album_dir, f)).modification_time > meta_mtime }
-          needs_import = true
-        else
-          begin
-            meta_json = JSON.parse(File.read(metadata_file)).as_a
-            needs_import = (meta_json.size != album_audio_files.size)
-          rescue
-            needs_import = true
-          end
-        end
-      end
-
-      if needs_import
-        puts "[Citrine Media] Auto-importing CD-DA album tracks from #{album_dir}..."
-        # Clean up old raw track files
-        Dir.children(src_dir).select { |f| f =~ /^track\d+\.raw$/i }.each do |f|
-          File.delete(File.join(src_dir, f)) rescue nil
-        end
-        # Delete old track*.vag so SPU2 tracks get regenerated
+      # 2. Check if modern .cas streaming tracks are present
+      has_cas = Dir.children(src_dir).any? { |f| f =~ /^track\d+\.cas$/i }
+      if has_cas
+        # Prune any stale legacy .vag preview clips
         Dir.children(src_dir).select { |f| f =~ /^track\d+\.vag$/i }.each do |f|
           File.delete(File.join(src_dir, f)) rescue nil
         end
-
-        Importers::FluoriteMedia.import_album(album_dir, src_dir) { |msg| puts "[Citrine Media] #{msg}" }
-      end
-
-      # 3. Check if album track VAGs need conversion (for SPU2 playback)
-      album_audio_files.sort.each_with_index do |audio_file, idx|
-        tnum = sprintf("%02d", idx + 1)
-        track_vag = File.join(src_dir, "track#{tnum}.vag")
-        audio_path = File.join(album_dir, audio_file)
-        vag_stale = !File.exists?(track_vag) ||
-                    (File.info(audio_path).modification_time > File.info(track_vag).modification_time) ||
-                    (File.size(track_vag) < 200_000 && File.size(audio_path) > 500_000)
-        if vag_stale
-          puts "[Citrine Media] Auto-converting album track #{idx + 1} #{audio_path} -> #{track_vag} (SPU2 4-bit ADPCM)..."
-          Importers::FluoriteMedia.convert_audio(
-            audio_path,
-            track_vag,
-            Importers::FluoriteMedia::AudioConfig.new(sample_rate: 22050, loop_audio: true, duration_seconds: nil)
-          )
+        # Prune any stale legacy raw CD-DA tracks and cue sheets
+        Dir.children(src_dir).select { |f| f =~ /^track\d+\.raw$/i || f.ends_with?(".cue") }.each do |f|
+          File.delete(File.join(src_dir, f)) rescue nil
         end
+        return
       end
-    end
-
-    def build_iso(cbc_path : String, output_iso_path : String, extra_files : Hash(String, Bytes) = {} of String => Bytes, audio_tracks : Array(String) = [] of String) : String
-      cbc_data = File.read(cbc_path).to_slice
-      src_dir = File.dirname(cbc_path)
-      auto_prepare_assets(src_dir)
-
-      # 1. Ingest all data assets registered via Citrine DiscManifest
-      Citrine::ISO::DiscManifest.current.data_files.each do |asset|
-        tname = asset.target_name
-        spath = asset.source_path
-        if File.exists?(spath)
-          extra_files[tname] ||= File.read(spath).to_slice
-        end
-      end
-
-      # 2. Auto-discover project assets in src_dir (cbt, vag, json, fnt, mesh)
-      if Dir.exists?(src_dir)
-        Dir.children(src_dir).each do |child|
-          next if child == "SYSTEM.CNF" || child.ends_with?(".elf") || child.ends_with?(".cbc") || child.ends_with?(".iso") || child.ends_with?(".cue") || child.ends_with?(".cr")
-          ext = File.extname(child).downcase
-          if [".vag", ".cas", ".cbt", ".json", ".fnt", ".mesh"].includes?(ext)
-            cpath = File.join(src_dir, child)
-            if File.file?(cpath)
-              extra_files[child] ||= File.read(cpath).to_slice
-            end
-          end
-        end
-      end
-
-      vag_files = Dir.glob(File.join(src_dir, "*.vag").gsub('\\', '/')).sort_by do |p|
-        base = File.basename(p)
-        if md = base.match(/(\d+)/)
-          md[1].to_i
-        else
-          999
-        end
-      end
-      all_vag_data = vag_files.map { |f| File.read(f).to_slice }
-      first_vag_data = all_vag_data.first?
-
-      elf_data = if @runner_elf_path != "runtime/bin/citrine_runner.elf" && File.exists?(@runner_elf_path)
-                   File.read(@runner_elf_path).to_slice
-                 else
-                   ElfBuilder.build_default_runner_elf(cbc_data, vag_bytes: first_vag_data, vag_tracks: all_vag_data)
-                 end
-
-      tracks = audio_tracks.dup
-
-      # 3. Ingest CD-DA audio tracks from DiscManifest
-      Citrine::ISO::DiscManifest.current.cd_audio_tracks.each do |asset|
-        if File.exists?(asset.source_path) && !tracks.includes?(asset.source_path)
-          tracks << asset.source_path
-        end
-      end
-
-      # 4. Fallback discovery for track*.raw / track*.bin if not in DiscManifest
-      if tracks.empty? && Dir.exists?(src_dir)
-        discovered = Dir.children(src_dir).select do |f|
-          ext = File.extname(f).downcase
-          (ext == ".raw" || ext == ".bin") && f.downcase.starts_with?("track")
-        end.map { |f| File.join(src_dir, f) }.sort_by do |p|
-          base = File.basename(p)
-          if md = base.match(/track(\d+)/i)
-            md[1].to_i
-          else
-            999
-          end
-        end
-
-        if discovered.empty?
-          ["track02.raw", "track02.bin", "cdda.raw", "audio.raw"].each do |f|
-            candidate = File.join(src_dir, f)
-            tracks << candidate if File.exists?(candidate)
-          end
-        else
-          discovered.each { |d| tracks << d }
-        end
-      end
+ 
+       # 3. Check if CD-DA album tracks need transcoding
+       needs_import = false
+       if !File.exists?(metadata_file) || !File.exists?(track02_file)
+         needs_import = true
+       else
+         meta_mtime = File.info(metadata_file).modification_time
+         if album_audio_files.any? { |f| File.info(File.join(album_dir, f)).modification_time > meta_mtime }
+           needs_import = true
+         else
+           begin
+             meta_json = JSON.parse(File.read(metadata_file)).as_a
+             needs_import = (meta_json.size != album_audio_files.size)
+           rescue
+             needs_import = true
+           end
+         end
+       end
+ 
+       if needs_import
+         puts "[Citrine Media] Auto-importing CD-DA album tracks from #{album_dir}..."
+         # Clean up old raw track files
+         Dir.children(src_dir).select { |f| f =~ /^track\d+\.raw$/i }.each do |f|
+           File.delete(File.join(src_dir, f)) rescue nil
+         end
+         # Delete old track*.vag so SPU2 tracks get regenerated
+         Dir.children(src_dir).select { |f| f =~ /^track\d+\.vag$/i }.each do |f|
+           File.delete(File.join(src_dir, f)) rescue nil
+         end
+ 
+         Importers::FluoriteMedia.import_album(album_dir, src_dir) { |msg| puts "[Citrine Media] #{msg}" }
+       end
+ 
+       # 4. Check if album track VAGs need conversion (for SPU2 playback)
+       album_audio_files.sort.each_with_index do |audio_file, idx|
+         tnum = sprintf("%02d", idx + 1)
+         track_vag = File.join(src_dir, "track#{tnum}.vag")
+         audio_path = File.join(album_dir, audio_file)
+         vag_stale = !File.exists?(track_vag) ||
+                     (File.info(audio_path).modification_time > File.info(track_vag).modification_time) ||
+                     (File.size(track_vag) < 200_000 && File.size(audio_path) > 500_000)
+         if vag_stale
+           puts "[Citrine Media] Auto-converting album track #{idx + 1} #{audio_path} -> #{track_vag} (SPU2 4-bit ADPCM)..."
+           Importers::FluoriteMedia.convert_audio(
+             audio_path,
+             track_vag,
+             Importers::FluoriteMedia::AudioConfig.new(sample_rate: 22050, loop_audio: true, duration_seconds: nil)
+           )
+         end
+       end
+     end
+ 
+     def build_iso(cbc_path : String, output_iso_path : String, extra_files : Hash(String, Bytes) = {} of String => Bytes, audio_tracks : Array(String) = [] of String) : String
+       cbc_data = File.read(cbc_path).to_slice
+       src_dir = File.dirname(cbc_path)
+       auto_prepare_assets(src_dir)
+ 
+       # 1. Ingest all data assets registered via Citrine DiscManifest
+       Citrine::ISO::DiscManifest.current.data_files.each do |asset|
+         tname = asset.target_name
+         spath = asset.source_path
+         if File.exists?(spath)
+           extra_files[tname] ||= File.read(spath).to_slice
+         end
+       end
+ 
+       # 2. Auto-discover project assets in src_dir (cbt, vag, json, fnt, mesh)
+       if Dir.exists?(src_dir)
+         Dir.children(src_dir).each do |child|
+           next if child == "SYSTEM.CNF" || child.ends_with?(".elf") || child.ends_with?(".cbc") || child.ends_with?(".iso") || child.ends_with?(".cue") || child.ends_with?(".cr")
+           ext = File.extname(child).downcase
+           if [".vag", ".cas", ".cbt", ".json", ".fnt", ".mesh"].includes?(ext)
+             next if extra_files.keys.any? { |k| k.downcase == child.downcase }
+             cpath = File.join(src_dir, child)
+             if File.file?(cpath)
+               extra_files[child] ||= File.read(cpath).to_slice
+             end
+           end
+         end
+       end
+ 
+       has_cas = extra_files.keys.any? { |k| k.downcase.ends_with?(".cas") } ||
+                 (Dir.exists?(src_dir) && Dir.children(src_dir).any? { |f| f =~ /^track\d+\.cas$/i })
+ 
+       vag_files = if has_cas
+                     [] of String
+                   else
+                     Dir.glob(File.join(src_dir, "*.vag").gsub('\\', '/')).sort_by do |p|
+                       base = File.basename(p)
+                       if md = base.match(/(\d+)/)
+                         md[1].to_i
+                       else
+                         999
+                       end
+                     end
+                   end
+       all_vag_data = vag_files.map { |f| File.read(f).to_slice }
+       first_vag_data = all_vag_data.first?
+ 
+       elf_data = if has_cas
+                    nil
+                  elsif @runner_elf_path != "runtime/bin/citrine_runner.elf" && File.exists?(@runner_elf_path)
+                    File.read(@runner_elf_path).to_slice
+                  else
+                    ElfBuilder.build_default_runner_elf(cbc_data, vag_bytes: first_vag_data, vag_tracks: all_vag_data)
+                  end
+ 
+       tracks = has_cas ? ([] of String) : audio_tracks.dup
+ 
+       if !has_cas
+         # 3. Ingest CD-DA audio tracks from DiscManifest
+         Citrine::ISO::DiscManifest.current.cd_audio_tracks.each do |asset|
+           if File.exists?(asset.source_path) && !tracks.includes?(asset.source_path)
+             tracks << asset.source_path
+           end
+         end
+ 
+         # 4. Fallback discovery for track*.raw / track*.bin if not in DiscManifest
+         if tracks.empty? && Dir.exists?(src_dir)
+           discovered = Dir.children(src_dir).select do |f|
+             ext = File.extname(f).downcase
+             (ext == ".raw" || ext == ".bin") && f.downcase.starts_with?("track")
+           end.map { |f| File.join(src_dir, f) }.sort_by do |p|
+             base = File.basename(p)
+             if md = base.match(/track(\d+)/i)
+               md[1].to_i
+             else
+               999
+             end
+           end
+ 
+           if discovered.empty?
+             ["track02.raw", "track02.bin", "cdda.raw", "audio.raw"].each do |f|
+               candidate = File.join(src_dir, f)
+               tracks << candidate if File.exists?(candidate)
+             end
+           else
+             discovered.each { |d| tracks << d }
+           end
+         end
+       end
 
       vag_files.each do |vag_file|
         base = File.basename(vag_file)

@@ -555,6 +555,9 @@ module Citrine
         base_elf[text_off + 0x0e90, 4].copy_from(Bytes[0x05, 0x00, 0x00, 0x10])
         base_elf[text_off + 0x0e94, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
 
+        # Note: libsd stub 4 at 0x0F24 is already sceSdGetAddr (ordinal 10) in original SoundIrxBase
+
+
         # Add cdvdman import table at 0x0bd0 (giving 0x4dc..0x0bd0 = 1,780 bytes for engine code)
         pos = text_off + 0x0bd0
         IO::ByteFormat::LittleEndian.encode(0x41e00000_u32, base_elf[pos, 4])
@@ -591,26 +594,20 @@ module Citrine
         # Initialize SoundMode at 0x17d4 to 0xFFFFFFFF (idle / no pending command)
         IO::ByteFormat::LittleEndian.encode(0xFFFFFFFF_u32, base_elf[text_off + 0x17d4, 4])
 
-        # Store state variables at 0x1900 in base_elf:
         IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x1900, 4]) # cur_track
         IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x1904, 4]) # cur_bank_idx
-        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x1908, 4]) # next_bank
+        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x1908, 4]) # next_refill_bank (0=Bank A, 1=Bank B)
         IO::ByteFormat::LittleEndian.encode(1_u32, base_elf[text_off + 0x190C, 4]) # play_state
         IO::ByteFormat::LittleEndian.encode(0x2000_u32, base_elf[text_off + 0x1910, 4]) # cur_vol
         IO::ByteFormat::LittleEndian.encode(track_table.size.to_u32, base_elf[text_off + 0x1914, 4]) # total_tracks
-        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x1918, 4]) # frame_counter
+        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x1918, 4]) # timer_accum_ms
 
-        # Dynamic timing variables at 0x18E0:
+        # Initial track pitch at 0x18EC:
         first_pitch = track_table.first?.try(&.pitch_reg) || 0x02AB_u16
         first_pitch = 0x02AB_u16 if first_pitch == 0_u16
-        first_bank_frames = (146800 // first_pitch).to_u32
-        first_period = first_bank_frames * 2
-        first_refill_b = 4_u32
-        first_refill_a = first_bank_frames + 4_u32
-        IO::ByteFormat::LittleEndian.encode(first_period, base_elf[text_off + 0x18E0, 4])
-        IO::ByteFormat::LittleEndian.encode(first_refill_a, base_elf[text_off + 0x18E4, 4])
-        IO::ByteFormat::LittleEndian.encode(first_refill_b, base_elf[text_off + 0x18E8, 4])
         IO::ByteFormat::LittleEndian.encode(first_pitch.to_u32, base_elf[text_off + 0x18EC, 4])
+        initial_bank_dur = 2446677_u32 // first_pitch.to_u32
+        IO::ByteFormat::LittleEndian.encode(initial_bank_dur, base_elf[text_off + 0x18F0, 4])
 
         # Store track table at 0x1920:
         track_table.each_with_index do |tinfo, i|
@@ -619,6 +616,17 @@ module Citrine
           IO::ByteFormat::LittleEndian.encode(tinfo.bank_count.to_u16, base_elf[entry_pos + 4, 2])
           IO::ByteFormat::LittleEndian.encode(tinfo.pitch_reg, base_elf[entry_pos + 6, 2])
         end
+
+        # Store debug format strings in .data (zero code size cost):
+        ref_msg = ">>> Stream bank %d to 0x%x\n\0"
+        ref_msg.to_slice.copy_to(base_elf[text_off + 0x1990, ref_msg.bytesize])
+
+        play_msg = ">>> Play track %d\n\0"
+        play_msg.to_slice.copy_to(base_elf[text_off + 0x19B0, play_msg.bytesize])
+
+        seek_msg = ">>> Seek bank %d\n\0"
+        seek_msg.to_slice.copy_to(base_elf[text_off + 0x19C8, seek_msg.bytesize])
+
 
         # Silence original PlaySound (0x170): jr $ra, nop
         base_elf[text_off + 0x170, 4].copy_from(Bytes[0x08, 0x00, 0xE0, 0x03])
@@ -652,18 +660,19 @@ module Citrine
         mips.move(A0, ZERO)
         mips.jalr(T9); mips.nop
 
-        mips.addiu(T9, S0, 0x0f84) # CpuEnableIntr
+        # SPU2 Interrupt Setup: CpuEnableIntr (0x0f8c), EnableIntr (0x0f84)
+        mips.addiu(T9, S0, 0x0f8c) # CpuEnableIntr
         mips.jalr(T9); mips.nop
 
-        mips.addiu(T9, S0, 0x0f8c) # EnableIntr
+        mips.addiu(T9, S0, 0x0f84) # EnableIntr
         mips.ori(A0, ZERO, 0x24)   # DMA channel 4 (SPU2 Core 0)
         mips.jalr(T9); mips.nop
 
-        mips.addiu(T9, S0, 0x0f8c)
+        mips.addiu(T9, S0, 0x0f84)
         mips.ori(A0, ZERO, 0x28)   # DMA channel 7 (SPU2 Core 1)
         mips.jalr(T9); mips.nop
 
-        mips.addiu(T9, S0, 0x0f8c)
+        mips.addiu(T9, S0, 0x0f84)
         mips.ori(A0, ZERO, 9)      # SPU2 Interrupt
         mips.jalr(T9); mips.nop
 
@@ -674,8 +683,8 @@ module Citrine
 
         # ================= MAIN STREAMING LOOP =================
         mips.label("stream_loop")
-        # DelayThread(16666) -> sleep 16.666 ms (1 vertical blank frame @ 60 Hz)
-        mips.ori(A0, ZERO, 16666)
+        # DelayThread(20000) -> sleep 20 ms
+        mips.ori(A0, ZERO, 20000)
         mips.addiu(T9, S0, 0x10b4) # DelayThread
         mips.jalr(T9)
         mips.nop
@@ -693,11 +702,19 @@ module Citrine
         mips.bnez(T0, "chk_cmd_pause")
         mips.nop
         mips.addiu(T9, S0, 0x0f14) # sceSdSetSwitch
-        mips.ori(A0, ZERO, 0x1600)  # SD_S_KOFF
+        mips.ori(A0, ZERO, 0x1600)  # SD_S_KOFF (Core 0)
+        mips.ori(A1, ZERO, 1)
+        mips.jalr(T9); mips.nop
+        mips.addiu(T9, S0, 0x0f14)
+        mips.ori(A0, ZERO, 0x1601)  # SD_S_KOFF (Core 1)
         mips.ori(A1, ZERO, 1)
         mips.jalr(T9); mips.nop
         mips.addiu(T9, S0, 0x0f14)
         mips.ori(A0, ZERO, 0x1600)
+        mips.move(A1, ZERO)
+        mips.jalr(T9); mips.nop
+        mips.addiu(T9, S0, 0x0f14)
+        mips.ori(A0, ZERO, 0x1601)
         mips.move(A1, ZERO)
         mips.jalr(T9); mips.nop
         mips.sw(ZERO, 0x190c, S0)   # play_state = 0 (stopped)
@@ -708,7 +725,11 @@ module Citrine
         mips.bne(T0, T2, "chk_cmd_resume")
         mips.nop
         mips.addiu(T9, S0, 0x0f0c) # sceSdSetParam
-        mips.ori(A0, ZERO, 0x0200)  # pitch = 0
+        mips.ori(A0, ZERO, 0x0200)  # Core 0 pitch = 0
+        mips.move(A1, ZERO)
+        mips.jalr(T9); mips.nop
+        mips.addiu(T9, S0, 0x0f0c)
+        mips.ori(A0, ZERO, 0x0201)  # Core 1 pitch = 0
         mips.move(A1, ZERO)
         mips.jalr(T9); mips.nop
         mips.ori(T2, ZERO, 2)
@@ -720,8 +741,12 @@ module Citrine
         mips.bne(T0, T2, "chk_cmd_play")
         mips.nop
         mips.addiu(T9, S0, 0x0f0c) # sceSdSetParam
-        mips.ori(A0, ZERO, 0x0200)  # pitch
+        mips.ori(A0, ZERO, 0x0200)  # Core 0 pitch
         mips.lw(A1, 0x18EC, S0)     # restore cur_pitch
+        mips.jalr(T9); mips.nop
+        mips.addiu(T9, S0, 0x0f0c)
+        mips.ori(A0, ZERO, 0x0201)  # Core 1 pitch
+        mips.lw(A1, 0x18EC, S0)
         mips.jalr(T9); mips.nop
         mips.ori(T2, ZERO, 1)
         mips.sw(T2, 0x190c, S0)     # play_state = 1
@@ -729,7 +754,7 @@ module Citrine
 
         mips.label("chk_cmd_play")
         mips.ori(T2, ZERO, 1)       # Play
-        mips.bne(T0, T2, "chk_cmd_track")
+        mips.bne(T0, T2, "chk_cmd_seek")
         mips.nop
         mips.lw(T2, 0x190c, S0)
         mips.ori(T3, ZERO, 2)
@@ -737,6 +762,17 @@ module Citrine
         mips.nop
         mips.move(A0, ZERO)
         mips.bal("start_track")
+        mips.nop
+        mips.beq(ZERO, ZERO, "chk_streaming"); mips.nop
+
+        mips.label("chk_cmd_seek")
+        # Check if (cmd >> 16) == 2 (Seek to Bank N)
+        mips.srl(T2, T0, 16)
+        mips.ori(T3, ZERO, 2)
+        mips.bne(T2, T3, "chk_cmd_track")
+        mips.nop
+        mips.andi(A1, T0, 0xFFFF)   # A1 = target_bank
+        mips.bal("seek_stream_bank")
         mips.nop
         mips.beq(ZERO, ZERO, "chk_streaming"); mips.nop
 
@@ -759,15 +795,10 @@ module Citrine
         mips.andi(T4, T0, 0xFF)
         mips.sll(S7, T4, 6)         # vol << 6
         mips.sw(S7, 0x1910, S0)
-        # Update volumes:
-        mips.addiu(T9, S0, 0x0f0c)
-        mips.ori(A0, ZERO, 0x0000); mips.move(A1, S7); mips.jalr(T9); mips.nop
-        mips.addiu(T9, S0, 0x0f0c)
-        mips.ori(A0, ZERO, 0x0100); mips.move(A1, S7); mips.jalr(T9); mips.nop
-        mips.addiu(T9, S0, 0x0f0c)
-        mips.ori(A0, ZERO, 0x0980); mips.move(A1, S7); mips.jalr(T9); mips.nop
-        mips.addiu(T9, S0, 0x0f0c)
-        mips.ori(A0, ZERO, 0x0a80); mips.move(A1, S7); mips.jalr(T9); mips.nop
+        mips.bal("set_all_volumes")
+        mips.nop
+        mips.beq(ZERO, ZERO, "chk_streaming")
+        mips.nop
 
         # Check streaming condition
         mips.label("chk_streaming")
@@ -776,63 +807,52 @@ module Citrine
         mips.bne(T0, T1, "stream_loop")
         mips.nop
 
-        # Increment frame counter at 0x1918
-        mips.lw(T0, 0x1918, S0)
-        mips.addiu(T0, T0, 1)
+        # Update elapsed timer (+20 ms per loop tick):
+        mips.lw(T0, 0x1918, S0) # timer_accum_ms
+        mips.addiu(T0, T0, 20)  # +20 ms
+        mips.lw(T1, 0x18F0, S0) # bank_dur_ms
+        mips.sltu(T2, T0, T1)
+        mips.bnez(T2, "timer_bank_not_expired")
+        mips.nop
+
+        # Timer expired: Voice 0 has transitioned banks!
+        # Subtract bank_dur_ms and refill the newly-freed bank.
+        mips.subu(T0, T0, T1)
         mips.sw(T0, 0x1918, S0)
 
-        # Check if frame_counter >= period_frames (0x18E0)
-        mips.lw(T2, 0x18E0, S0)
-        mips.sltu(T3, T0, T2)
-        mips.bnez(T3, "chk_refill_target")
-        mips.nop
-        # Frame counter wrapped (Voice 0 looped back to Bank A at 0x15000):
-        mips.subu(T0, T0, T2)
-        mips.sw(T0, 0x1918, S0)
-
-        mips.label("chk_refill_target")
-        mips.lw(T1, 0x1908, S0) # next_bank (0=Bank A, 1=Bank B)
-        mips.bnez(T1, "chk_refill_bank_b")
+        # Check which bank needs refill: next_refill_bank at 0x1908
+        mips.lw(T3, 0x1908, S0)
+        mips.bnez(T3, "refill_bank_b")
         mips.nop
 
-        # next_bank == 0: Refill Bank A when frame >= refill_a_frame (0x18E4)
-        mips.lw(T2, 0x18E4, S0)
-        mips.sltu(T3, T0, T2)
-        mips.bnez(T3, "stream_loop") # frame < refill_a_frame -> wait!
-        mips.nop
-
-        # Refill Bank A (0x15000): loop_start = 1, loop_end = 0
+        # ================= REFILL BANK A (0x15000) =================
+        # Voice 0 has entered Bank B, so Bank A is free to refill with next bank!
         mips.lui(A0, 0x0001)
         mips.ori(A0, A0, 0x5000)
-        mips.ori(A1, ZERO, 1)
-        mips.move(A2, ZERO)
+        mips.ori(A1, ZERO, 1)    # loop_start = 1
+        mips.move(A2, ZERO)      # loop_end = 0
         mips.bal("read_and_dma_bank")
         mips.nop
         mips.ori(T1, ZERO, 1)
-        mips.sw(T1, 0x1908, S0) # next_bank = 1
+        mips.sw(T1, 0x1908, S0)  # next_refill_bank = 1 (Bank B is next)
         mips.beq(ZERO, ZERO, "stream_loop")
         mips.nop
 
-        mips.label("chk_refill_bank_b")
-        # next_bank == 1: Refill Bank B when frame >= refill_b_frame (0x18E8)
-        # Must only fire in phase 0 (refill_b <= frame < refill_a) after frame wrap!
-        mips.lw(T2, 0x18E8, S0)
-        mips.sltu(T3, T0, T2)
-        mips.bnez(T3, "stream_loop") # frame < refill_b_frame -> wait!
-        mips.nop
-        mips.lw(T2, 0x18E4, S0)
-        mips.sltu(T3, T0, T2)
-        mips.beqz(T3, "stream_loop") # frame >= refill_a_frame -> wait for wrap at period_frames!
-        mips.nop
-
-        # Refill Bank B (0x19000): loop_start = 0, loop_end = 1
+        # ================= REFILL BANK B (0x19000) =================
+        # Voice 0 has entered Bank A, so Bank B is free to refill with next bank!
+        mips.label("refill_bank_b")
         mips.lui(A0, 0x0001)
         mips.ori(A0, A0, 0x9000)
-        mips.move(A1, ZERO)
-        mips.ori(A2, ZERO, 1)
+        mips.move(A1, ZERO)      # loop_start = 0
+        mips.ori(A2, ZERO, 1)    # loop_end = 1
         mips.bal("read_and_dma_bank")
         mips.nop
-        mips.sw(ZERO, 0x1908, S0) # next_bank = 0
+        mips.sw(ZERO, 0x1908, S0) # next_refill_bank = 0 (Bank A is next)
+        mips.beq(ZERO, ZERO, "stream_loop")
+        mips.nop
+
+        mips.label("timer_bank_not_expired")
+        mips.sw(T0, 0x1918, S0)
         mips.beq(ZERO, ZERO, "stream_loop")
         mips.nop
 
@@ -877,29 +897,13 @@ module Citrine
         mips.addiu(T9, S0, 0x0bec) # sceCdSync (stub at 0x0bec)
         mips.jalr(T9); mips.nop
 
-        # Compensate frame_counter for time spent blocking in sceCdSync (~12 frames = ~200ms)
-        mips.lw(T0, 0x1918, S0)
-        mips.addiu(T0, T0, 12)
-        mips.sw(T0, 0x1918, S0)
-
         # Print refill message
-        mips.bal("load_refill_msg")
-        mips.nop
-        mips.label("refill_msg_fmt")
-        ref_str = ">>> [CITRINE S.IRX] Streamed bank %d to SPU 0x%05x (sector %d)\n\0".to_slice
-        ref_str.each_slice(4) do |sl|
-          w = 0_u32
-          sl.each_with_index { |b, bi| w |= (b.to_u32 << (bi * 8)) }
-          mips.emit(w)
-        end
-        mips.label("load_refill_msg")
-        mips.move(A0, RA)
+        mips.addiu(A0, S0, 0x1990)
         mips.lw(A1, 0x1904, S0) # cur_bank_idx
         mips.move(A2, S1)        # spu_dest (0x15000 or 0x19000)
-        mips.sll(T5, A1, 3)
-        mips.addu(A3, S4, T5)    # sector
         mips.addiu(T9, S0, 0x1030) # printf
         mips.jalr(T9); mips.nop
+
 
         # Patch ADPCM loop flags:
         mips.addiu(T6, S0, 0x1A00) # staging_buf
@@ -926,6 +930,10 @@ module Citrine
         mips.sb(T7, 1, T8)
 
         mips.label("do_voice_trans")
+        # Flush CPU data cache to physical IOP RAM before DMA transfer
+        mips.addiu(T9, S0, 0x0fc0) # FlushDcache
+        mips.jalr(T9); mips.nop
+
         # sceSdVoiceTrans(0, 0, staging_buf, s1, 16384)
         mips.move(A0, ZERO)
         mips.move(A1, ZERO)
@@ -937,7 +945,7 @@ module Citrine
         mips.addiu(T9, S0, 0x0f34) # sceSdVoiceTrans
         mips.jalr(T9); mips.nop
 
-        # DelayThread(1000 usec = 1 ms) to ensure SPU2 DMA finishes before returning
+        # Brief delay for DMA initiation (1 ms):
         mips.ori(A0, ZERO, 1000)
         mips.addiu(T9, S0, 0x10b4) # DelayThread
         mips.jalr(T9); mips.nop
@@ -975,38 +983,102 @@ module Citrine
         mips.label("track_idx_in_bounds")
 
         # Print track switch message
-        mips.bal("load_track_msg")
-        mips.nop
-        mips.label("track_msg_fmt")
-        trk_str = "\n>>> [CITRINE S.IRX] Starting Track %d from Disc...\n\0".to_slice
-        trk_str.each_slice(4) do |sl|
-          w = 0_u32
-          sl.each_with_index { |b, bi| w |= (b.to_u32 << (bi * 8)) }
-          mips.emit(w)
-        end
-        mips.label("load_track_msg")
-        mips.move(A0, RA)
+        mips.addiu(A0, S0, 0x19B0)
         mips.move(A1, S6)
         mips.addiu(T9, S0, 0x1030) # printf
         mips.jalr(T9); mips.nop
 
-        # Key off Voice 0:
+
+        # Set cur_track = S6
+        mips.sw(S6, 0x1900, S0)
+
+        # Set Voice 0 Pitch & dynamic frame timing:
+        mips.sll(T2, S6, 3)     # S6 * 8
+        mips.addiu(T3, S0, 0x1920)
+        mips.addu(T3, T3, T2)   # &track_table[S6]
+        mips.lhu(A1, 6, T3)     # pitch_reg
+        mips.bnez(A1, "pitch_val_ok")
+        mips.nop
+        mips.ori(A1, ZERO, 0x02AB)
+        mips.label("pitch_val_ok")
+        mips.sw(A1, 0x18EC, S0) # cur_pitch
+
+        # Set Voice 0 Pitch = cur_pitch on Core 0 and Core 1
+        mips.addiu(T9, S0, 0x0f0c) # sceSdSetParam
+        mips.ori(A0, ZERO, 0x0200)  # Core 0 SD_VP_PITCH
+        mips.lw(A1, 0x18EC, S0)
+        mips.jalr(T9); mips.nop
+        mips.addiu(T9, S0, 0x0f0c)
+        mips.ori(A0, ZERO, 0x0201)  # Core 1 SD_VP_PITCH
+        mips.lw(A1, 0x18EC, S0)
+        mips.jalr(T9); mips.nop
+
+        # Compute bank_dur_ms = 2446677 / cur_pitch:
+        mips.li(T0, 2446677_u32)
+        mips.lw(T1, 0x18EC, S0)
+        mips.divu(T0, T1)
+        mips.mflo(T2)
+        mips.sw(T2, 0x18F0, S0) # bank_dur_ms
+
+        # Set Volumes:
+        mips.lw(S7, 0x1910, S0)
+        mips.bal("set_all_volumes")
+        mips.nop
+
+        # Reset cur_bank_idx to 0:
+        mips.sw(ZERO, 0x1904, S0)
+        mips.beq(ZERO, ZERO, "prime_and_play_spu2_banks")
+        mips.nop
+
+        # ================= HELPER: seek_stream_bank =================
+        mips.label("seek_stream_bank")
+        mips.addiu(SP, SP, -64)
+        mips.sw(RA, 60, SP)
+        mips.sw(S6, 24, SP)
+        mips.move(S6, A1) # target_bank
+
+        # Check bounds against cur_track bank_count:
+        mips.lw(T0, 0x1900, S0) # cur_track
+        mips.sll(T2, T0, 3)     # cur_track * 8
+        mips.addiu(T3, S0, 0x1920)
+        mips.addu(T3, T3, T2)   # &track_table[cur_track]
+        mips.lhu(T4, 4, T3)     # bank_count
+        mips.sltu(T5, S6, T4)
+        mips.bnez(T5, "seek_bank_in_bounds")
+        mips.nop
+        mips.move(S6, ZERO)
+        mips.label("seek_bank_in_bounds")
+
+        # Print seek message
+        mips.addiu(A0, S0, 0x19C8)
+        mips.move(A1, S6)
+        mips.addiu(T9, S0, 0x1030) # printf
+        mips.jalr(T9); mips.nop
+
+
+        # Set cur_bank_idx = target_bank
+        mips.sw(S6, 0x1904, S0)
+
+        # ================= HELPER: prime_and_play_spu2_banks =================
+        mips.label("prime_and_play_spu2_banks")
+        # Key off Voice 0 on Core 0 and Core 1:
         mips.addiu(T9, S0, 0x0f14)
         mips.ori(A0, ZERO, 0x1600)
         mips.ori(A1, ZERO, 1)
         mips.jalr(T9); mips.nop
         mips.addiu(T9, S0, 0x0f14)
+        mips.ori(A0, ZERO, 0x1601)
+        mips.ori(A1, ZERO, 1)
+        mips.jalr(T9); mips.nop
+
+        mips.addiu(T9, S0, 0x0f14)
         mips.ori(A0, ZERO, 0x1600)
         mips.move(A1, ZERO)
         mips.jalr(T9); mips.nop
-
-        # Reset state
-        mips.sw(S6, 0x1900, S0)   # cur_track = track_idx
-        mips.sw(ZERO, 0x1904, S0) # cur_bank_idx = 0
-        mips.sw(ZERO, 0x1908, S0) # next_bank = 0
-        mips.sw(ZERO, 0x1918, S0) # frame_counter = 0
-        mips.ori(T0, ZERO, 1)
-        mips.sw(T0, 0x190c, S0)   # play_state = 1
+        mips.addiu(T9, S0, 0x0f14)
+        mips.ori(A0, ZERO, 0x1601)
+        mips.move(A1, ZERO)
+        mips.jalr(T9); mips.nop
 
         # Pre-fill Bank A (0x15000): loop_start=1, loop_end=0
         mips.lui(A0, 0x0001)
@@ -1022,73 +1094,69 @@ module Citrine
         mips.ori(A2, ZERO, 1)
         mips.bal("read_and_dma_bank"); mips.nop
 
-        # Set Voice 0 SSA = 0x15000
+        # Set Voice 0 SSA and LSA to 0x15000 on Core 0 and Core 1
+        mips.move(S6, ZERO)
+        mips.label("addr_core_loop")
+        mips.lui(A1, 0x0001); mips.ori(A1, A1, 0x5000)
         mips.addiu(T9, S0, 0x0f1c) # sceSdSetAddr
-        mips.ori(A0, ZERO, 0x2040)  # SD_VA_SSA
-        mips.lui(A1, 0x0001)
-        mips.ori(A1, A1, 0x5000)
+        mips.ori(A0, S6, 0x2040)  # SD_VA_SSA
         mips.jalr(T9); mips.nop
-
-        # Set Voice 0 Loop Address (LSA = 0x2060) to 0x15000
-        mips.addiu(T9, S0, 0x0f1c) # sceSdSetAddr
-        mips.ori(A0, ZERO, 0x2060)  # SD_VA_LSA
-        mips.lui(A1, 0x0001)
-        mips.ori(A1, A1, 0x5000)
+        mips.addiu(T9, S0, 0x0f1c)
+        mips.ori(A0, S6, 0x2060)  # SD_VA_LSA
         mips.jalr(T9); mips.nop
+        mips.addiu(S6, S6, 1)
+        mips.ori(T8, ZERO, 2)
+        mips.bne(S6, T8, "addr_core_loop"); mips.nop
 
-        # Set Voice 0 Pitch & dynamic frame timing:
-        mips.sll(T2, S6, 3)     # S6 * 8
-        mips.addiu(T3, S0, 0x1920)
-        mips.addu(T3, T3, T2)   # &track_table[S6]
-        mips.lhu(A1, 6, T3)     # pitch_reg
-        mips.bnez(A1, "pitch_val_ok")
-        mips.nop
-        mips.ori(A1, ZERO, 0x02AB)
-        mips.label("pitch_val_ok")
-        mips.sw(A1, 0x18EC, S0) # cur_pitch
 
-        # Compute dynamic bank frames: bank_frames = 146800 // pitch_reg
-        mips.lui(T0, 0x0002)
-        mips.ori(T0, T0, 0x3D70) # 146800 = 0x00023D70
-        mips.divu(T0, A1)
-        mips.mflo(T1)            # T1 = bank_frames
-        mips.sll(T2, T1, 1)      # T2 = period_frames = bank_frames * 2
-        mips.ori(T3, ZERO, 4)    # T3 = refill_b_frame = 4
-        mips.addiu(T4, T1, 4)    # T4 = refill_a_frame = bank_frames + 4
-        mips.sw(T2, 0x18E0, S0)  # period_frames
-        mips.sw(T4, 0x18E4, S0)  # refill_a_frame
-        mips.sw(T3, 0x18E8, S0)  # refill_b_frame
+        # Initial state flags: Voice 0 starts in Bank A (playing cur_bank_idx).
+        mips.sw(ZERO, 0x1908, S0) # next_refill_bank = 0 (Bank A is first)
+        mips.sw(ZERO, 0x1918, S0) # timer_accum_ms = 0
+        mips.ori(T0, ZERO, 1)
+        mips.sw(T0, 0x190C, S0)   # play_state = 1
 
-        # Set Voice 0 Pitch = cur_pitch
-        mips.addiu(T9, S0, 0x0f0c) # sceSdSetParam
-        mips.ori(A0, ZERO, 0x0200)  # SD_VP_PITCH
-        mips.lw(A1, 0x18EC, S0)
-        mips.jalr(T9); mips.nop
-
-        # Set Volumes:
-        mips.lw(S7, 0x1910, S0)
-        mips.addiu(T9, S0, 0x0f0c)
-        mips.ori(A0, ZERO, 0x0000); mips.move(A1, S7); mips.jalr(T9); mips.nop
-        mips.addiu(T9, S0, 0x0f0c)
-        mips.ori(A0, ZERO, 0x0100); mips.move(A1, S7); mips.jalr(T9); mips.nop
-        mips.addiu(T9, S0, 0x0f0c)
-        mips.ori(A0, ZERO, 0x0980); mips.move(A1, S7); mips.jalr(T9); mips.nop
-        mips.addiu(T9, S0, 0x0f0c)
-        mips.ori(A0, ZERO, 0x0a80); mips.move(A1, S7); mips.jalr(T9); mips.nop
-
-        # Reset frame_counter and next_bank right before voice key-on
-        mips.sw(ZERO, 0x1908, S0) # next_bank = 0
-        mips.sw(ZERO, 0x1918, S0) # frame_counter = 0
-
-        # Key on Voice 0:
+        # Key on Voice 0 on Core 0 and Core 1:
         mips.addiu(T9, S0, 0x0f14)
-        mips.ori(A0, ZERO, 0x1500) # SD_S_KON
+        mips.ori(A0, ZERO, 0x1500) # SD_S_KON (Core 0)
+        mips.ori(A1, ZERO, 1)
+        mips.jalr(T9); mips.nop
+        mips.addiu(T9, S0, 0x0f14)
+        mips.ori(A0, ZERO, 0x1501) # SD_S_KON (Core 1)
         mips.ori(A1, ZERO, 1)
         mips.jalr(T9); mips.nop
 
         mips.lw(S6, 24, SP)
         mips.lw(RA, 60, SP)
         mips.addiu(SP, SP, 64)
+        mips.jr(RA); mips.nop
+
+        # ================= HELPER: set_all_volumes =================
+        mips.label("set_all_volumes")
+        mips.addiu(SP, SP, -16)
+        mips.sw(RA, 0, SP)
+        mips.sw(S1, 4, SP)
+        mips.move(S1, ZERO) # S1 = core (0..1)
+        mips.label("vol_core_loop")
+        mips.addiu(T9, S0, 0x0f0c) # sceSdSetParam
+        mips.ori(A0, S1, 0x0000); mips.move(A1, S7); mips.jalr(T9); mips.nop # Voice 0 VOLL
+        mips.addiu(T9, S0, 0x0f0c)
+        mips.ori(A0, S1, 0x0100); mips.move(A1, S7); mips.jalr(T9); mips.nop # Voice 0 VOLR
+        mips.addiu(T9, S0, 0x0f0c)
+        mips.ori(A0, S1, 0x0980); mips.move(A1, S7); mips.jalr(T9); mips.nop # MVOLL
+        mips.addiu(T9, S0, 0x0f0c)
+        mips.ori(A0, S1, 0x0a80); mips.move(A1, S7); mips.jalr(T9); mips.nop # MVOLR
+        mips.addiu(S1, S1, 1)
+        mips.ori(T8, ZERO, 2)
+        mips.bne(S1, T8, "vol_core_loop")
+        mips.nop
+        # Also set Broadcast volumes on Core 1:
+        mips.addiu(T9, S0, 0x0f0c)
+        mips.ori(A0, ZERO, 0x0f81); mips.move(A1, S7); mips.jalr(T9); mips.nop # BVOLL
+        mips.addiu(T9, S0, 0x0f0c)
+        mips.ori(A0, ZERO, 0x1081); mips.move(A1, S7); mips.jalr(T9); mips.nop # BVOLR
+        mips.lw(S1, 4, SP)
+        mips.lw(RA, 0, SP)
+        mips.addiu(SP, SP, 16)
         mips.jr(RA); mips.nop
 
         mips.resolve!

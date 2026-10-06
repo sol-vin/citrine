@@ -43,6 +43,7 @@ module Citrine
         "Citrine_StopCDDA",
         "Citrine_GetCDDAStatus",
         "Citrine_SetVolume",
+        "Citrine_AudioSeekStream",
         "citrine_vm_panic"
       ]
 
@@ -472,6 +473,36 @@ module Citrine
             emitter.jalr(T9)
             emitter.nop
             emitter.lw(V0, 24, SP) # Return set volume (A0)
+            emitter.lw(RA, 28, SP)
+            emitter.jr(RA)
+            emitter.addiu(SP, SP, 32)
+          when "Citrine_AudioSeekStream"
+            emitter.addiu(SP, SP, -32)
+            emitter.sw(RA, 28, SP)
+            emitter.sw(A0, 24, SP)
+
+            # If A0 >= 0x020000, pass command directly
+            emitter.lui(T0, 0x0002)
+            emitter.sltu(T1, A0, T0)
+            emitter.beqz(T1, "seek_play_entry")
+            emitter.nop
+
+            # Convert seconds (A0) to bank index: target_bank = (A0 * 1000) / 3582
+            emitter.li(T2, 1000)
+            emitter.mult(A0, T2)
+            emitter.mflo(T3)
+            emitter.li(T2, 3582)
+            emitter.divu(T3, T2)
+            emitter.mflo(T1) # target_bank
+            emitter.andi(T1, T1, 0xFFFF)
+            emitter.lui(A0, 0x0002)
+            emitter.or_(A0, A0, T1)
+
+            emitter.label("seek_play_entry")
+            emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+            emitter.jalr(T9)
+            emitter.nop
+            emitter.ori(V0, ZERO, 1) # Return success (1)
             emitter.lw(RA, 28, SP)
             emitter.jr(RA)
             emitter.addiu(SP, SP, 32)

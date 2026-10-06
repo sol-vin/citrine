@@ -1742,6 +1742,8 @@ module Citrine
         compile_error("Audio.cdda_status takes no arguments", node) if argc != 0
       when NativeId::AudioSetVolume
         compile_error("Audio.set_volume requires 1 argument: (volume)", node) if argc != 1
+      when NativeId::AudioSeekStream
+        compile_error("Audio.seek_stream requires 1 argument: (time_sec)", node) if argc != 1
       else
         # no extra constraints
       end
@@ -3621,6 +3623,7 @@ module Citrine
       when "stop_cdda", "stop_stream" then NativeId::AudioStopCDDA
       when "cdda_status", "get_cdda_status", "stream_status" then NativeId::AudioGetCDDAStatus
       when "set_volume", "set_audio_volume", "set_cdda_volume", "set_stream_volume" then NativeId::AudioSetVolume
+      when "seek_stream", "stream_seek" then NativeId::AudioSeekStream
       else nil
       end
     end

@@ -83,8 +83,10 @@ describe "Citrine PS2 Audio Streaming Suite" do
     # Inject controller input:
     # Frame 60: DPAD Right (Next Track)
     # Frame 120: Cross (Pause/Resume)
+    # Frame 180: R1 (Jump +10s / Seek)
     tc.inject_input(60, Citrine::PadButton::Right, duration: 2)
     tc.inject_input(120, Citrine::PadButton::Cross, duration: 2)
+    tc.inject_input(180, Citrine::PadButton::R1, duration: 2)
 
     result = tc.boot_pcsx2(timeout: 14.seconds)
     result.should_boot_cleanly
@@ -95,9 +97,12 @@ describe "Citrine PS2 Audio Streaming Suite" do
     result.should_have_output("cdrom0:S.IRX;1")
 
     # Verify streaming engine started
-    result.should_have_output(">>> [CITRINE S.IRX] Starting Track")
+    result.should_have_output(">>> Play track")
+
+    # Verify seek command executed
+    result.should_have_output(">>> Seek bank")
 
     # Verify continuous disc streaming refill activity
-    result.should_have_output(">>> [CITRINE S.IRX] Streamed bank")
+    result.should_have_output(">>> Stream bank")
   end
 end

@@ -551,7 +551,7 @@ module Citrine
   end
 
   # Seeks to an arbitrary position (in seconds) in the active audio stream.
-  def self.seek_stream(time_sec : Float32 | Float64) : Bool
+  def self.seek_stream(time_sec : Float32 | Float64 | Int32) : Bool
     true
   end
 

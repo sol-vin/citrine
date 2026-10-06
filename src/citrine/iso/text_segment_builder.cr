@@ -1090,6 +1090,18 @@ module Citrine
           emitter.lw(T5, 0x80, T0)
           emitter.addiu(T5, T5, 600)
           emitter.sw(T5, 0x80, T0)
+
+          # Send seek command to S.IRX: target_bank = T5 / 215
+          emitter.ori(T6, ZERO, 215)
+          emitter.divu(T5, T6)
+          emitter.mflo(T1)
+          emitter.andi(T1, T1, 0xFFFF)
+          emitter.lui(A0, 0x0002)
+          emitter.or_(A0, A0, T1)
+          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+          emitter.jalr(T9)
+          emitter.nop
+          emitter.lui(T0, 0x7000)
         end
         if addr = @rodata.button_msg_addrs["r1"]?
           emitter.li(A0, addr)
@@ -1112,6 +1124,18 @@ module Citrine
           emitter.move(T5, ZERO)
           emitter.label("l1_sub_ok")
           emitter.sw(T5, 0x80, T0)
+
+          # Send seek command to S.IRX: target_bank = T5 / 215
+          emitter.ori(T6, ZERO, 215)
+          emitter.divu(T5, T6)
+          emitter.mflo(T1)
+          emitter.andi(T1, T1, 0xFFFF)
+          emitter.lui(A0, 0x0002)
+          emitter.or_(A0, A0, T1)
+          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+          emitter.jalr(T9)
+          emitter.nop
+          emitter.lui(T0, 0x7000)
         end
         if addr = @rodata.button_msg_addrs["l1"]?
           emitter.li(A0, addr)
@@ -1125,6 +1149,24 @@ module Citrine
         emitter.andi(T7, T8, 0x0200)
         emitter.beqz(T7, "chk_btn_l2")
         emitter.nop
+        if @profile.has_audio
+          # Scrub forward 4 seconds (+240 frames)
+          emitter.lw(T5, 0x80, T0)
+          emitter.addiu(T5, T5, 240)
+          emitter.sw(T5, 0x80, T0)
+
+          # Send seek command to S.IRX: target_bank = T5 / 215
+          emitter.ori(T6, ZERO, 215)
+          emitter.divu(T5, T6)
+          emitter.mflo(T1)
+          emitter.andi(T1, T1, 0xFFFF)
+          emitter.lui(A0, 0x0002)
+          emitter.or_(A0, A0, T1)
+          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+          emitter.jalr(T9)
+          emitter.nop
+          emitter.lui(T0, 0x7000)
+        end
         if addr = @rodata.button_msg_addrs["r2"]?
           emitter.li(A0, addr)
           emitter.call("debug_puts")
@@ -1137,6 +1179,28 @@ module Citrine
         emitter.andi(T7, T8, 0x0100)
         emitter.beqz(T7, "chk_btn_start")
         emitter.nop
+        if @profile.has_audio
+          # Scrub backward 4 seconds (-240 frames)
+          emitter.lw(T5, 0x80, T0)
+          emitter.addiu(T5, T5, -240)
+          emitter.bgez(T5, "l2_sub_ok")
+          emitter.nop
+          emitter.move(T5, ZERO)
+          emitter.label("l2_sub_ok")
+          emitter.sw(T5, 0x80, T0)
+
+          # Send seek command to S.IRX: target_bank = T5 / 215
+          emitter.ori(T6, ZERO, 215)
+          emitter.divu(T5, T6)
+          emitter.mflo(T1)
+          emitter.andi(T1, T1, 0xFFFF)
+          emitter.lui(A0, 0x0002)
+          emitter.or_(A0, A0, T1)
+          emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+          emitter.jalr(T9)
+          emitter.nop
+          emitter.lui(T0, 0x7000)
+        end
         if addr = @rodata.button_msg_addrs["l2"]?
           emitter.li(A0, addr)
           emitter.call("debug_puts")

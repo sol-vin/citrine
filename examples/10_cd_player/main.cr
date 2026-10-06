@@ -101,16 +101,29 @@ Citrine.main_loop do
     status_mode = 0 # Normal PLAYING
   end
 
+  # When scrub buttons are released, commit seek to audio hardware
+  if pad.button_released?(Button::R2) || pad.button_released?(Button::L2)
+    if is_playing
+      Citrine.seek_stream(elapsed_sec)
+    end
+  end
+
   # 5. Jump: +10s (R1) / -10s (L1)
   if pad.button_pressed?(Button::R1)
     elapsed_sec += 10.0_f32
     if elapsed_sec > dur
       elapsed_sec = dur
     end
+    if is_playing
+      Citrine.seek_stream(elapsed_sec)
+    end
   elsif pad.button_pressed?(Button::L1)
     elapsed_sec -= 10.0_f32
     if elapsed_sec < 0.0_f32
       elapsed_sec = 0.0_f32
+    end
+    if is_playing
+      Citrine.seek_stream(elapsed_sec)
     end
   end
 
@@ -220,11 +233,6 @@ Citrine.main_loop do
   # Album Cover Card (128x128)
   Citrine.draw_rectangle(62, 52, 134, 134, Color::DarkGray)
   Citrine.draw_rectangle(64, 54, 130, 130, Color::Black)
-  Citrine.draw_circle(129, 119, 56, Color.new(30_u8, 32_u8, 44_u8, 255_u8))
-  Citrine.draw_circle(129, 119, 42, Color.new(42_u8, 46_u8, 60_u8, 255_u8))
-  Citrine.draw_circle(129, 119, 24, Color::Yellow)
-  Citrine.draw_circle(129, 119, 7, Color::Black)
-  Citrine.draw_text("CAS", 120, 115, 9, Color::Black)
   Citrine.draw_texture(cover_tex, 65, 55)
 
   # Track Info Card
@@ -250,22 +258,21 @@ Citrine.main_loop do
   vol_w = (master_vol * 120) // 255
   Citrine.draw_rectangle(100, 228, vol_w, 8, Color::Yellow)
 
-  # Spectrum Equalizer (Visual profile per track)
+  # Spectrum Equalizer (Visual profile per track - 12 retro spectrum bars)
   eq_x = 62
   while eq_x < 578
     eq_active = is_playing || status_mode == 3 || status_mode == 4
     eq_h = eq_active ? (12 + ((eq_x * 11 + track_idx * 17) % 40)) : 6
     eq_col = eq_active ? Color::Green : Color::DarkGray
-    Citrine.draw_rectangle(eq_x, 345 - eq_h, 14, eq_h, eq_col)
-    eq_x += 18
+    Citrine.draw_rectangle(eq_x, 345 - eq_h, 30, eq_h, eq_col)
+    eq_x += 44
   end
 
   # Footer Controls & Status Card
-  Citrine.draw_rectangle(40, 360, 560, 72, Color::DarkGray)
+  Citrine.draw_rectangle(40, 366, 560, 56, Color::DarkGray)
   loop_str = is_looping ? "ON" : "OFF"
-  Citrine.draw_text("CROSS: Play/Pause - CIRCLE: Stop - SQUARE: Loop (#{loop_str})", 55, 370, 11, Color::Yellow)
-  Citrine.draw_text("DPAD L/R: Prev/Next Track - R1/L1: +/-10s Jump - R2/L2: Fast Fwd/Rewind", 55, 388, 11, Color::Cyan)
-  Citrine.draw_text("DPAD U/D: Volume (#{master_vol}/255) - #{TOTAL_TRACKS} Streamed CAS Tracks on Disc", 55, 406, 11, Color::White)
+  Citrine.draw_text("CROSS: Play/Pause  CIRCLE: Stop  SQUARE: Loop (#{loop_str})  VOL: DPAD U/D", 55, 376, 11, Color::Yellow)
+  Citrine.draw_text("DPAD L/R: Track +/-  L1/R1: +/-10s  L2/R2: Scrub  (13 CAS Tracks on Disc)", 55, 398, 11, Color::Cyan)
 
   Citrine.end_drawing
 end

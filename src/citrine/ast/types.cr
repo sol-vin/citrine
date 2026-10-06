@@ -179,6 +179,7 @@ module Citrine
     AudioStopCDDA    = 221
     AudioGetCDDAStatus = 222
     AudioSetVolume   = 223
+    AudioSeekStream  = 224
   end
 
   # Type discriminator identifiers for runtime `is_a?` and `as` type introspection.

@@ -31,7 +31,15 @@ module Citrine
                          vag_entries.map(&.[1])
                        end
 
-      cas_files = extra_files.select { |k, _| k.downcase.ends_with?(".cas") }.to_a.sort_by do |k, _|
+      # Normalize and deduplicate extra_files case-insensitively
+      dedup_extra = Hash(String, Bytes).new
+      extra_files.each do |k, v|
+        norm = k.upcase
+        dedup_extra[norm] ||= v
+      end
+      extra_files = dedup_extra
+
+      cas_files = extra_files.select { |k, _| k.ends_with?(".CAS") }.to_a.sort_by do |k, _|
         if md = k.match(/(\d+)/)
           md[1].to_i
         else
@@ -39,22 +47,31 @@ module Citrine
         end
       end
 
-      vag_files = extra_files.select { |k, _| k.downcase.ends_with?(".vag") }.to_a.sort_by do |k, _|
-        if md = k.match(/(\d+)/)
-          md[1].to_i
-        else
-          999
+      if !cas_files.empty?
+        # Enforce .cas exclusivity: eliminate any .vag files or audio_tracks
+        extra_files.reject! { |k, _| k.ends_with?(".VAG") }
+        vag_files = [] of Tuple(String, Bytes)
+        all_vag_tracks = [] of Bytes
+        vag_bytes = nil
+        audio_tracks = [] of String
+      else
+        vag_files = extra_files.select { |k, _| k.ends_with?(".VAG") }.to_a.sort_by do |k, _|
+          if md = k.match(/(\d+)/)
+            md[1].to_i
+          else
+            999
+          end
+        end
+
+        if vag_files.empty? && !all_vag_tracks.empty?
+          all_vag_tracks.each_with_index do |tdata, idx|
+            tnum = sprintf("%02d", idx + 1)
+            vag_files << {"TRACK#{tnum}.VAG", tdata}
+          end
         end
       end
 
-      if vag_files.empty? && cas_files.empty? && !all_vag_tracks.empty?
-        all_vag_tracks.each_with_index do |tdata, idx|
-          tnum = sprintf("%02d", idx + 1)
-          vag_files << {"TRACK#{tnum}.VAG", tdata}
-        end
-      end
-
-      non_stream_files = extra_files.reject { |k, _| k == "S.IRX" || k == "S.IRX;1" || k.downcase.ends_with?(".vag") || k.downcase.ends_with?(".cas") }.to_a
+      non_stream_files = extra_files.reject { |k, _| k == "S.IRX" || k == "S.IRX;1" || k.ends_with?(".VAG") || k.ends_with?(".CAS") }.to_a
 
       has_custom_sirx = extra_files.has_key?("S.IRX") || extra_files.has_key?("S.IRX;1")
       use_streaming = !has_custom_sirx && (!cas_files.empty? || vag_files.size > 1 || all_vag_tracks.size > 1 || vag_files.any? { |_, d| d.size > 131072 } || all_vag_tracks.any? { |d| d.size > 131072 })

@@ -44,7 +44,7 @@ module Citrine
       alias DrawCommand = Citrine::GS::DrawCommand
       alias Phase = Citrine::GS::Phase
 
-      def self.emit_cbt_texture_spans(commands : Array(DrawCommand), path : String, start_x : Int32, start_y : Int32, grid_res : Int32 = 32)
+      def self.emit_cbt_texture_spans(commands : Array(DrawCommand), path : String, start_x : Int32, start_y : Int32, grid_res : Int32 = 16)
         return unless File.exists?(path)
         bytes = File.read(path).to_slice
         return unless bytes.size > 16 && String.new(bytes[0, 4]) == "CBT1"
@@ -1570,6 +1570,10 @@ end
               vol = regs[base_r]
               boot_messages << "[CITRINE AUDIO] CD-DA Volume set to #{vol}"
               regs[dst_r] = vol
+            when 224 # AudioSeekStream
+              time_sec = regs[base_r]
+              boot_messages << "[CITRINE AUDIO] Stream seeking to #{time_sec}s"
+              regs[dst_r] = 1_i64
             end
           end
         end
