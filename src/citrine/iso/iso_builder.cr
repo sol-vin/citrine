@@ -130,7 +130,7 @@ module Citrine
               pitch_reg = IO::ByteFormat::LittleEndian.decode(UInt16, data[12, 2])
             end
             track_lba = sec_cursor + 1_u32 # Audio data begins at sector 1 (skipping 2048-byte header sector)
-            bank_count = ((data.size - 2048) // 16384).to_u32
+            bank_count = data.size > 2048 ? ((data.size - 2048) // 16384).to_u32 : 0_u32
             track_table << SoundIrxBuilder::TrackInfo.new(track_lba, bank_count, pitch_reg)
             file_lba = sec_cursor
             sec_cursor += ((data.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32

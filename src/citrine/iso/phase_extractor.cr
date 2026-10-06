@@ -480,6 +480,7 @@ end
 
       has_button_checks = false
       has_drawing = false
+      has_audio = false
       inline_asm_words.clear
       fns.each do |fn|
         io.pos = instructions_start_pos + (fn.offset.to_i64 * 4)
@@ -502,6 +503,9 @@ end
             if nat == 10 || nat == 11 || (nat >= 20 && nat <= 34) || (nat >= 100 && nat <= 111)
               has_drawing = true
             end
+            if (nat >= 35 && nat <= 37) || (nat >= 220 && nat <= 224) || nat == 233 || nat == 234
+              has_audio = true
+            end
           elsif is_inline_asm
             imm = (instr & 0xFFFF_u32).to_i
             if imm < constants.size
@@ -511,7 +515,11 @@ end
         end
       end
       is_inline_assembly = !inline_asm_words.empty?
-      has_audio = strings.any? { |s| s.ends_with?(".vag") || s.ends_with?(".wav") || s.includes?("cdda") || s.includes?("CDDA") || s.includes?("SPU2") }
+      has_audio ||= strings.any? do |s|
+        down = s.downcase
+        down.ends_with?(".vag") || down.ends_with?(".wav") || down.ends_with?(".cas") ||
+          down.includes?("cdda") || down.includes?("cd-da") || s.includes?("SPU2")
+      end
       is_dvd_screensaver = strings.any? { |s| s.includes?("BouncingLogo") || s.includes?("DVD Bouncing Screensaver") || s.includes?("DVD Bounce") }
       is_controller_tester = strings.any? { |s| s.includes?("Controller Diagnostic") || s.includes?("DualShock 2") || s.includes?("DUALSHOCK 2") || s.includes?("Controller Tester") }
 

@@ -4,6 +4,8 @@ require "../src/citrine/iso/iso_builder"
 
 describe "Citrine CD-DA Audio & Mixed-Mode Disc Pipeline" do
   it "encodes audio to Red Book CD-DA raw PCM sector-aligned stream" do
+    pending! "FFmpeg is required for CD-DA audio transcode testing" unless Citrine::Importers::FluoriteMedia.ffmpeg_installed?
+
     # Generate 1 second 44.1kHz stereo test WAV
     temp_wav = "temp_cdda_test.wav"
     temp_raw = "temp_cdda_test.raw"
