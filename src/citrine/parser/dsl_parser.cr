@@ -259,6 +259,10 @@ module Citrine
           end
           ctx_name = extract_name(node.args.first?) || "default"
           ctx = program.vm_contexts[ctx_name] ||= VmContextDef.new(ctx_name, (program.vm_contexts.size + 1).to_u16)
+          if node.name == "vm_context"
+            program.top_level_nodes << node if namespace.empty?
+            return
+          end
           if block = node.block
             old_ctx = @current_context
             @current_context = ctx

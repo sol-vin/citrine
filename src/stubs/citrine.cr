@@ -193,93 +193,12 @@ enum Button : UInt8
   Square   = 15
 end
 
-# Controller port / player selection on PlayStation 2.
-enum Port : UInt8
-  # Physical controller port 1 on the console.
-  Port1   = 0
-  # Physical controller port 2 on the console.
-  Port2   = 1
-  # Player 1 controller (Port 1).
-  Player1 = 0
-  # Player 2 controller (Port 2).
-  Player2 = 1
+require "../citrine/subsystems/controller"
 
-  # Returns the 0-indexed port index (0 or 1).
-  def index : Int32
-    self.value.to_i32
-  end
-end
-
-# Controller handle providing ergonomic object-oriented button and stick queries for a specific port.
-#
-# ### Example:
-# ```crystal
-# p1 = Citrine.player(0)
-# p2 = Citrine.player(1)
-#
-# if p1.button_pressed?(Button::Cross)
-#   # Player 1 action
-# end
-# ```
-struct Controller
-  # The physical controller port associated with this controller handle.
-  getter port : Port
-
-  # Initializes a controller handle for the specified port (0 = Port 1, 1 = Port 2).
-  def initialize(port : Port | Int32)
-    @port = port.is_a?(Port) ? port : (port == 1 ? Port::Port2 : Port::Port1)
-  end
-
-  # Returns true if the specified button is currently held down on this controller port.
-  def button_down?(button : Button) : Bool
-    Citrine.button_down?(@port, button)
-  end
-
-  # Returns true if the specified button was pressed on this controller port during the current frame (rising edge).
-  def button_pressed?(button : Button) : Bool
-    Citrine.button_pressed?(@port, button)
-  end
-
-  # Returns true if the specified button was released on this controller port during the current frame (falling edge).
-  def button_released?(button : Button) : Bool
-    Citrine.button_released?(@port, button)
-  end
-
-  # Returns the horizontal analog stick value (-1.0 to 1.0).
-  def analog_x : Float32
-    Citrine.get_analog(@port, 0)
-  end
-
-  # Returns the vertical analog stick value (-1.0 to 1.0).
-  def analog_y : Float32
-    Citrine.get_analog(@port, 1)
-  end
-
-  # Returns the left analog stick horizontal axis (-1.0 to 1.0).
-  def left_stick_x : Float32
-    analog_x
-  end
-
-  # Returns the left analog stick vertical axis (-1.0 to 1.0).
-  def left_stick_y : Float32
-    analog_y
-  end
-
-  # Returns the right analog stick horizontal axis (-1.0 to 1.0).
-  def right_stick_x : Float32
-    Citrine.get_analog(@port, 2)
-  end
-
-  # Returns the right analog stick vertical axis (-1.0 to 1.0).
-  def right_stick_y : Float32
-    Citrine.get_analog(@port, 3)
-  end
-
-  # Sets the vibration rumble motors for this controller port.
-  def rumble(small : UInt8, large : UInt8) : Nil
-    Citrine.set_rumble(@port, small, large)
-  end
-end
+alias Port = Citrine::Port
+alias PadButton = Citrine::PadButton
+alias Controller = Citrine::Controller
+alias VirtualInput = Citrine::VirtualInput
 
 # Color Look-Up Table (CLUT) palette handle for 8-bit (PSMT8) and 4-bit (PSMT4) indexed textures.
 struct Palette

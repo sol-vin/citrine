@@ -1375,6 +1375,7 @@ end
                   false
                 end
               end
+              active_context_name = ""
               regs[dst_r] = reclaimed_bytes
             when 182 # MemoryStats
               active_bytes = allocations.values.reject(&.freed).sum(&.size_bytes)

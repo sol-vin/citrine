@@ -917,7 +917,7 @@ module Citrine
                   clean_str.to_i64? || clean_str.to_u64?.try(&.to_i64!) || 0_i64
                 end
           if v64 >= -32768 && v64 <= 32767
-            instructions << Instruction.encode_load_int(dest, v64.to_u16!)
+            instructions << Instruction.encode_load_int(dest, v64)
           else
             const_idx = add_constant(ConstValue.new(ConstType::Int32, int_val: v64.to_i32!, uint_val: v64.to_u32!))
             instructions << Instruction.encode_ab_imm(Opcode::LoadConst, dest, const_idx.to_u16)
@@ -1157,7 +1157,7 @@ module Citrine
         dest = allocator.alloc_temp
         val = resolve_constant_path(node)
         if val.type == ConstType::Int32 && val.int_val >= -32768 && val.int_val <= 32767
-          instructions << Instruction.encode_load_int(dest, val.int_val.to_u16!)
+          instructions << Instruction.encode_load_int(dest, val.int_val)
         else
           const_idx = add_constant(val)
           instructions << Instruction.encode_ab_imm(Opcode::LoadConst, dest, const_idx.to_u16)
