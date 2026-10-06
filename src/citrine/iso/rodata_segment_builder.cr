@@ -340,10 +340,25 @@ module Citrine
           total_items = {(body_mem.pos // 16).to_i, 65500}.min
           packet = IO::Memory.new
           body_slice = body_mem.to_slice
-          gif_tag = (1_u64 << 60) | (1_u64 << 15) | total_items.to_u64
-          packet.write_bytes(gif_tag, IO::ByteFormat::LittleEndian)
-          packet.write_bytes(0x0e_u64, IO::ByteFormat::LittleEndian)
-          packet.write(body_slice[0, total_items * 16])
+
+          if total_items <= 32767
+            gif_tag = (1_u64 << 60) | (1_u64 << 15) | total_items.to_u64
+            packet.write_bytes(gif_tag, IO::ByteFormat::LittleEndian)
+            packet.write_bytes(0x0e_u64, IO::ByteFormat::LittleEndian)
+            packet.write(body_slice[0, total_items * 16])
+          else
+            offset = 0
+            while offset < total_items
+              chunk_size = {total_items - offset, 32767}.min
+              is_eop = (offset + chunk_size >= total_items)
+              eop_bit = is_eop ? (1_u64 << 15) : 0_u64
+              gif_tag = (1_u64 << 60) | eop_bit | chunk_size.to_u64
+              packet.write_bytes(gif_tag, IO::ByteFormat::LittleEndian)
+              packet.write_bytes(0x0e_u64, IO::ByteFormat::LittleEndian)
+              packet.write(body_slice[offset * 16, chunk_size * 16])
+              offset += chunk_size
+            end
+          end
 
           pkt = packet.to_slice
           phase_addrs << curr_addr

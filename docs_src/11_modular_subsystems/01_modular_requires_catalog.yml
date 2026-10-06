@@ -1,0 +1,213 @@
+id: MODULAR_REQUIRES_CATALOG
+title: Complete Modular Requires Catalog
+summary: Exhaustive reference of all modular require paths in Citrine, their features, and memory budgets.
+track: 11_modular_subsystems
+overview: |
+  Citrine enforces zero-cost modularity on the PlayStation 2. Instead of a monolithic binary that exhausts
+  the Emotion Engine's 32 MB Main RAM and 16 KB I-cache, features are split into fine-grained modular subsystems.
+  
+  Only `require "citrine"` is resident by default (~180 KB base kernel). All other capabilities—2D transformation stacks,
+  3D perspective renderers, low-level Graphics Synthesizer packet builders, SPU2 sound banks, IPU MPEG-2 video streaming,
+  VU1 vertex shaders, VU0 compute kernels, physics, and immediate UI—are loaded on demand via explicit `require` statements.
+related_sources:
+  - "src/stubs/citrine.cr"
+  - "src/stubs/citrine/draw2d.cr"
+  - "src/stubs/citrine/draw3d.cr"
+  - "src/stubs/citrine/gl.cr"
+  - "src/stubs/citrine/audio.cr"
+  - "src/stubs/citrine/video.cr"
+  - "src/stubs/citrine/physics.cr"
+  - "src/stubs/citrine/shader.cr"
+  - "src/stubs/citrine/compute.cr"
+  - "src/stubs/citrine/ui.cr"
+  - "src/stubs/citrine/inputmap.cr"
+  - "src/stubs/citrine/scene.cr"
+  - "src/stubs/citrine/context.cr"
+sections:
+  - id: require_citrine_core
+    title: Core Resident Kernel
+    summary: require "citrine" (Always resident, ~180 KB)
+    content: |
+      The base engine kernel providing foundational runtime services:
+      - Bytecode VM interpreter and instruction execution loop.
+      - Zero-GC frame and level memory arenas.
+      - DualShock pad driver and controller polling (`Citrine.button_pressed?`, `Citrine.get_analog`).
+      - Core vector math (`Vector2`, `Vector3`, `Matrix4`, `Color`).
+      - Sequenced game loops (`Citrine.main_loop`), context shifts, and `exit`.
+      - Hardware DMA synchronization (`Citrine_SyncDMA()`).
+      ```crystal
+      require "citrine"
+
+      Citrine.main_loop do
+        exit if Citrine.button_pressed?(0, :start)
+      end
+      ```
+
+  - id: require_citrine_draw2d
+    title: 2D Graphics & Transformation Stack
+    summary: require "citrine/draw2d"
+    content: |
+      High-performance 2D drawing DSL featuring:
+      - 3x2 affine transformation stack (`Transform2D.push`, `translate`, `scale`, `rotation`).
+      - Arbitrary pivot rotations around custom origins (`rotation(deg, ox, oy)`).
+      - Rotated typography (`Draw2D.text(str, x, y, rotation: 45.0, origin: ...)`).
+      - Geometric primitives: rounded rectangles (`radius:`), circles, ellipses, stars, quads, polygons.
+      - Block-scoped drawing passes: `Citrine.draw_2d do |d| ... end` and `Draw2D.with_style`.
+      ```crystal
+      require "citrine"
+      require "citrine/draw2d"
+
+      Citrine.draw_2d do |d|
+        d.transform do |t|
+          t.translate(320, 224)
+          t.rotate(45.0)
+          d.rounded_rect(-50, -50, 100, 100, radius: 12.0, color: Color::Red)
+          d.text("ROTATED", -30, -8, rotation: 15.0)
+        end
+      end
+      ```
+
+  - id: require_citrine_draw3d
+    title: 3D Perspective Rendering
+    summary: require "citrine/draw3d"
+    content: |
+      3D Graphics Synthesizer perspective rendering API:
+      - Scoped camera projection modes: `Citrine::Draw3D.mode(camera) do |d| ... end`.
+      - Solid and wireframe 3D primitives: `Draw3D.cube`, `Draw3D.cube_wires`, `Draw3D.grid`.
+      - Indexed 3D mesh rasterization with dynamic lighting: `Draw3D.mesh`.
+      - Hardware Z-buffer configuration and automatic 2D orthographic restore on block exit.
+      ```crystal
+      require "citrine"
+      require "citrine/draw3d"
+
+      cam = Camera3D.new(Vector3.new(0, 5, -10), Vector3.new(0, 0, 0))
+      Citrine.draw_3d(cam) do |d|
+        d.grid(slices: 20, spacing: 1.0)
+        d.cube(Vector3.new(0, 1, 0), 2.0, 2.0, 2.0, Color::Blue)
+      end
+      ```
+
+  - id: require_citrine_gl
+    title: Immediate-Mode GS & GIF Packets
+    summary: require "citrine/gl"
+    content: |
+      Low-level Graphics Synthesizer rasterizer controls:
+      - Block-scoped primitive builders: `GL.triangles`, `GL.quads`, `GL.lines`, `GL.points`.
+      - Matrix transformation stack: `GL.matrix do ... end`.
+      - eDRAM alpha blending equations: `GL.blend_equation("(A - B) * C + D")`.
+      - Direct DMA GIF packet dispatch.
+      ```crystal
+      require "citrine/gl"
+
+      GL.triangles do
+        GL.color(Color::Red);   GL.vertex(0, 1, 0)
+        GL.color(Color::Green); GL.vertex(-1, -1, 0)
+        GL.color(Color::Blue);  GL.vertex(1, -1, 0)
+      end
+      ```
+
+  - id: require_citrine_audio
+    title: SPU2 Audio & Sound Banks
+    summary: require "citrine/audio"
+    content: |
+      PlayStation 2 SPU2 hardware sound processor manager (2 MB RAM):
+      - Declarative sound banks with strict byte budgets (`Audio.bank :sfx, budget: 512.kilobytes`).
+      - Sample lifecycles: `:pinned` (resident), `:cached` (LRU eviction under memory pressure), `:transient` (one-shot).
+      - Hardware ADPCM 24-voice polyphony and streaming disc audio (CD-DA/CAS).
+      ```crystal
+      require "citrine/audio"
+
+      Audio.bank :combat, budget: 256.kilobytes do |b|
+        b.sample :slash, "sfx/slash.adpcm", policy: :pinned
+        b.sample :hit,   "sfx/hit.adpcm",   policy: :cached
+      end
+
+      Audio.play(:slash)
+      ```
+
+  - id: require_citrine_video
+    title: IPU Hardware Video Streaming
+    summary: require "citrine/video"
+    content: |
+      Hardware MPEG-2 / PSS Full-Motion Video (FMV) playback via the Image Processing Unit (IPU):
+      - Direct disc-to-IPU DMA streaming using double-buffered ring caches.
+      - Full-screen or sub-region video playback: `Video.draw_frame(id, x, y, w, h)`.
+      - High-level cutscene helper: `Video.stream("movies/intro.pss", skip_button: :start)`.
+      ```crystal
+      require "citrine/video"
+
+      Video.stream("movies/intro.pss")
+      ```
+
+  - id: require_citrine_physics
+    title: Deterministic Fixed-Point Physics
+    summary: require "citrine/physics"
+    content: |
+      High-performance physics engine optimized for Emotion Engine MMI:
+      - 16.16 fixed-point arithmetic (`FixedPoint`).
+      - Axis-Aligned Bounding Box (`AABB`) and circle/sphere collision detection.
+      - Verlet particle integration and constraint solvers.
+      - 2D/3D rigid body dynamics.
+      ```crystal
+      require "citrine/physics"
+
+      box_a = AABB.new(0, 0, 32, 32)
+      box_b = AABB.new(20, 20, 32, 32)
+      if box_a.intersects?(box_b)
+        # Collision response
+      end
+      ```
+
+  - id: require_citrine_shader_compute
+    title: VU1 Shaders & VU0 Compute Kernels
+    summary: require "citrine/shader" and require "citrine/compute"
+    content: |
+      Programmable vector unit coprocessor acceleration:
+      - Vertex shaders compiling directly to VU1 128-bit dual-issue VLIW microcode.
+      - Autonomous VU0 micro-mode compute kernels for parallel physics and math.
+      ```crystal
+      require "citrine/shader"
+      require "citrine/compute"
+
+      # Autonomous compute kernel on VU0
+      Citrine::Compute.kernel :particle_update do |k|
+        pos = k.load_vec4(0)
+        vel = k.load_vec4(1)
+        k.store_vec4(0, pos + vel)
+      end
+      ```
+
+  - id: require_citrine_ui
+    title: Immediate-Mode UI (Raygui Style)
+    summary: require "citrine/ui"
+    content: |
+      Immediate-mode graphical user interface designed for DualShock controller navigation:
+      - Panels, buttons, sliders, progress bars, checkboxes, and text inputs.
+      - Focus navigation with D-Pad and Cross activation.
+      ```crystal
+      require "citrine/ui"
+
+      Citrine::UI.scope do |ui|
+        ui.panel(100, 100, 200, 150, "Options")
+        if ui.button("Play", 120, 140)
+          exit # Transition to gameplay loop
+        end
+      end
+      ```
+
+  - id: require_citrine_inputmap
+    title: DualShock Input Actions & Combos
+    summary: require "citrine/inputmap"
+    content: |
+      Semantic action-based controller mapping system:
+      - Logical action binding (`Action.register(:jump, :cross)`).
+      - Multi-button combo detection (`Action.register_combo(:super_attack, [:l1, :r1, :cross])`).
+      - Analog stick deadzone smoothing and sensitivity calibration.
+      ```crystal
+      require "citrine/inputmap"
+
+      Action.register(:jump, :cross)
+      if Action.pressed?(:jump)
+        # Handle jump
+      end
+      ```

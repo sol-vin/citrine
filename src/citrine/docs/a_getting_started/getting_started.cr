@@ -46,7 +46,7 @@ module Citrine
         #
         # To compile and boot any Citrine game in the PCSX2 emulator:
         # ```bash
-        # citrine run examples/01_hello_world/main.cr
+        # citrine run examples/01_hello_pad/main.cr
         # ```
         # This automatically compiles the Crystal code into compact Citrine Bytecode (`.cbc`),
         # packages it into an ISO9660 disc image (`game.iso`), and launches PCSX2.

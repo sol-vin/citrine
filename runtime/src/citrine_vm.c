@@ -282,9 +282,17 @@ CitrineVM* citrine_vm_create(const uint8_t* cbc_data, size_t cbc_size) {
     vm->frame_arena.buffer = (uint8_t*)malloc(vm->frame_arena.capacity);
     vm->frame_arena.offset = 0;
 
+    vm->context_arena.capacity = 4 * 1024 * 1024; // 4 MB Context Arena
+    vm->context_arena.buffer = (uint8_t*)malloc(vm->context_arena.capacity);
+    vm->context_arena.offset = 0;
+
     vm->level_arena.capacity = 2 * 1024 * 1024; // 2 MB
     vm->level_arena.buffer = (uint8_t*)malloc(vm->level_arena.capacity);
     vm->level_arena.offset = 0;
+
+    vm->active_subsystems = 1; // SUBSYS_CORE
+    vm->active_context_id = 0;
+    vm->in_main_loop = false;
 
     vm->watchdog_limit = 5000000; // 5M instructions per frame max
 
@@ -297,6 +305,7 @@ void citrine_vm_destroy(CitrineVM* vm) {
     if (!vm) return;
     if (vm->functions) free(vm->functions);
     if (vm->frame_arena.buffer) free(vm->frame_arena.buffer);
+    if (vm->context_arena.buffer) free(vm->context_arena.buffer);
     if (vm->level_arena.buffer) free(vm->level_arena.buffer);
     if (vm->string_pool) {
         for (uint32_t i = 0; i < vm->num_strings; i++) {
@@ -306,6 +315,28 @@ void citrine_vm_destroy(CitrineVM* vm) {
     }
     if (vm->constant_pool) free(vm->constant_pool);
     free(vm);
+}
+
+void citrine_vm_switch_context(CitrineVM* vm, uint16_t context_id, uint32_t subsys_mask) {
+    if (!vm) return;
+    if (vm->in_main_loop) {
+        citrine_vm_panic(vm, "Safety Error: Cannot switch context inside active main_loop! Exit loop first.");
+        return;
+    }
+
+    // 1. Zero-GC Memory Reclamation: Reset context arena
+    vm->context_arena.offset = 0;
+
+    // 2. Update active context & subsystems
+    vm->active_context_id = context_id;
+    vm->active_subsystems = subsys_mask;
+}
+
+void citrine_vm_clear_context(CitrineVM* vm) {
+    if (!vm) return;
+    vm->context_arena.offset = 0;
+    vm->active_context_id = 0;
+    vm->active_subsystems = 1; // SUBSYS_CORE
 }
 
 bool citrine_vm_step(CitrineVM* vm) {
@@ -1873,6 +1904,21 @@ static void native_dispatch(CitrineVM* vm, uint16_t native_id, Value* args, uint
             Citrine_DrawMesh(args[0].as.handle, pos, (uint32_t)args[4].as.i);
             break;
         }
+        case 38: // LoadModel(path)
+            out_ret->type = VAL_HANDLE;
+            out_ret->as.handle = Citrine_LoadModel(args[0].as.str);
+            break;
+        case 39: { // DrawModel(handle, x, y, z, scale, tint)
+            CitrineVector3 pos = {
+                (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i,
+                (args[2].type == VAL_FLOAT32) ? args[2].as.f : (float)args[2].as.i,
+                (args[3].type == VAL_FLOAT32) ? args[3].as.f : (float)args[3].as.i
+            };
+            float scale = (args[4].type == VAL_FLOAT32) ? args[4].as.f : (float)args[4].as.i;
+            uint32_t tint = (uint32_t)args[5].as.i;
+            Citrine_DrawModel(args[0].as.handle, pos, scale, tint);
+            break;
+        }
         case 30: // LoadTexture(path)
             out_ret->type = VAL_HANDLE;
             out_ret->as.handle = Citrine_LoadTexture(args[0].as.str);
@@ -1885,7 +1931,20 @@ static void native_dispatch(CitrineVM* vm, uint16_t native_id, Value* args, uint
                 (uint32_t)args[3].as.i
             );
             break;
+        case 32: // DrawTextureRec(id, sx, sy, sw, sh, dx, dy, tint)
+            Citrine_DrawTextureRec(
+                args[0].as.handle,
+                (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i,
+                (args[2].type == VAL_FLOAT32) ? args[2].as.f : (float)args[2].as.i,
+                (args[3].type == VAL_FLOAT32) ? args[3].as.f : (float)args[3].as.i,
+                (args[4].type == VAL_FLOAT32) ? args[4].as.f : (float)args[4].as.i,
+                (args[5].type == VAL_FLOAT32) ? args[5].as.f : (float)args[5].as.i,
+                (args[6].type == VAL_FLOAT32) ? args[6].as.f : (float)args[6].as.i,
+                (argc > 7) ? (uint32_t)args[7].as.i : 0xFFFFFFFFu
+            );
+            break;
         case 35: // LoadSound(path)
+
             out_ret->type = VAL_HANDLE;
             out_ret->as.handle = Citrine_LoadSound(args[0].as.str);
             break;
@@ -1907,6 +1966,65 @@ static void native_dispatch(CitrineVM* vm, uint16_t native_id, Value* args, uint
             out_ret->type = VAL_FLOAT32;
             out_ret->as.f = Citrine_GetAnalog(args[0].as.i);
             break;
+        case 49: { // DrawModelEx(handle, x, y, z, rx, ry, rz, angle, sx, sy, sz, tint)
+            CitrineVector3 pos = {
+                (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i,
+                (args[2].type == VAL_FLOAT32) ? args[2].as.f : (float)args[2].as.i,
+                (args[3].type == VAL_FLOAT32) ? args[3].as.f : (float)args[3].as.i
+            };
+            CitrineVector3 rot_axis = {
+                (args[4].type == VAL_FLOAT32) ? args[4].as.f : (float)args[4].as.i,
+                (args[5].type == VAL_FLOAT32) ? args[5].as.f : (float)args[5].as.i,
+                (args[6].type == VAL_FLOAT32) ? args[6].as.f : (float)args[6].as.i
+            };
+            float rot_angle = (args[7].type == VAL_FLOAT32) ? args[7].as.f : (float)args[7].as.i;
+            CitrineVector3 scale = {
+                (args[8].type == VAL_FLOAT32) ? args[8].as.f : (float)args[8].as.i,
+                (args[9].type == VAL_FLOAT32) ? args[9].as.f : (float)args[9].as.i,
+                (args[10].type == VAL_FLOAT32) ? args[10].as.f : (float)args[10].as.i
+            };
+            uint32_t tint = (uint32_t)args[11].as.i;
+            Citrine_DrawModelEx(args[0].as.handle, pos, rot_axis, rot_angle, scale, tint);
+            break;
+        }
+        case 50: // UnloadModel(handle)
+            Citrine_UnloadModel(args[0].as.handle);
+            break;
+        case 51: { // DrawTriangle3D(x1, y1, z1, x2, y2, z2, x3, y3, z3, color)
+            CitrineVector3 v1 = {
+                (args[0].type == VAL_FLOAT32) ? args[0].as.f : (float)args[0].as.i,
+                (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i,
+                (args[2].type == VAL_FLOAT32) ? args[2].as.f : (float)args[2].as.i
+            };
+            CitrineVector3 v2 = {
+                (args[3].type == VAL_FLOAT32) ? args[3].as.f : (float)args[3].as.i,
+                (args[4].type == VAL_FLOAT32) ? args[4].as.f : (float)args[4].as.i,
+                (args[5].type == VAL_FLOAT32) ? args[5].as.f : (float)args[5].as.i
+            };
+            CitrineVector3 v3 = {
+                (args[6].type == VAL_FLOAT32) ? args[6].as.f : (float)args[6].as.i,
+                (args[7].type == VAL_FLOAT32) ? args[7].as.f : (float)args[7].as.i,
+                (args[8].type == VAL_FLOAT32) ? args[8].as.f : (float)args[8].as.i
+            };
+            Citrine_DrawTriangle3D(v1, v2, v3, (uint32_t)args[9].as.i);
+            break;
+        }
+        case 52: { // DrawBillboard(tex_id, cx, cy, cz, px, py, pz, size, tint)
+            CitrineVector3 cam_pos = {
+                (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i,
+                (args[2].type == VAL_FLOAT32) ? args[2].as.f : (float)args[2].as.i,
+                (args[3].type == VAL_FLOAT32) ? args[3].as.f : (float)args[3].as.i
+            };
+            CitrineVector3 pos = {
+                (args[4].type == VAL_FLOAT32) ? args[4].as.f : (float)args[4].as.i,
+                (args[5].type == VAL_FLOAT32) ? args[5].as.f : (float)args[5].as.i,
+                (args[6].type == VAL_FLOAT32) ? args[6].as.f : (float)args[6].as.i
+            };
+            float size = (args[7].type == VAL_FLOAT32) ? args[7].as.f : (float)args[7].as.i;
+            uint32_t tint = (uint32_t)args[8].as.i;
+            Citrine_DrawBillboard(args[0].as.handle, cam_pos, pos, size, tint);
+            break;
+        }
         case 60: // SetDebugOverlay(bool)
             Citrine_HUD_SetVisible(args[0].as.i != 0);
             break;
@@ -2242,8 +2360,100 @@ static void native_dispatch(CitrineVM* vm, uint16_t native_id, Value* args, uint
             *out_ret = args[2];
             break;
         }
+        case 180: { // ContextSet(ctx_id, subsys_mask)
+
+            uint16_t cid = (uint16_t)args[0].as.i;
+            uint32_t mask = (uint32_t)args[1].as.i;
+            citrine_vm_switch_context(vm, cid, mask);
+            out_ret->type = VAL_NIL;
+            break;
+        }
+        case 181: { // ContextClear()
+            citrine_vm_clear_context(vm);
+            out_ret->type = VAL_NIL;
+            break;
+        }
+
+        case 230: { // DrawRectangleRotated(x, y, w, h, angle, ox, oy, color)
+            Citrine_DrawRectangleRotated(
+                (args[0].type == VAL_FLOAT32) ? args[0].as.f : (float)args[0].as.i,
+                (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i,
+                (args[2].type == VAL_FLOAT32) ? args[2].as.f : (float)args[2].as.i,
+                (args[3].type == VAL_FLOAT32) ? args[3].as.f : (float)args[3].as.i,
+                (args[4].type == VAL_FLOAT32) ? args[4].as.f : (float)args[4].as.i,
+                (args[5].type == VAL_FLOAT32) ? args[5].as.f : (float)args[5].as.i,
+                (args[6].type == VAL_FLOAT32) ? args[6].as.f : (float)args[6].as.i,
+                (uint32_t)args[7].as.i
+            );
+            break;
+        }
+        case 231: { // DrawRoundedRectangle(x, y, w, h, radius, color)
+            Citrine_DrawRoundedRectangle(
+                (args[0].type == VAL_FLOAT32) ? args[0].as.f : (float)args[0].as.i,
+                (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i,
+                (args[2].type == VAL_FLOAT32) ? args[2].as.f : (float)args[2].as.i,
+                (args[3].type == VAL_FLOAT32) ? args[3].as.f : (float)args[3].as.i,
+                (args[4].type == VAL_FLOAT32) ? args[4].as.f : (float)args[4].as.i,
+                (uint32_t)args[5].as.i
+            );
+            break;
+        }
+        case 232: { // DrawTextRotated(text, x, y, size, angle, ox, oy, color)
+            Citrine_DrawTextRotated(
+                args[0].as.str ? args[0].as.str : "",
+                (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i,
+                (args[2].type == VAL_FLOAT32) ? args[2].as.f : (float)args[2].as.i,
+                args[3].as.i,
+                (args[4].type == VAL_FLOAT32) ? args[4].as.f : (float)args[4].as.i,
+                (args[5].type == VAL_FLOAT32) ? args[5].as.f : (float)args[5].as.i,
+                (args[6].type == VAL_FLOAT32) ? args[6].as.f : (float)args[6].as.i,
+                (uint32_t)args[7].as.i
+            );
+            break;
+        }
+        case 233: // AudioUnloadSound(id)
+            Citrine_StopSound(args[0].as.handle);
+            break;
+        case 234: // AudioGetFreeMemory()
+            out_ret->type = VAL_INT32;
+            out_ret->as.i = 2097152; // 2MB total SPU2
+            break;
+        case 235: // ComputeDispatch(count)
+        case 236: // ComputeSync()
+            break;
+
+        case 237: { // DrawTexturePro(id, sx, sy, sw, sh, dx, dy, dw, dh, rot, ox, oy, tint, flip_flags)
+            Citrine_DrawTexturePro(
+                args[0].as.handle,
+                (args[1].type == VAL_FLOAT32) ? args[1].as.f : (float)args[1].as.i,
+                (args[2].type == VAL_FLOAT32) ? args[2].as.f : (float)args[2].as.i,
+                (args[3].type == VAL_FLOAT32) ? args[3].as.f : (float)args[3].as.i,
+                (args[4].type == VAL_FLOAT32) ? args[4].as.f : (float)args[4].as.i,
+                (args[5].type == VAL_FLOAT32) ? args[5].as.f : (float)args[5].as.i,
+                (args[6].type == VAL_FLOAT32) ? args[6].as.f : (float)args[6].as.i,
+                (args[7].type == VAL_FLOAT32) ? args[7].as.f : (float)args[7].as.i,
+                (args[8].type == VAL_FLOAT32) ? args[8].as.f : (float)args[8].as.i,
+                (args[9].type == VAL_FLOAT32) ? args[9].as.f : (float)args[9].as.i,
+                (args[10].type == VAL_FLOAT32) ? args[10].as.f : (float)args[10].as.i,
+                (args[11].type == VAL_FLOAT32) ? args[11].as.f : (float)args[11].as.i,
+                (argc > 12) ? (uint32_t)args[12].as.i : 0xFFFFFFFFu,
+                (argc > 13) ? (uint8_t)args[13].as.i : 0
+            );
+            break;
+        }
+
+        case 241: // LoadPalette(path)
+            out_ret->type = VAL_HANDLE;
+            out_ret->as.handle = Citrine_LoadPalette(args[0].as.str);
+            break;
+
+        case 242: // SetPalette(id)
+            Citrine_SetPalette(args[0].as.handle);
+            break;
 
         default:
+
             break;
     }
 }
+

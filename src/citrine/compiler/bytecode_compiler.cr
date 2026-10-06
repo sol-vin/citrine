@@ -180,6 +180,9 @@ module Citrine
     property inline_counter : Int32 = 0
     property loop_break_jumps : Array(Array(Int32)) = [] of Array(Int32)
     property loop_next_jumps : Array(Array(Int32)) = [] of Array(Int32)
+    property active_loop_context : String? = nil
+    property in_main_loop : Bool = false
+    property program : ParsedProgram? = nil
 
     def initialize(@filename : String? = nil)
       @source_map = SourceMap.new
@@ -191,6 +194,7 @@ module Citrine
     end
 
     def compile(program : ParsedProgram) : Bytes
+      @program = program
       if @release_mode
         strip_debug_nodes(program)
       end
@@ -548,12 +552,131 @@ module Citrine
     end
 
 
+    private def extract_name(arg : Crystal::ASTNode?) : String?
+      case arg
+      when Crystal::SymbolLiteral then arg.value
+      when Crystal::StringLiteral then arg.value
+      when Crystal::Var           then arg.name
+      when Crystal::Call          then arg.name
+      else nil
+      end
+    end
+
+    private def compute_subsys_mask(ctx_name : String) : UInt32
+      mask = 1_u32 # SUBSYS_CORE
+      if p = @program
+        if ctx = p.vm_contexts[ctx_name]?
+          ctx.requires.each do |req|
+            case req
+            when "citrine/draw2d" then mask |= (1_u32 << 1)
+            when "citrine/draw3d", "citrine/draw" then mask |= (1_u32 << 2)
+            when "citrine/gl" then mask |= (1_u32 << 3)
+            when "citrine/audio" then mask |= (1_u32 << 4)
+            when "citrine/video" then mask |= (1_u32 << 5)
+            when "citrine/physics" then mask |= (1_u32 << 6)
+            when "citrine/shader" then mask |= (1_u32 << 7)
+            when "citrine/compute" then mask |= (1_u32 << 8)
+            when "citrine/inputmap" then mask |= (1_u32 << 9)
+            when "citrine/ui" then mask |= (1_u32 << 10)
+            end
+          end
+        else
+          mask |= (1_u32 << 1) if p.loaded_requires.includes?("citrine/draw2d")
+          mask |= (1_u32 << 2) if p.loaded_requires.includes?("citrine/draw3d")
+          mask |= (1_u32 << 3) if p.loaded_requires.includes?("citrine/gl")
+          mask |= (1_u32 << 4) if p.loaded_requires.includes?("citrine/audio")
+          mask |= (1_u32 << 5) if p.loaded_requires.includes?("citrine/video")
+        end
+      end
+      mask
+    end
+
+    private def validate_context_subsystem_call(obj_str : String, method_name : String, active_ctx : String, node : Crystal::ASTNode)
+      p = @program || return
+      ctx = p.vm_contexts[active_ctx]?
+
+      req_for_obj : String? = case obj_str
+      when "Citrine::Draw2D", "Draw2D" then "citrine/draw2d"
+      when "Citrine::Draw3D", "Draw3D" then "citrine/draw3d"
+      when "Citrine::GL", "GL"         then "citrine/gl"
+      when "Citrine::Audio", "Audio"   then "citrine/audio"
+      when "Citrine::Video", "Video"   then "citrine/video"
+      when "Citrine::Physics", "Physics", "Citrine::Physics2D" then "citrine/physics"
+      when "Citrine::Shader", "Shader" then "citrine/shader"
+      when "Citrine::Compute", "Compute" then "citrine/compute"
+      when "Citrine::UI", "UI"         then "citrine/ui"
+      when "Citrine::InputMap", "InputMap" then "citrine/inputmap"
+      else nil
+      end
+
+      if req_for_obj
+        other_contexts = p.vm_contexts.select { |k, v| v.requires.includes?(req_for_obj) }.keys
+        if other_contexts.size > 0 && (ctx.nil? || !ctx.requires.includes?(req_for_obj))
+          compile_error(
+            "Subsystem violation: '#{obj_str}.#{method_name}' requires '#{req_for_obj}', which is not mounted in active main_loop context ':#{active_ctx}'.",
+            node
+          )
+        end
+      end
+
+      if !obj_str.empty?
+        p.vm_contexts.each do |cname, cdef|
+          next if cname == active_ctx
+          if cdef.structs.has_key?(obj_str) && (ctx.nil? || !ctx.structs.has_key?(obj_str))
+            compile_error(
+              "Context violation: Type '#{obj_str}' belongs to context(:#{cname}), which is not mounted in active main_loop context ':#{active_ctx}'.",
+              node
+            )
+          end
+        end
+      end
+    end
+
     private def compile_main_loop(
-      body : Crystal::ASTNode,
+      call_node : Crystal::Call,
       allocator : RegisterAllocator,
       instructions : Array(Instruction),
       fn : CompiledFunction
     ) : UInt8
+      ctx_name : String? = nil
+      if named = call_node.named_args
+        named.each do |na|
+          if na.name == "context"
+            ctx_name = extract_name(na.value)
+          end
+        end
+      end
+      if ctx_name.nil? && call_node.args.size > 0
+        ctx_name = extract_name(call_node.args.first)
+      end
+      if ctx_name.nil?
+        if (p = @program) && p.vm_contexts.size > 0
+          ctx_name = p.vm_contexts.keys.first
+        else
+          ctx_name = "default"
+        end
+      end
+
+      # Context switch native call before loop starts
+      ctx_id = @program.try(&.vm_contexts[ctx_name]?.try(&.id)) || 1_u16
+      subsys_mask = compute_subsys_mask(ctx_name)
+
+      ctx_reg = allocator.alloc_temp
+      mask_reg = allocator.alloc_temp
+      instructions << Instruction.encode_load_int(ctx_reg, ctx_id.to_u16)
+      instructions << Instruction.encode_load_int(mask_reg, (subsys_mask & 0xFFFF_u32).to_u16)
+      instructions << Instruction.encode_call_native(ctx_reg, 2_u8, NativeId::ContextSet.value)
+      allocator.free_temp(ctx_reg)
+      allocator.free_temp(mask_reg)
+
+      old_loop_ctx = @active_loop_context
+      old_in_loop = @in_main_loop
+      @active_loop_context = ctx_name
+      @in_main_loop = true
+
+      loop_break_jumps = [] of Int32
+      @loop_break_jumps.push(loop_break_jumps)
+
       loop_start_offset = instructions.size
 
       # Check window_open?
@@ -566,6 +689,7 @@ module Citrine
       instructions << Instruction.encode_jump_if_false(cond_reg, 0_i16)
 
       # Body
+      body = call_node.block.not_nil!.body
       body_reg = compile_node(body, allocator, instructions, fn)
       allocator.free_temp(body_reg)
 
@@ -578,6 +702,16 @@ module Citrine
       exit_offset = (instructions.size - jump_exit_idx - 1).to_i16
       instructions[jump_exit_idx] = Instruction.encode_jump_if_false(cond_reg, exit_offset)
       allocator.free_temp(cond_reg)
+
+      # Patch all break / exit jumps!
+      loop_break_jumps.each do |j_idx|
+        b_offset = (instructions.size - j_idx - 1).to_i16
+        instructions[j_idx] = Instruction.encode_branch(Opcode::Jump, 0_u8, b_offset)
+      end
+      @loop_break_jumps.pop
+
+      @active_loop_context = old_loop_ctx
+      @in_main_loop = old_in_loop
 
       ret_reg = allocator.alloc_temp
       instructions << Instruction.encode_load_nil(ret_reg)
@@ -682,8 +816,18 @@ module Citrine
             val_type = "Int"
           elsif call_node.name == "[]" && (recv = call_node.obj)
             recv_name = recv.is_a?(Crystal::Var) ? recv.name : (recv.is_a?(Crystal::Path) ? recv.names.last : nil)
-            if recv_name && @var_types[recv_name]? == "Array(String)"
-              val_type = "String"
+            if recv_name
+              rtype = @var_types[recv_name]?
+              if rtype == "Array(String)"
+                val_type = "String"
+              elsif rtype == "Array(Track)" || rtype == "Array(Citrine::Audio::Track)" || rtype == "Citrine::Audio::Album" || rtype == "Album" || rtype == "Audio::Album"
+                val_type = "Citrine::Audio::Track"
+              end
+            end
+          elsif call_node.name == "tracks" && (recv = call_node.obj)
+            recv_name = recv.is_a?(Crystal::Var) ? recv.name : (recv.is_a?(Crystal::Path) ? recv.names.last : nil)
+            if recv_name && (@var_types[recv_name]? == "Citrine::Audio::Album" || @var_types[recv_name]? == "Album" || @var_types[recv_name]? == "Audio::Album")
+              val_type = "Array(Track)"
             end
           end
         elsif node.value.is_a?(Crystal::Var)
@@ -1674,8 +1818,15 @@ module Citrine
         compile_error("Citrine.draw_triangle requires 7 arguments: (x1, y1, x2, y2, x3, y3, color)", node) if argc != 7
       when NativeId::DrawQuad
         compile_error("Citrine.draw_quad requires 9 arguments: (x1, y1, x2, y2, x3, y3, x4, y4, color)", node) if argc != 9
+      when NativeId::DrawRectangleRotated
+        compile_error("Citrine.draw_rectangle_rotated requires 8 arguments: (x, y, w, h, angle, ox, oy, color)", node) if argc != 8
+      when NativeId::DrawRoundedRectangle
+        compile_error("Citrine.draw_rounded_rectangle requires 6 arguments: (x, y, w, h, radius, color)", node) if argc != 6
+      when NativeId::DrawTextRotated
+        compile_error("Citrine.draw_text_rotated requires 8 arguments: (text, x, y, size, angle, ox, oy, color)", node) if argc != 8
       when NativeId::DrawText
         compile_error("Citrine.draw_text requires 5 arguments: (text, x, y, size, color)", node) if argc != 5
+
       when NativeId::DrawCube, NativeId::DrawCubeWires
         compile_error("Citrine.#{name} requires 5 or 7 arguments: (pos, w, h, d, color) or (x, y, z, w, h, d, color)", node) if argc != 5 && argc != 7
       when NativeId::DrawGrid
@@ -1686,6 +1837,13 @@ module Citrine
         compile_error("Citrine.draw_texture requires 3 or 4 arguments: (texture_id, x, y[, tint])", node) if argc != 3 && argc != 4
       when NativeId::DrawTextureRec
         compile_error("Citrine.draw_texture_rec requires 7 or 8 arguments: (texture_id, sx, sy, sw, sh, dx, dy[, tint])", node) if argc != 7 && argc != 8
+      when NativeId::DrawTexturePro
+        compile_error("Citrine.draw_texture_pro requires 11 to 14 arguments: (tex, sx, sy, sw, sh, dx, dy, dw, dh, rot, ox, oy[, tint[, flip_flags]])", node) if argc < 11 || argc > 14
+      when NativeId::LoadPalette
+        compile_error("Citrine.load_palette requires 1 argument: (filename)", node) if argc != 1
+      when NativeId::SetPalette
+        compile_error("Citrine.set_palette requires 1 argument: (palette_id)", node) if argc != 1
+
       when NativeId::LoadSound
         compile_error("Citrine.load_sound requires 1 argument: (filename)", node) if argc != 1
       when NativeId::PlaySound
@@ -1801,6 +1959,29 @@ module Citrine
       end
 
       obj_str = node.obj ? node.obj.to_s : ""
+
+      if @in_main_loop
+        if node.name == "exit" && (obj_str.empty? || obj_str == "Citrine")
+          if @loop_break_jumps.size > 0
+            dest = allocator.alloc_temp
+            j = instructions.size
+            instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, 0_i16)
+            @loop_break_jumps.last << j
+            instructions << Instruction.encode_load_nil(dest)
+            return dest
+          end
+        end
+        if (node.name == "switch_context" || node.name == "set_vm_context") && (obj_str.empty? || obj_str == "Citrine")
+          compile_error("Safety Error: Cannot switch context inside active main_loop! Exit the loop first.", node)
+        end
+        if (node.name == "context" || node.name == "vm_context" || node.name == "make_vm_context") && (obj_str.empty? || obj_str == "Citrine")
+          compile_error("Compile Error: Context definitions cannot be placed inside main_loop.", node)
+        end
+        if active_ctx = @active_loop_context
+          validate_context_subsystem_call(obj_str, node.name, active_ctx, node)
+        end
+      end
+
       is_collection_push = obj_str.downcase.includes?("arr") || obj_str.downcase.includes?("list") ||
                            obj_str.downcase.includes?("io") || obj_str.downcase.includes?("buf") ||
                            (node.obj.is_a?(Crystal::Var) && @var_types[node.obj.as(Crystal::Var).name]?.try { |t| t.starts_with?("Array") || t.includes?("IO") }) ||
@@ -1893,7 +2074,7 @@ module Citrine
 
       # Main loop
       if node.name == "main_loop" && (obj_str.empty? || obj_str == "Citrine") && node.block
-        loop_ret = compile_main_loop(node.block.not_nil!.body, allocator, instructions, fn)
+        loop_ret = compile_main_loop(node, allocator, instructions, fn)
         instructions << Instruction.encode_abc(Opcode::Move, dest, loop_ret, 0_u8)
         allocator.free_temp(loop_ret)
         return dest
@@ -2042,10 +2223,12 @@ module Citrine
 
       # Native API Calls (Citrine.draw_rectangle, GL.begin, etc.)
       is_gl_obj = obj_str == "Citrine::GL" || obj_str == "GL"
-      is_pad_obj = obj_str == "Citrine" || obj_str.empty? || is_gl_obj || obj_str.includes?("VirtualPad") || obj_str.includes?("VU0") || obj_str.includes?("Audio")
+      is_pad_obj = obj_str == "Citrine" || obj_str.empty? || is_gl_obj || obj_str.includes?("VirtualPad") || obj_str.includes?("VU0") || obj_str.includes?("Audio") || obj_str.includes?("Compute") || obj_str.includes?("Shader") || obj_str.includes?("Draw2D") || obj_str.includes?("Draw3D")
       if is_pad_obj
+
         if native_id = map_native_call(node.name, is_gl_obj)
           validate_native_call_arity(native_id, node.name, node.args.size, node)
+
 
           if (native_id == NativeId::ButtonPressed || native_id == NativeId::ButtonDown || native_id == NativeId::ButtonReleased)
             if node.args.size != 2
@@ -2261,8 +2444,50 @@ module Citrine
         return dest
       end
 
-      # Array index read: arr[idx]
+      # Array index read: arr[idx] or custom #[] method dispatch
       if node.name == "[]" && node.obj && node.args.size == 1
+        custom_bracket_method = nil
+        bracket_recv_type = if node.obj.is_a?(Crystal::Var)
+                              @var_types[node.obj.as(Crystal::Var).name]?
+                            elsif node.obj.is_a?(Crystal::Path)
+                              node.obj.as(Crystal::Path).names.last
+                            else
+                              nil
+                            end
+
+        if bracket_recv_type
+          clean_vtype = bracket_recv_type.split("(").first.strip
+          clean_vtype = clean_vtype[2..-1] if clean_vtype.starts_with?("::")
+          if !clean_vtype.starts_with?("Array") && !clean_vtype.starts_with?("StaticArray")
+            cands = [clean_vtype, clean_vtype.split("::").last]
+            cands.each do |c|
+              if @functions.any? { |f| f.name == "#{c}#[]" }
+                custom_bracket_method = "#{c}#[]"
+                break
+              end
+            end
+          end
+        end
+
+        if custom_bracket_method && (f_idx = @functions.index { |f| f.name == custom_bracket_method })
+          obj_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+          call_base = allocator.alloc_call_frame(node.args.size + 2)
+          dest_call = call_base
+          instructions << Instruction.encode_abc(Opcode::Move, (dest_call + 1).to_u8, obj_reg, 0_u8)
+          allocator.free_temp(obj_reg)
+          node.args.each_with_index do |arg, i|
+            arg_reg = compile_node(arg, allocator, instructions, fn)
+            target_reg = (dest_call + 2_u8 + i.to_u8).to_u8
+            instructions << Instruction.encode_abc(Opcode::Move, target_reg, arg_reg, 0_u8)
+            allocator.free_temp(arg_reg)
+          end
+          instructions << Instruction.encode_ab_imm(Opcode::Call, dest_call, f_idx.to_u16)
+          (node.args.size + 1).times { |i| allocator.free_temp((dest_call + 1_u8 + i.to_u8).to_u8) }
+          instructions << Instruction.encode_abc(Opcode::Move, dest, dest_call, 0_u8)
+          allocator.free_temp(dest_call)
+          return dest
+        end
+
         arr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
         idx_reg = compile_node(node.args[0], allocator, instructions, fn)
         seq_base = allocator.alloc_contiguous(2)
@@ -3551,6 +3776,7 @@ module Citrine
       end
 
       case name
+
       when "init_window" then NativeId::InitWindow
       when "close_window" then NativeId::CloseWindow
       when "window_open?" then NativeId::WindowOpen
@@ -3565,6 +3791,9 @@ module Citrine
       when "draw_line" then NativeId::DrawLine
       when "draw_triangle" then NativeId::DrawTriangle
       when "draw_quad" then NativeId::DrawQuad
+      when "draw_rectangle_rotated" then NativeId::DrawRectangleRotated
+      when "draw_rounded_rectangle" then NativeId::DrawRoundedRectangle
+      when "draw_text_rotated" then NativeId::DrawTextRotated
       when "gl_begin" then NativeId::GLBegin
       when "gl_end" then NativeId::GLEnd
       when "gl_vertex" then NativeId::GLVertex
@@ -3578,14 +3807,25 @@ module Citrine
       when "gl_load_identity" then NativeId::GLLoadIdentity
       when "draw_text" then NativeId::DrawText
       when "load_texture" then NativeId::LoadTexture
-      when "draw_texture" then NativeId::DrawTexture
+      when "draw_texture", "texture" then NativeId::DrawTexture
       when "draw_texture_rec" then NativeId::DrawTextureRec
+      when "draw_texture_pro" then NativeId::DrawTexturePro
+      when "load_palette" then NativeId::LoadPalette
+      when "set_palette" then NativeId::SetPalette
+
+
       when "begin_mode_3d" then NativeId::BeginMode3D
       when "end_mode_3d" then NativeId::EndMode3D
       when "draw_cube" then NativeId::DrawCube
       when "draw_cube_wires" then NativeId::DrawCubeWires
       when "draw_grid" then NativeId::DrawGrid
       when "draw_mesh" then NativeId::DrawMesh
+      when "load_model", "load_model_handle" then NativeId::LoadModel
+      when "draw_model", "draw_model_native" then NativeId::DrawModel
+      when "draw_model_ex", "draw_model_ex_native" then NativeId::DrawModelEx
+      when "unload_model" then NativeId::UnloadModel
+      when "draw_triangle_3d", "draw_triangle_3d_native" then NativeId::DrawTriangle3D
+      when "draw_billboard", "draw_billboard_native" then NativeId::DrawBillboard
       when "button_down?" then NativeId::ButtonDown
       when "button_pressed?" then NativeId::ButtonPressed
       when "button_released?" then NativeId::ButtonReleased
@@ -3598,6 +3838,10 @@ module Citrine
       when "load_sound" then NativeId::LoadSound
       when "play_sound" then NativeId::PlaySound
       when "stop_sound" then NativeId::StopSound
+      when "unload_sound" then NativeId::AudioUnloadSound
+      when "free_memory", "get_free_memory" then NativeId::AudioGetFreeMemory
+      when "compute_dispatch", "dispatch" then NativeId::ComputeDispatch
+      when "compute_sync", "sync" then NativeId::ComputeSync
       when "debug_overlay=" then NativeId::SetDebugOverlay
       when "log", "puts", "print", "println", "printf" then NativeId::Log
       when "debug_puts", "debug_log" then NativeId::DebugLog
@@ -3619,14 +3863,15 @@ module Citrine
       when "panic" then NativeId::Panic
       when "batch_transform_points", "vu0_batch_transform" then NativeId::VU0BatchTransform
       when "batch_dot_product", "vu0_batch_dot" then NativeId::VU0BatchDot
-      when "play_cdda_track", "play_cdda", "play_stream" then NativeId::AudioPlayCDDA
-      when "stop_cdda", "stop_stream" then NativeId::AudioStopCDDA
-      when "cdda_status", "get_cdda_status", "stream_status" then NativeId::AudioGetCDDAStatus
-      when "set_volume", "set_audio_volume", "set_cdda_volume", "set_stream_volume" then NativeId::AudioSetVolume
-      when "seek_stream", "stream_seek" then NativeId::AudioSeekStream
+      when "play_cdda_track", "play_cdda", "play_stream", "play_music" then NativeId::AudioPlayCDDA
+      when "stop_cdda", "stop_stream", "stop_music", "pause_stream", "pause_music" then NativeId::AudioStopCDDA
+      when "cdda_status", "get_cdda_status", "stream_status", "music_status", "music_playing?" then NativeId::AudioGetCDDAStatus
+      when "set_volume", "set_audio_volume", "set_cdda_volume", "set_stream_volume", "set_music_volume", "master_volume=" then NativeId::AudioSetVolume
+      when "seek_stream", "stream_seek", "seek_music" then NativeId::AudioSeekStream
       else nil
       end
     end
+
 
     private def resolve_type_id(type_name : String) : UInt32?
       clean = type_name.split("(").first.strip

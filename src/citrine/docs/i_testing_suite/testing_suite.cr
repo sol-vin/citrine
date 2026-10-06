@@ -56,7 +56,7 @@ module Citrine
         # require "citrine/spec/ps2_spec"
         #
         # ps2_spec "Player Movement & SPRAM Safety" do |t|
-        #   t.target("examples/01_hello_world/main.cr")
+        #   t.target("examples/01_hello_pad/main.cr")
         #   result = t.boot_pcsx2(timeout: 2.seconds)
         #   result.should_boot_cleanly
         #   result.should_preserve_spram

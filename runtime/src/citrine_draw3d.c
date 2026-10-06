@@ -48,3 +48,41 @@ void Citrine_DrawMesh(uint32_t mesh_id, CitrineVector3 pos, uint32_t tint) {
     // Emits indexed triangle array to GS via DMA Channel 2 (GIF-DMA)
 #endif
 }
+
+uint32_t Citrine_LoadModel(const char* path) {
+    (void)path;
+    static uint32_t s_next_model_id = 1;
+    return s_next_model_id++;
+}
+
+void Citrine_DrawModel(uint32_t model_id, CitrineVector3 pos, float scale, uint32_t tint) {
+    (void)model_id; (void)pos; (void)scale; (void)tint;
+#ifndef HOST_TEST_BUILD
+    // Emits textured triangle meshes using active model materials via GIF-DMA
+#endif
+}
+
+void Citrine_DrawModelEx(uint32_t model_id, CitrineVector3 pos, CitrineVector3 rot_axis, float rot_angle, CitrineVector3 scale, uint32_t tint) {
+    (void)model_id; (void)pos; (void)rot_axis; (void)rot_angle; (void)scale; (void)tint;
+#ifndef HOST_TEST_BUILD
+    // Transforms and emits textured triangle meshes with rotation and non-uniform scaling
+#endif
+}
+
+void Citrine_UnloadModel(uint32_t model_id) {
+    (void)model_id;
+}
+
+void Citrine_DrawTriangle3D(CitrineVector3 v1, CitrineVector3 v2, CitrineVector3 v3, uint32_t color) {
+    (void)v1; (void)v2; (void)v3; (void)color;
+#ifndef HOST_TEST_BUILD
+    // Emits single 3D triangle primitive to Graphics Synthesizer Context 1
+#endif
+}
+
+void Citrine_DrawBillboard(uint32_t tex_id, CitrineVector3 cam_pos, CitrineVector3 pos, float size, uint32_t tint) {
+    (void)tex_id; (void)cam_pos; (void)pos; (void)size; (void)tint;
+#ifndef HOST_TEST_BUILD
+    // Computes camera-facing billboard quad orientation and emits textured sprite
+#endif
+}

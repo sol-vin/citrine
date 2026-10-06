@@ -1,6 +1,7 @@
 require "compiler/crystal/syntax"
 require "json"
 require "../importers/fluorite_media"
+require "../importers/mesh_importer"
 require "../iso/disc_manifest"
 
 module Citrine
@@ -209,6 +210,8 @@ module Citrine
         "bake",
         "bake_asset",
         "bake_texture",
+        "bake_model",
+        "bake_mesh",
         "bake_cd_track",
         "bake_cd_album",
         "bake_stream",
@@ -219,11 +222,17 @@ module Citrine
         "disc_files"
       ].includes?(call.name)
 
-      is_citrine_media_macro = (call.obj.nil? || call.obj.to_s == "Citrine") && [
+      is_citrine_media_macro = (call.obj.nil? || ["Citrine", "Citrine::Audio", "Audio"].includes?(call.obj.to_s)) && [
+        "album",
+        "load_album",
         "load_track_titles",
         "load_track_durations",
         "album_track_titles",
         "album_track_durations",
+        "album_optical_tracks",
+        "album_optical_track_strings",
+        "album_track_dur_strings",
+        "album_track_duration_strings",
         "album_title",
         "album_name",
         "album_artist"
@@ -247,6 +256,10 @@ module Citrine
         expand_bake(call)
       when "bake_texture"
         expand_bake_texture(call)
+      when "bake_model"
+        expand_bake_model(call)
+      when "bake_mesh"
+        expand_bake_mesh(call)
       when "bake_cd_track"
         expand_bake_cd_track(call)
       when "bake_cd_album"
@@ -263,10 +276,16 @@ module Citrine
         expand_album_track_count(call)
       when "disc_files"
         expand_disc_files(call)
+      when "album", "load_album"
+        expand_album(call)
       when "load_track_titles", "album_track_titles"
         expand_track_titles(call)
       when "load_track_durations", "album_track_durations"
         expand_track_durations(call)
+      when "album_optical_tracks", "album_optical_track_strings"
+        expand_optical_tracks(call)
+      when "album_track_dur_strings", "album_track_duration_strings"
+        expand_track_dur_strings(call)
       when "album_title", "album_name"
         expand_album_title(call)
       when "album_artist"
@@ -539,6 +558,94 @@ module Citrine
         width: width,
         height: height,
         clut: clut
+      )
+      Crystal::StringLiteral.new(asset.target_name)
+    end
+
+    private def expand_bake_mesh(call : Crystal::Call) : Crystal::ASTNode
+      expand_bake_model(call)
+    end
+
+    private def expand_bake_model(call : Crystal::Call) : Crystal::ASTNode
+      return Crystal::StringLiteral.new("") if call.args.empty?
+      arg0 = call.args[0]
+      src_rel = arg0.is_a?(Crystal::StringLiteral) ? arg0.value : arg0.to_s
+      target_rel = (call.args.size > 1 && call.args[1].is_a?(Crystal::StringLiteral)) ? call.args[1].as(Crystal::StringLiteral).value : nil
+      tex_size = (call.args.size > 2 && call.args[2].is_a?(Crystal::NumberLiteral)) ? call.args[2].as(Crystal::NumberLiteral).value.to_i : 128
+      clut = (call.args.size > 3 && call.args[3].is_a?(Crystal::NumberLiteral)) ? call.args[3].as(Crystal::NumberLiteral).value.to_i : 8
+
+      full_src = resolve_asset_path(src_rel)
+      base_dir = @filename ? File.dirname(@filename.not_nil!) : "."
+      out_target = target_rel || File.basename(src_rel).sub(/\.(glb|gltf|obj)$/i, ".cbm")
+      out_full = File.join(base_dir, out_target)
+
+      if File.exists?(full_src)
+        ext = File.extname(full_src).downcase
+        is_stale = !File.exists?(out_full) || (File.info(full_src).modification_time > File.info(out_full).modification_time)
+        if is_stale
+          begin
+            model = case ext
+                    when ".glb"
+                      Importers::MeshImporter.import_glb(File.read(full_src).to_slice, File.basename(src_rel, ext))
+                    when ".gltf"
+                      Importers::MeshImporter.import_gltf_model(File.read(full_src), nil, File.basename(src_rel, ext))
+                    when ".obj"
+                      Importers::MeshImporter.import_obj_model(File.read(full_src), File.basename(src_rel, ext))
+                    else
+                      nil
+                    end
+
+            if model
+              # Process materials and convert embedded or referenced textures to .cbt
+              model.materials.each_with_index do |mat, mat_idx|
+                if embedded_bytes = mat.embedded_image_bytes
+                  img_ext = mat.embedded_image_mime == "image/jpeg" ? ".jpg" : ".png"
+                  temp_img = File.join(base_dir, "#{File.basename(src_rel, ext)}_mat#{mat_idx}#{img_ext}")
+                  File.write(temp_img, embedded_bytes)
+
+                  cbt_name = "#{File.basename(src_rel, ext)}_mat#{mat_idx}.cbt"
+                  cbt_full = File.join(base_dir, cbt_name)
+                  begin
+                    Importers::FluoriteMedia.convert_texture(
+                      temp_img,
+                      cbt_full,
+                      Importers::FluoriteMedia::TextureConfig.new(width: tex_size, height: tex_size, clut_bits: clut)
+                    )
+                    mat.texture_path = cbt_name
+                    Citrine::ISO::DiscManifest.current.add_file(cbt_full, cbt_name)
+                  rescue
+                  end
+                elsif !mat.texture_path.empty?
+                  tex_full = resolve_asset_path(mat.texture_path)
+                  if File.exists?(tex_full)
+                    cbt_name = File.basename(mat.texture_path).sub(/\.(png|jpg|jpeg|bmp)$/i, ".cbt")
+                    cbt_full = File.join(base_dir, cbt_name)
+                    begin
+                      Importers::FluoriteMedia.convert_texture(
+                        tex_full,
+                        cbt_full,
+                        Importers::FluoriteMedia::TextureConfig.new(width: tex_size, height: tex_size, clut_bits: clut)
+                      )
+                      mat.texture_path = cbt_name
+                      Citrine::ISO::DiscManifest.current.add_file(cbt_full, cbt_name)
+                    rescue
+                    end
+                  end
+                end
+              end
+
+              # Export to CBM2 format
+              cbm_data = Importers::MeshImporter.export_cbm2(model)
+              File.write(out_full, cbm_data)
+            end
+          rescue
+          end
+        end
+      end
+
+      asset = Citrine::ISO::DiscManifest.current.add_file(
+        File.exists?(out_full) ? out_full : full_src,
+        out_target
       )
       Crystal::StringLiteral.new(asset.target_name)
     end
@@ -921,5 +1028,104 @@ module Citrine
       artist_name = first ? (first["artist"]?.try(&.as_s?) || "Unknown Artist") : "Unknown Artist"
       Crystal::StringLiteral.new(artist_name)
     end
+
+    private def expand_optical_tracks(call : Crystal::Call) : Crystal::ASTNode
+      meta = load_album_metadata(call)
+      elements = [] of Crystal::ASTNode
+      if meta
+        meta.each_with_index do |item, idx|
+          t_num = item["track_number"]?.try(&.as_i?) || (idx + 1)
+          prefix = t_num < 10 ? "0#{t_num}" : "#{t_num}"
+          elements << Crystal::StringLiteral.new("Track #{prefix}: TRACK#{prefix}.CAS (96 kbps SPU2 Stream)")
+        end
+      end
+      Crystal::ArrayLiteral.new(elements)
+    end
+
+    private def expand_track_dur_strings(call : Crystal::Call) : Crystal::ASTNode
+      meta = load_album_metadata(call)
+      elements = [] of Crystal::ASTNode
+      if meta
+        meta.each do |item|
+          dur_any = item["duration_seconds"]?
+          dur = if dur_any
+                  dur_any.as_f? || dur_any.as_i?.try(&.to_f) || 0.0
+                else
+                  0.0
+                end
+          dur_i = dur.to_i
+          m = dur_i // 60
+          s = dur_i % 60
+          m_str = m < 10 ? "0#{m}" : "#{m}"
+          s_str = s < 10 ? "0#{s}" : "#{s}"
+          elements << Crystal::StringLiteral.new("#{m_str}:#{s_str}")
+        end
+      end
+      Crystal::ArrayLiteral.new(elements)
+    end
+
+    private def expand_album(call : Crystal::Call) : Crystal::ASTNode
+      meta = load_album_metadata(call)
+      first = meta ? meta.first? : nil
+      album_title = first ? (first["album"]?.try(&.as_s?) || "Unknown Album") : "Unknown Album"
+      album_artist = first ? (first["artist"]?.try(&.as_s?) || "Unknown Artist") : "Unknown Artist"
+
+      track_nodes = [] of Crystal::ASTNode
+      if meta
+        meta.each_with_index do |item, idx|
+          t_num = item["track_number"]?.try(&.as_i?) || (idx + 1)
+          prefix = t_num < 10 ? "0#{t_num}" : "#{t_num}"
+          title = item["title"]?.try(&.as_s?) || "Track #{prefix}"
+          artist = item["artist"]?.try(&.as_s?) || album_artist
+          album = item["album"]?.try(&.as_s?) || album_title
+
+          dur_any = item["duration_seconds"]?
+          dur = if dur_any
+                  dur_any.as_f? || dur_any.as_i?.try(&.to_f) || 0.0
+                else
+                  0.0
+                end
+          dur_i = dur.to_i
+          m = dur_i // 60
+          s = dur_i % 60
+          m_str = m < 10 ? "0#{m}" : "#{m}"
+          s_str = s < 10 ? "0#{s}" : "#{s}"
+          dur_s = "#{m_str}:#{s_str}"
+
+          stream_file = item["output_file"]?.try(&.as_s?) || "track#{prefix}.cas"
+          stream_basename = File.basename(stream_file)
+          optical_str = "Track #{prefix}: TRACK#{prefix}.CAS (96 kbps SPU2 Stream)"
+
+          track_call = Crystal::Call.new(
+            Crystal::Path.new(["Citrine", "Audio", "Track"]),
+            "new",
+            [
+              Crystal::NumberLiteral.new(idx),
+              Crystal::NumberLiteral.new(t_num),
+              Crystal::StringLiteral.new(title),
+              Crystal::StringLiteral.new(artist),
+              Crystal::StringLiteral.new(album),
+              Crystal::NumberLiteral.new(sprintf("%.1f", dur), :f32),
+              Crystal::StringLiteral.new(dur_s),
+              Crystal::StringLiteral.new(stream_basename),
+              Crystal::StringLiteral.new(optical_str)
+            ] of Crystal::ASTNode
+          )
+          track_nodes << track_call
+        end
+      end
+
+      tracks_array = Crystal::ArrayLiteral.new(track_nodes)
+      Crystal::Call.new(
+        Crystal::Path.new(["Citrine", "Audio", "Album"]),
+        "new",
+        [
+          Crystal::StringLiteral.new(album_title),
+          Crystal::StringLiteral.new(album_artist),
+          tracks_array
+        ] of Crystal::ASTNode
+      )
+    end
   end
 end
+

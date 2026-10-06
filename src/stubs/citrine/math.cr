@@ -18,11 +18,14 @@ module Citrine
 
     # Computes sine of `x` (in radians) using an accurate Taylor series polynomial.
     def self.sin(x : Float32) : Float32
-      # Taylor series approximation for PS2 float registers
-      # sin(x) = x - x^3/6 + x^5/120 - x^7/5040
       x = normalize_angle(x)
+      if x > PI * 0.5_f32
+        x = PI - x
+      elsif x < -PI * 0.5_f32
+        x = -PI - x
+      end
       x2 = x * x
-      x * (1.0_f32 - x2 * (0.16666667_f32 - x2 * (0.00833333_f32 - x2 * 0.00019841_f32)))
+      x * (1.0_f32 - x2 * (0.16666667_f32 - x2 * (0.00833333_f32 - x2 * (0.0001984127_f32 - x2 * 0.00000275573_f32))))
     end
 
     # Computes cosine of `x` (in radians) via phase-shifted sine.

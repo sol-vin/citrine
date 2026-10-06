@@ -210,6 +210,73 @@ Citrine.close_window
 
 ---
 
+## Modular Subsystems & Require-Driven Context DSL
+
+On PlayStation 2's **32 MB Main RAM** and tight instruction cache architecture, keeping every native subsystem and scene entity loaded at all times causes memory exhaustion. Citrine provides a **Require-Driven Context Architecture**:
+
+```crystal
+require "citrine" # Resident Kernel (~180 KB: VM, DualShock, SIF/DMA, Math)
+
+# Group modular subsystems and user files by execution context:
+context(:menu) do
+  require "citrine/draw2d"
+  require "./src/menu/title_screen"
+end
+
+context(:game) do
+  require "citrine/draw3d"
+  require "citrine/physics"
+  require "./src/game/player"
+  require "./src/game/dungeon"
+end
+
+# Shared across multiple contexts:
+@[Context(:menu, :game)]
+require "citrine/audio"
+
+# Top-level state-machine loop with zero-fragmentation context memory shifts
+loop do
+  # 1. 2D Title Screen & Menus
+  menu = TitleScreen.new
+  Citrine.main_loop(context: :menu) do
+    menu.draw
+    exit if menu.start_selected?
+  end
+
+  # === Context Shift: DMA sync + context_arena.offset = 0 (100% RAM reclaimed) ===
+
+  # 2. 3D Gameplay
+  player = Player.new
+  dungeon = Dungeon.new
+  Citrine.main_loop(context: :game) do
+    player.update
+    dungeon.draw
+    exit if player.dead? || Citrine.button_pressed?(0, :select)
+  end
+end
+```
+
+### Modular Requires Reference
+
+| Require Path | Subsystem | Description & Features |
+| :--- | :--- | :--- |
+| `require "citrine"` | **Core Resident Kernel** | VM interpreter, zero-GC arenas, DualShock pad, SIF/DMA transport, Vector2, Vector3, Matrix4, Color, `main_loop`, `exit`. (~180 KB). |
+| `require "citrine/draw2d"` | **2D Graphics DSL** | Affine transform stack (`Transform2D`), 2D texture drawing DSL (`draw_texture`, origin presets, `flip_x`/`y`, UV cropping), 8-bit CLUT palette swapping (`PSMT8` with CSM1 swizzling), rotated text (`text(..., rotation: deg)`), rounded rectangles (`radius:`), circles, stars, card styling. |
+
+| `require "citrine/draw3d"` | **3D Graphics DSL** | Perspective camera (`Citrine::Draw3D.mode`), cubes, wireframes, floor grids, 3D mesh rendering, lighting. |
+| `require "citrine/gl"` | **Immediate-Mode GS** | Low-level GS rasterizer control, primitive blocks (`triangles`, `quads`, `lines`), custom blend equations, eDRAM state. |
+| `require "citrine/audio"` | **SPU2 Sound Banks** | SPU2 2MB sound banks, sample lifecycles (`:pinned`, `:cached` LRU, `:transient`), ADPCM voices, CD-DA disc streaming. |
+| `require "citrine/video"` | **IPU Video Streaming** | Full-Motion Video (FMV) streaming from disc via hardware IPU MPEG-2 decoder. |
+| `require "citrine/physics"` | **Fixed-Point Physics** | Deterministic 16.16 math, AABB & sphere collision, Verlet particle dynamics, rigid bodies. |
+| `require "citrine/shader"` | **VU1 Vertex Shaders** | Programmable vertex pipelines compiling to VU1 128-bit dual-issue VLIW microcode. |
+| `require "citrine/compute"` | **VU0 Compute Kernels** | Autonomous micro-mode compute kernels for parallel mathematical transforms. |
+| `require "citrine/ui"` | **Immediate-Mode UI** | DualShock-navigable UI panels, sliders, buttons, checkboxes, and progress bars. |
+| `require "citrine/inputmap"` | **Semantic InputMap** | Controller action bindings, multi-button combo detection, analog stick deadzone smoothing. |
+| `require "citrine/scene"` | **Scene Graph** | Scene lifecycle management, cameras, and transition states. |
+| `require "citrine/context"` | **Context Manager** | Context state introspection, `active_context`, and dynamic switching API. |
+
+---
+
 ## Hardware Safety Guarantees & Budget Auditing
 
 Every time you compile code with `citrine compile` or `citrine run`, the **Hardware Budget Checker** statically audits your code:

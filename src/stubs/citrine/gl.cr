@@ -298,5 +298,62 @@ module Citrine
 
       @@current_matrix = @@current_matrix * r
     end
+
+    # Scoped immediate-mode primitive blocks (guaranteed glBegin / glEnd pairing)
+    def self.triangles(&block)
+      self.begin(Mode::Triangles)
+      begin
+        yield
+      ensure
+        self.end
+      end
+    end
+
+    def self.quads(&block)
+      self.begin(Mode::Quads)
+      begin
+        yield
+      ensure
+        self.end
+      end
+    end
+
+    def self.lines(&block)
+      self.begin(Mode::Lines)
+      begin
+        yield
+      ensure
+        self.end
+      end
+    end
+
+    def self.line_strip(&block)
+      self.begin(Mode::LineStrip)
+      begin
+        yield
+      ensure
+        self.end
+      end
+    end
+
+    def self.points(&block)
+      self.begin(Mode::Points)
+      begin
+        yield
+      ensure
+        self.end
+      end
+    end
+
+    # Scoped matrix transformation block (guaranteed push_matrix / pop_matrix pairing)
+    def self.matrix(&block)
+      push_matrix
+      begin
+        yield
+      ensure
+        pop_matrix
+      end
+    end
   end
 end
+

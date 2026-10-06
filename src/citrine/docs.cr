@@ -217,9 +217,24 @@ module Citrine
   #   </thead>
   #   <tbody>
   #     <tr>
+  #       <td><code>MODULAR_REQUIRES_CATALOG</code></td>
+  #       <td><strong>Complete Modular Requires Catalog</strong></td>
+  #       <td>Exhaustive reference of all modular require paths in Citrine, their features, and memory budgets.</td>
+  #     </tr>
+  #     <tr>
   #       <td><code>MODULAR_SUBSYSTEMS</code></td>
   #       <td><strong>Modular Subsystems (Physics, UI, Scene, Hardware)</strong></td>
   #       <td>Opt-in engine modules strictly loaded via require "citrine/..." for zero overhead in core builds.</td>
+  #     </tr>
+  #     <tr>
+  #       <td><code>CONTEXT_DSL_AND_MEMORY_SHIFTS</code></td>
+  #       <td><strong>Require-Based Context DSL & Sequential Loop Shifts</strong></td>
+  #       <td>Declarative subsystem mounting, modular user code separation, compile-time safety, and zero-fragmentation PS2 memory arenas.</td>
+  #     </tr>
+  #     <tr>
+  #       <td><code>DRAW2D_TEXTURES</code></td>
+  #       <td><strong>2D Texture Drawing DSL & PS2 Palette Swapping</strong></td>
+  #       <td>Comprehensive guide to Citrine's 2D draw_texture DSL, arbitrary rotation, matrix stack integration, and hardware CLUT palette swapping on PlayStation 2.</td>
   #     </tr>
   #   </tbody>
   # </table>
@@ -247,9 +262,9 @@ module Citrine
     #
     # #### Citrine PlayStation 2 Toolkit Commands:
     # ```bash
-    # citrine run examples/01_hello_world/main.cr
+    # citrine run examples/01_hello_pad/main.cr
     # citrine iso examples/05_hello_world/main.cr
-    # citrine debug examples/01_hello_world/game.cbc
+    # citrine debug examples/01_hello_pad/game.cbc
     # citrine ui
     # ```
     def self.topic_01_quick_start : Nil; end
@@ -292,7 +307,10 @@ module Citrine
     # - `J_METAPROGRAMMING::METAPROGRAMMING`: **PS2 Metaprogramming, Macros & ECS** &mdash; Compile-time macro expansion, declarative ECS component memory layout, and finite state machines.
     #
     # ##### 11. Modular subsystems (`K_MODULAR_SUBSYSTEMS`)
+    # - `K_MODULAR_SUBSYSTEMS::MODULAR_REQUIRES_CATALOG`: **Complete Modular Requires Catalog** &mdash; Exhaustive reference of all modular require paths in Citrine, their features, and memory budgets.
     # - `K_MODULAR_SUBSYSTEMS::MODULAR_SUBSYSTEMS`: **Modular Subsystems (Physics, UI, Scene, Hardware)** &mdash; Opt-in engine modules strictly loaded via require "citrine/..." for zero overhead in core builds.
+    # - `K_MODULAR_SUBSYSTEMS::CONTEXT_DSL_AND_MEMORY_SHIFTS`: **Require-Based Context DSL & Sequential Loop Shifts** &mdash; Declarative subsystem mounting, modular user code separation, compile-time safety, and zero-fragmentation PS2 memory arenas.
+    # - `K_MODULAR_SUBSYSTEMS::DRAW2D_TEXTURES`: **2D Texture Drawing DSL & PS2 Palette Swapping** &mdash; Comprehensive guide to Citrine's 2D draw_texture DSL, arbitrary rotation, matrix stack integration, and hardware CLUT palette swapping on PlayStation 2.
     #
     # ##### 12. Advanced subsystems (`L_ADVANCED_SUBSYSTEMS`)
     # - `L_ADVANCED_SUBSYSTEMS::ADVANCED_SUBSYSTEMS`: **Advanced Subsystems (Std, Box2D, Hardware, Shaders)** &mdash; Comprehensive standard library, Box2D rigid body physics, USB peripherals, network sockets, and VU1/GS shaders.
@@ -337,7 +355,10 @@ module Citrine
     # - `J_METAPROGRAMMING::METAPROGRAMMING`: **PS2 Metaprogramming, Macros & ECS** &mdash; Compile-time macro expansion, declarative ECS component memory layout, and finite state machines.
     #
     # ##### `K_MODULAR_SUBSYSTEMS`
+    # - `K_MODULAR_SUBSYSTEMS::MODULAR_REQUIRES_CATALOG`: **Complete Modular Requires Catalog** &mdash; Exhaustive reference of all modular require paths in Citrine, their features, and memory budgets.
     # - `K_MODULAR_SUBSYSTEMS::MODULAR_SUBSYSTEMS`: **Modular Subsystems (Physics, UI, Scene, Hardware)** &mdash; Opt-in engine modules strictly loaded via require "citrine/..." for zero overhead in core builds.
+    # - `K_MODULAR_SUBSYSTEMS::CONTEXT_DSL_AND_MEMORY_SHIFTS`: **Require-Based Context DSL & Sequential Loop Shifts** &mdash; Declarative subsystem mounting, modular user code separation, compile-time safety, and zero-fragmentation PS2 memory arenas.
+    # - `K_MODULAR_SUBSYSTEMS::DRAW2D_TEXTURES`: **2D Texture Drawing DSL & PS2 Palette Swapping** &mdash; Comprehensive guide to Citrine's 2D draw_texture DSL, arbitrary rotation, matrix stack integration, and hardware CLUT palette swapping on PlayStation 2.
     #
     # ##### `L_ADVANCED_SUBSYSTEMS`
     # - `L_ADVANCED_SUBSYSTEMS::ADVANCED_SUBSYSTEMS`: **Advanced Subsystems (Std, Box2D, Hardware, Shaders)** &mdash; Comprehensive standard library, Box2D rigid body physics, USB peripherals, network sockets, and VU1/GS shaders.
@@ -366,7 +387,10 @@ require "./docs/g_concurrency/concurrency"
 require "./docs/h_media_pipeline/media_pipeline"
 require "./docs/i_testing_suite/testing_suite"
 require "./docs/j_metaprogramming/metaprogramming"
+require "./docs/k_modular_subsystems/modular_requires_catalog"
 require "./docs/k_modular_subsystems/modular_subsystems"
+require "./docs/k_modular_subsystems/context_dsl_and_memory_shifts"
+require "./docs/k_modular_subsystems/draw2d_textures"
 require "./docs/l_advanced_subsystems/advanced_subsystems"
 
 alias CitrineDocs = ::Citrine::Docs

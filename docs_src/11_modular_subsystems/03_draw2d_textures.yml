@@ -1,0 +1,149 @@
+id: DRAW2D_TEXTURES
+title: 2D Texture Drawing DSL & PS2 Palette Swapping
+summary: Comprehensive guide to Citrine's 2D draw_texture DSL, arbitrary rotation, matrix stack integration, and hardware CLUT palette swapping on PlayStation 2.
+track: 11_modular_subsystems
+overview: |
+  Citrine provides an expressive, idiomatic Crystal DSL for 2D texture drawing under `Citrine::Draw2D`.
+  
+  Moving beyond flat procedural calls with loose numeric arguments, the `draw_texture` DSL integrates natively with the 
+  `Transform2D` affine matrix stack, offers arbitrary pivot rotation with anchor presets (`:center`, `:bottom_center`), 
+  color modulation tinting, UV cropping (`Rect`), and directional mirroring (`flip_x`, `flip_y`).
+  
+  On the PlayStation 2 Graphics Synthesizer (GS), Citrine transparently routes axis-aligned unrotated draws to the hardware 
+  `GS_PRIM_SPRITE` fast-path (2 vertices, zero CPU trigonometry). Furthermore, it provides native 8-bit CLUT (`PSMT8`) 
+  palette swapping with hardware CSM1 swizzling, enabling instant character skinning and recoloring with zero eDRAM pixel duplication.
+related_sources:
+  - "src/stubs/citrine.cr"
+  - "src/stubs/citrine/draw2d.cr"
+  - "runtime/include/citrine_draw2d.h"
+  - "runtime/src/citrine_draw2d.c"
+sections:
+  - id: draw_texture_dsl
+    title: Idiomatic draw_texture DSL
+    summary: Fluent 2D texture drawing with named arguments and overloads
+    content: |
+      Inside `Citrine.draw_2d do |d|` or directly via `Citrine::Draw2D`, developers can draw textures using clean,
+      expressive keyword arguments:
+      ```crystal
+      require "citrine"
+      require "citrine/draw2d"
+
+      Citrine.draw_2d do |d|
+        # Native dimensions, default coordinates
+        d.draw_texture(hero_tex, 100, 50)
+
+        # Explicit dimensions and tint color
+        d.draw_texture(hero_tex, 100, 50, width: 64, height: 64, tint: Color::White)
+
+        # Scale factor
+        d.texture(hero_tex, 100, 50, scale: 2.0)
+      end
+      ```
+      The `Texture` struct also exposes `.draw(x, y, ...)` directly on the instance:
+      ```crystal
+      hero_tex.draw(100, 50, tint: Color::Red)
+      ```
+
+  - id: rotation_and_pivots
+    title: Rotation & Origin Anchor Presets
+    summary: Arbitrary pivot rotation with anchor symbols and Vector2 offsets
+    content: |
+      Rotating sprites requires specifying a rotation angle (in degrees) and a pivot point around which rotation occurs.
+      Citrine offers intuitive anchor presets as well as explicit `Vector2` coordinates:
+
+      | Anchor Preset | Relative Pivot Ratio | Typical Use Case |
+      |:---|:---|:---|
+      | `:top_left` (default) | `(0.0, 0.0)` | UI icons, screen-space elements |
+      | `:center` | `(0.5, 0.5)` | Rotating bullets, particles, coins, wheels |
+      | `:bottom_center` | `(0.5, 1.0)` | Character sprites grounded on the floor |
+      | `:top_center` | `(0.5, 0.0)` | Hanging ropes, chandeliers, ceiling traps |
+      | `:bottom_left` | `(0.0, 1.0)` | Gauges, rotating levers |
+
+      ```crystal
+      Citrine.draw_2d do |d|
+        # Rotated around center pivot
+        d.draw_texture(sword_tex, 200, 150, rotation: 45.0, origin: :center)
+
+        # Rotated around character feet
+        d.draw_texture(character_tex, 300, 400, rotation: 15.0, origin: :bottom_center)
+
+        # Rotated around custom weapon hilt coordinates
+        d.draw_texture(gun_tex, 100, 100, rotation: aim_angle, origin: Vector2.new(8, 12))
+      end
+      ```
+
+  - id: matrix_stack_integration
+    title: Affine Matrix Stack Integration
+    summary: Hierarchical scene rendering with Transform2D
+    content: |
+      All 2D texture operations fully respect `Draw2D.transform(...)`, `push_matrix`, and `pop_matrix`.
+      Child textures inherit parent translation, rotation, and scaling:
+      ```crystal
+      Citrine.draw_2d do |d|
+        # Camera or container transform
+        d.transform(x: 320, y: 240, rotation: camera_angle, scale: camera_zoom) do
+          # (0, 0) is rendered in transformed camera space
+          d.draw_texture(world_map_tex, 0, 0, origin: :center)
+
+          # Vehicle turret attached to chassis
+          d.draw_texture(chassis_tex, 100, 100, origin: :center)
+          d.transform(x: 100, y: 100, rotation: turret_angle) do
+            d.draw_texture(turret_tex, 0, 0, origin: :center)
+          end
+        end
+      end
+      ```
+
+  - id: uv_cropping_and_flipping
+    title: UV Cropping & Directional Mirroring
+    summary: Spritesheet slicing via Rect and clean flip_x / flip_y controls
+    content: |
+      Textures can be cropped to sub-rectangles (for texture atlases and spritesheets) using `src: Rect`:
+      ```crystal
+      Citrine.draw_2d do |d|
+        # UV crop a 32x32 frame from an atlas
+        frame_rect = Rect.new(32, 0, 32, 32)
+        d.draw_texture(atlas_tex, 100, 100, src: frame_rect)
+
+        # Character facing left or right
+        d.draw_texture(hero_tex, 100, 100, flip_x: facing_left, flip_y: false)
+      end
+      ```
+      The `Sprite` value struct also bundles a `Texture` with a source `Rect` for reusable frame handles:
+      ```crystal
+      icon = atlas_tex.crop(0, 0, 16, 16)
+      icon.draw(50, 50, rotation: 45.0, origin: :center)
+      ```
+
+  - id: ps2_palette_swapping
+    title: PlayStation 2 CLUT Palette Swapping (PSMT8)
+    summary: Zero-eDRAM duplication character skinning with CSM1 swizzling
+    content: |
+      On the PlayStation 2, the 4 MB embedded DRAM (eDRAM) must fit the front buffer, back buffer, Z-buffer,
+      and all active textures. Duplicating 32-bit textures for alternate character colors (e.g. 4-player multiplayer)
+      rapidly exhausts eDRAM.
+      
+      Citrine solves this with **8-bit Indexed Textures (`PSMT8`)**:
+      - Texture pixel data is 1 byte per pixel (**75% memory reduction**).
+      - Palettes (Color Look-Up Tables / CLUT) are 256 colors $\times$ 4 bytes = **1 KB**.
+      - Swapping character skins simply alters the GS `TEX0_1.CBP` (CLUT Buffer Pointer) in VRAM without re-uploading the texture pixels!
+      
+      #### Hardware CSM1 Swizzling
+      In GS `CSM1` mode, palette entries 8..15 and 16..23 within every 32-entry block must be swapped.
+      `Palette.swizzle_psmt8` performs this transformation automatically during upload:
+      ```crystal
+      p1_palette = Palette.load("rom0:HERO_P1.PAL")
+      p2_palette = Palette.load("rom0:HERO_P2.PAL")
+
+      Citrine.draw_2d do |d|
+        # Inline palette swap
+        d.draw_texture(hero_tex, 100, 100, palette: p1_palette)
+        d.draw_texture(hero_tex, 200, 100, palette: p2_palette)
+
+        # Block-scoped palette for multiple enemies
+        d.with_palette(fire_palette) do
+          d.draw_texture(mob_tex, 50, 100)
+          d.draw_texture(boss_tex, 150, 100)
+        end
+      end
+      ```

@@ -92,6 +92,12 @@ module Citrine
     LoadSound       = 35
     PlaySound       = 36
     StopSound       = 37
+    LoadModel       = 38
+    DrawModel       = 39
+    DrawModelEx     = 49
+    UnloadModel     = 50
+    DrawTriangle3D  = 51
+    DrawBillboard   = 52
     SetDebugOverlay = 60
     Sleep           = 65
     FiberId         = 66
@@ -180,7 +186,19 @@ module Citrine
     AudioGetCDDAStatus = 222
     AudioSetVolume   = 223
     AudioSeekStream  = 224
+    DrawRectangleRotated = 230
+    DrawRoundedRectangle = 231
+    DrawTextRotated      = 232
+    AudioUnloadSound     = 233
+    AudioGetFreeMemory   = 234
+    ComputeDispatch      = 235
+    ComputeSync          = 236
+    DrawTexturePro       = 237
+    LoadPalette          = 241
+    SetPalette           = 242
   end
+
+
 
   # Type discriminator identifiers for runtime `is_a?` and `as` type introspection.
   #

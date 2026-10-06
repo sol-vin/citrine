@@ -235,7 +235,7 @@ module Citrine
         #
         # ```bash
         # # Audit game memory and canary integrity
-        # citrine mem-check examples/01_hello_world/game.cbc
+        # citrine mem-check examples/01_hello_pad/game.cbc
         # ```
         #
         def self.topic_06_audit_and_leak_tools : Nil; end

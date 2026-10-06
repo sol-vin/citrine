@@ -38,6 +38,14 @@ module Citrine
         @@current = new
       end
 
+      def clear
+        @assets.clear
+      end
+
+      def has_file?(name : String) : Bool
+        @assets.any? { |a| a.target_name == name }
+      end
+
       def add_file(source : String, target : String? = nil) : DiscAsset
         tname = target || File.basename(source)
         asset = DiscAsset.new(source, tname, TrackType::Data)

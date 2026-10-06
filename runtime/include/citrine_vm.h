@@ -427,7 +427,13 @@ typedef struct {
 
     // Memory Arenas
     Arena           frame_arena;    // Reset every frame at EndDrawing
+    Arena           context_arena;  // Reset every context switch between main_loops
     Arena           level_arena;    // Reset on level reload
+
+    // Context & Subsystem State
+    uint32_t        active_subsystems;
+    uint16_t        active_context_id;
+    bool            in_main_loop;
 
     // Safety & Watchdog
     uint32_t        instruction_count;
@@ -445,6 +451,8 @@ void       citrine_vm_destroy(CitrineVM* vm);
 bool       citrine_vm_step(CitrineVM* vm);
 void       citrine_vm_run(CitrineVM* vm);
 void       citrine_vm_panic(CitrineVM* vm, const char* format, ...);
+void       citrine_vm_switch_context(CitrineVM* vm, uint16_t context_id, uint32_t subsys_mask);
+void       citrine_vm_clear_context(CitrineVM* vm);
 
 // Concurrency Scheduler API
 uint32_t   citrine_scheduler_spawn(CitrineVM* vm, uint32_t func_idx, Value* args, uint8_t argc);

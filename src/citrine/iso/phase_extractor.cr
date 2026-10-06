@@ -48,7 +48,15 @@ module Citrine
       alias DrawCommand = Citrine::GS::DrawCommand
       alias Phase = Citrine::GS::Phase
 
-      def self.emit_cbt_texture_spans(commands : Array(DrawCommand), path : String, start_x : Int32, start_y : Int32, grid_res : Int32 = 16)
+      def self.emit_cbt_texture_spans(
+        commands : Array(DrawCommand),
+        path : String,
+        start_x : Int32,
+        start_y : Int32,
+        dest_w : Int32 = 128,
+        dest_h : Int32 = 128,
+        grid_res : Int32 = 64
+      )
         return unless File.exists?(path)
         bytes = File.read(path).to_slice
         return unless bytes.size > 16 && String.new(bytes[0, 4]) == "CBT1"
@@ -61,13 +69,12 @@ module Citrine
 
         step_x = w // grid_res
         step_y = h // grid_res
-        scale = 128 // grid_res
 
         grid_res.times do |gy|
           gx = 0
           while gx < grid_res
-            px = gx * step_x
-            py = gy * step_y
+            px = (gx * step_x).clamp(0, w - 1)
+            py = (gy * step_y).clamp(0, h - 1)
             pal_idx = pixels[py * w + px].to_i
             r = pal[pal_idx * 4].to_u32
             g = pal[pal_idx * 4 + 1].to_u32
@@ -76,7 +83,7 @@ module Citrine
 
             span_len = 1
             while (gx + span_len) < grid_res
-              npx = (gx + span_len) * step_x
+              npx = ((gx + span_len) * step_x).clamp(0, w - 1)
               npal_idx = pixels[py * w + npx].to_i
               nr = pal[npal_idx * 4].to_u32
               ng = pal[npal_idx * 4 + 1].to_u32
@@ -86,10 +93,10 @@ module Citrine
               span_len += 1
             end
 
-            x1 = start_x + (gx * scale)
-            y1 = start_y + (gy * scale)
-            x2 = x1 + (span_len * scale)
-            y2 = y1 + scale
+            x1 = start_x + (gx * dest_w // grid_res)
+            y1 = start_y + (gy * dest_h // grid_res)
+            x2 = start_x + ((gx + span_len) * dest_w // grid_res)
+            y2 = start_y + ((gy + 1) * dest_h // grid_res)
             commands << DrawCommand.new(DrawCommand::Type::Rect, x1, y1, x2, y2, color: color)
 
             gx += span_len
@@ -302,10 +309,11 @@ end
         simulated_button_press = false
         button_phase_count = 0
 
-        is_animated = false
+        is_live_example = strings.any? { |s| s.includes?("[LIVE]") || s.includes?("01 Hello World") }
+        is_animated = is_live_example
         animation_checked = false
         prev_frame_cmds = [] of DrawCommand
-        max_anim_frames = 16
+        max_anim_frames = is_live_example ? 60 : 16
         anim_frame_count = 0
         frames_per_bank = 16
         max_banks = 3
@@ -664,7 +672,15 @@ end
               end
 
               if current_commands.size > 0
-                if !animation_checked
+                if is_live_example
+                  # Live dynamic telemetry app: record up to 60 frames for the 1-second blink cycle
+                  phases << Phase.new(current_commands.dup, 1_u32, current_loop_message)
+                  current_loop_message = nil
+                  current_commands = [] of DrawCommand
+                  if phases.size >= max_anim_frames
+                    first_frame_done = true
+                  end
+                elsif !animation_checked
                   if phases.empty?
                     # Record Frame 0 without simulated button press
                     prev_frame_cmds = current_commands.dup
@@ -817,12 +833,79 @@ end
                              nil
                            end
               if found_file
-                self.class.emit_cbt_texture_spans(current_commands, found_file, dest_x, dest_y)
+                self.class.emit_cbt_texture_spans(current_commands, found_file, dest_x, dest_y, dest_w: 128, dest_h: 128, grid_res: 64)
               else
                 current_commands << DrawCommand.new(DrawCommand::Type::Rect, dest_x, dest_y, dest_x + 128, dest_y + 128, color: 0xFF2A1F18_u32)
               end
               regs[dst_r] = 0_i64
-            when 32 # DrawTextureRec
+            when 32 # DrawTextureRec(id, sx, sy, sw, sh, dx, dy[, tint])
+              tex_id = regs[base_r]
+              tex_name = loaded_textures[tex_id]? || ""
+              dest_w = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_i32!
+              dest_h = (regs[base_r + 4] & 0xFFFFFFFF_i64).to_i32!
+              dest_x = (regs[base_r + 5] & 0xFFFFFFFF_i64).to_i32!
+              dest_y = (regs[base_r + 6] & 0xFFFFFFFF_i64).to_i32!
+              dest_w = 128 if dest_w <= 0
+              dest_h = 128 if dest_h <= 0
+              found_file = if !tex_name.empty? && File.exists?(tex_name)
+                             tex_name
+                           elsif !tex_name.empty? && (entry = Dir.glob("**/#{File.basename(tex_name)}").first?)
+                             entry
+                           else
+                             nil
+                           end
+              if found_file
+                self.class.emit_cbt_texture_spans(current_commands, found_file, dest_x, dest_y, dest_w: dest_w, dest_h: dest_h, grid_res: {dest_w, 64}.min)
+              else
+                current_commands << DrawCommand.new(DrawCommand::Type::Rect, dest_x, dest_y, dest_x + dest_w, dest_y + dest_h, color: 0xFF2A1F18_u32)
+              end
+              regs[dst_r] = 0_i64
+            when 230 # DrawRectangleRotated(x, y, w, h, angle, ox, oy, color)
+              x = (regs[base_r] & 0xFFFFFFFF_i64).to_i32!
+              y = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
+              w = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
+              h = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_i32!
+              val = (regs[base_r + 7] & 0xFFFFFFFF_i64).to_u32
+              color = (val < constants.size) ? (constants[val]?.try(&.u32_val) || val) : val
+              current_commands << DrawCommand.new(DrawCommand::Type::Rect, x, y, x + w, y + h, color: color)
+            when 231 # DrawRoundedRectangle(x, y, w, h, radius, color)
+              x = (regs[base_r] & 0xFFFFFFFF_i64).to_i32!
+              y = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
+              w = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
+              h = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_i32!
+              val = (regs[base_r + 5] & 0xFFFFFFFF_i64).to_u32
+              color = (val < constants.size) ? (constants[val]?.try(&.u32_val) || val) : val
+              current_commands << DrawCommand.new(DrawCommand::Type::Rect, x, y, x + w, y + h, color: color)
+            when 232 # DrawTextRotated(text, x, y, size, angle, ox, oy, color)
+              t_idx = (regs[base_r] & 0xFFFFFFFF_i64).to_u32
+              text = (t_idx < constants.size) ? (constants[t_idx]?.try(&.str_val) || "") : ""
+              x = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
+              y = (regs[base_r + 2] & 0xFFFFFFFF_i64).to_i32!
+              size = (regs[base_r + 3] & 0xFFFFFFFF_i64).to_i32!
+              val = (regs[base_r + 7] & 0xFFFFFFFF_i64).to_u32
+              color = (val < constants.size) ? (constants[val]?.try(&.u32_val) || val) : val
+              current_commands << DrawCommand.new(DrawCommand::Type::Text, x, y, size, 0, color: color, text: text)
+            when 237 # DrawTexturePro(id, sx, sy, sw, sh, dx, dy, dw, dh, rot, ox, oy, tint, flip_flags)
+              tex_id = regs[base_r]
+              tex_name = loaded_textures[tex_id]? || ""
+              dest_x = (regs[base_r + 5] & 0xFFFFFFFF_i64).to_i32!
+              dest_y = (regs[base_r + 6] & 0xFFFFFFFF_i64).to_i32!
+              dest_w = (regs[base_r + 7] & 0xFFFFFFFF_i64).to_i32!
+              dest_h = (regs[base_r + 8] & 0xFFFFFFFF_i64).to_i32!
+              dest_w = 128 if dest_w <= 0
+              dest_h = 128 if dest_h <= 0
+              found_file = if !tex_name.empty? && File.exists?(tex_name)
+                             tex_name
+                           elsif !tex_name.empty? && (entry = Dir.glob("**/#{File.basename(tex_name)}").first?)
+                             entry
+                           else
+                             nil
+                           end
+              if found_file
+                self.class.emit_cbt_texture_spans(current_commands, found_file, dest_x, dest_y, dest_w: dest_w, dest_h: dest_h, grid_res: {dest_w, 64}.min)
+              else
+                current_commands << DrawCommand.new(DrawCommand::Type::Rect, dest_x, dest_y, dest_x + dest_w, dest_y + dest_h, color: 0xFF2A1F18_u32)
+              end
               regs[dst_r] = 0_i64
             when 35 # LoadSound
               boot_messages << "[CITRINE SPU2] Loaded ADPCM Sound Sample"

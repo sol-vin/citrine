@@ -34,6 +34,51 @@ struct Vector2
   end
 end
 
+# 2D Axis-Aligned Rectangle defined by position (x, y) and size (width, height).
+struct Rect
+  # Horizontal position of top-left corner.
+  property x : Float32
+  # Vertical position of top-left corner.
+  property y : Float32
+  # Width of rectangle.
+  property width : Float32
+  # Height of rectangle.
+  property height : Float32
+
+  # Creates a rectangle from Float32 values.
+  def initialize(@x : Float32, @y : Float32, @width : Float32, @height : Float32)
+  end
+
+  # Creates a rectangle converting arbitrary numeric types to Float32.
+  def initialize(x : Number, y : Number, width : Number, height : Number)
+    @x = x.to_f32
+    @y = y.to_f32
+    @width = width.to_f32
+    @height = height.to_f32
+  end
+
+  # Returns true if point (px, py) is contained within this rectangle.
+  def contains?(px : Number, py : Number) : Bool
+    fx = px.to_f32
+    fy = py.to_f32
+    fx >= @x && fx <= (@x + @width) && fy >= @y && fy <= (@y + @height)
+  end
+
+  # Returns true if this rectangle intersects with other rectangle.
+  def intersects?(other : Rect) : Bool
+    !(@x + @width < other.x || other.x + other.width < @x ||
+      @y + @height < other.y || other.y + other.height < @y)
+  end
+
+  # Returns a new rectangle offset by (dx, dy).
+  def offset(dx : Number, dy : Number) : Rect
+    Rect.new(@x + dx.to_f32, @y + dy.to_f32, @width, @height)
+  end
+end
+
+alias Rectangle = Rect
+
+
 # 3D mathematical vector with single-precision floating point coordinates.
 struct Vector3
   # X coordinate.
@@ -236,6 +281,40 @@ struct Controller
   end
 end
 
+# Color Look-Up Table (CLUT) palette handle for 8-bit (PSMT8) and 4-bit (PSMT4) indexed textures.
+struct Palette
+  # Hardware palette buffer handle ID in GS VRAM.
+  getter handle : UInt32
+  # Number of palette color entries (16 or 256).
+  getter size : Int32
+
+  # Creates a Palette wrapper with given GPU handle and color count.
+  def initialize(@handle : UInt32, @size : Int32 = 256)
+  end
+
+  # Loads an indexed CLUT palette file from optical disc or host filesystem.
+  def self.load(path : String) : Palette
+    Palette.new(Citrine.load_palette(path), 256)
+  end
+
+  # Creates a 16-color or 256-color palette in GS VRAM from an array of Colors.
+  def self.create(colors : Array(Color)) : Palette
+    Palette.new(Citrine.create_palette(colors), colors.size)
+  end
+
+  # Swizzles a 256-color palette according to PS2 GS CSM1 hardware layout
+  # (swaps entries 8..15 and 16..23 within every 32-entry block).
+  def self.swizzle_psmt8(colors : Array(Color)) : Array(Color)
+    return colors if colors.size != 256
+    swizzled = Array(Color).new(256, Color::Black)
+    256.times do |i|
+      target_idx = (i & ~0x18) | ((i & 0x08) << 1) | ((i & 0x10) >> 1)
+      swizzled[target_idx] = colors[i]
+    end
+    swizzled
+  end
+end
+
 # Texture handle referencing image data loaded in Graphics Synthesizer VRAM.
 struct Texture
   # Hardware texture allocation handle ID.
@@ -253,7 +332,94 @@ struct Texture
   def self.load(path : String) : Texture
     Texture.new(Citrine.load_texture(path), 64, 64)
   end
+
+  # Draws this texture in 2D mode with optional rotation, origin anchor, scale, tint, and palette.
+  def draw(
+    x : Number, y : Number,
+    width : Number? = nil, height : Number? = nil,
+    rotation : Number = 0.0,
+    origin : Symbol | Vector2? = nil,
+    scale : Number = 1.0,
+    scale_y : Number? = nil,
+    tint : Color = Color::White,
+    flip_x : Bool = false,
+    flip_y : Bool = false,
+    src : Rect? = nil,
+    dest : Rect? = nil,
+    palette : Palette | UInt32? = nil
+  )
+    Citrine::Draw2D.draw_texture(
+      self, x, y,
+      width: width, height: height,
+      rotation: rotation, origin: origin,
+      scale: scale, scale_y: scale_y,
+      tint: tint, flip_x: flip_x, flip_y: flip_y,
+      src: src, dest: dest, palette: palette
+    )
+  end
+
+  # Returns a cropped sprite region from this texture.
+  def crop(x : Number, y : Number, width : Number, height : Number) : Sprite
+    Sprite.new(self, Rect.new(x, y, width, height))
+  end
+
+  # Unloads texture from GS VRAM.
+  def unload
+    Citrine.unload_texture(@handle)
+  end
 end
+
+# Sub-region of a Texture with source UV rectangle and default dimensions.
+struct Sprite
+  # Underlying GPU texture resource.
+  getter texture : Texture
+  # Source rectangle (UV crop coordinates in pixels).
+  getter src : Rect
+
+  # Creates a Sprite from a texture and source sub-rectangle.
+  def initialize(@texture : Texture, @src : Rect)
+  end
+
+  # Returns sprite width in pixels.
+  def width : Float32
+    @src.width
+  end
+
+  # Returns sprite height in pixels.
+  def height : Float32
+    @src.height
+  end
+
+  # Draws this sprite in 2D mode.
+  def draw(
+    x : Number, y : Number,
+    width : Number? = nil, height : Number? = nil,
+    rotation : Number = 0.0,
+    origin : Symbol | Vector2? = nil,
+    scale : Number = 1.0,
+    scale_y : Number? = nil,
+    tint : Color = Color::White,
+    flip_x : Bool = false,
+    flip_y : Bool = false,
+    palette : Palette | UInt32? = nil
+  )
+    @texture.draw(
+      x, y,
+      width: width || @src.width,
+      height: height || @src.height,
+      rotation: rotation,
+      origin: origin,
+      scale: scale,
+      scale_y: scale_y,
+      tint: tint,
+      flip_x: flip_x,
+      flip_y: flip_y,
+      src: @src,
+      palette: palette
+    )
+  end
+end
+
 
 # Prints diagnostic string `msg` to EE SIO / SIF console.
 def debug_puts(msg : String)
@@ -268,7 +434,15 @@ end
 # Core Citrine runtime module exposing display, rendering, input, audio, video,
 # coroutine fibers, channels, and diagnostic facilities.
 module Citrine
+  alias Vector2 = ::Vector2
+  alias Rect = ::Rect
+  alias Rectangle = ::Rectangle
+  alias Palette = ::Palette
+  alias Texture = ::Texture
+  alias Sprite = ::Sprite
+
   # =========================================================================
+
   # Display & Window Management
   # =========================================================================
 
@@ -300,15 +474,46 @@ module Citrine
   end
 
   # Main game loop executing `block` repeatedly while the display window is open.
-  def self.main_loop(&block)
+  # Optionally accepts a `context` symbol defining active subsystems.
+  def self.main_loop(context : Symbol? = nil, &block)
     while window_open?
       yield
     end
   end
 
+  # Breaks out of the active main_loop cleanly.
+  def self.exit_loop
+  end
+
   # =========================================================================
-  # 2D Rendering
+  # 2D Rendering & Graphics DSL
   # =========================================================================
+
+  # Scoped 2D rendering frame block. Prepares Graphics Synthesizer frame,
+  # yields the Citrine::Draw2D context, and finalizes DMA GIF packet dispatch.
+  def self.draw_2d(&block : Citrine::Draw2D.class -> Nil)
+    begin_drawing
+    begin
+      yield Citrine::Draw2D
+    ensure
+      end_drawing
+    end
+  end
+
+  # Alias for draw_2d block DSL.
+  def self.draw(&block : Citrine::Draw2D.class -> Nil)
+    draw_2d(&block)
+  end
+
+  # Scoped immediate-mode OpenGL block with automatic begin/end pair.
+  def self.gl(mode : Citrine::GL::Mode = Citrine::GL::Mode::Triangles, &block)
+    Citrine::GL.begin(mode)
+    begin
+      yield Citrine::GL
+    ensure
+      Citrine::GL.end
+    end
+  end
 
   # Prepares the Graphics Synthesizer packet buffer for frame draw calls.
   def self.begin_drawing
@@ -321,6 +526,22 @@ module Citrine
   # Clears the active backbuffer with specified solid `color`.
   def self.clear_background(color : Color)
   end
+
+  # Draws a 2D rotated rectangle with custom pivot origin.
+  def self.draw_rectangle_rotated(x : Number, y : Number, width : Number, height : Number, rotation : Number, ox : Number = 0.0, oy : Number = 0.0, color : Color = Color::White)
+    Citrine::Draw2D.rect(x, y, width, height, rotation: rotation, origin: Vector2.new(ox, oy), fill: color)
+  end
+
+  # Draws a 2D rectangle with rounded corners.
+  def self.draw_rounded_rectangle(x : Number, y : Number, width : Number, height : Number, radius : Number, color : Color = Color::White)
+    Citrine::Draw2D.rect(x, y, width, height, radius: radius, fill: color)
+  end
+
+  # Renders rotated text at given angle around pivot origin.
+  def self.draw_text_rotated(text : String, x : Number, y : Number, size : Int32, rotation : Number, ox : Number = 0.0, oy : Number = 0.0, color : Color = Color::White)
+    Citrine::Draw2D.text(text, x, y, size: size, color: color, rotation: rotation, origin: Vector2.new(ox, oy))
+  end
+
 
   # Draws a 2D solid filled rectangle with upper-left corner at `(x, y)` and size `(width, height)`.
   def self.draw_rectangle(x : Number, y : Number, width : Number, height : Number, color : Color)
@@ -398,9 +619,35 @@ module Citrine
   def self.draw_texture_rec(texture : Texture | UInt32, src_x : Number, src_y : Number, src_w : Number, src_h : Number, dest_x : Number, dest_y : Number, tint : Color = Color::White)
   end
 
+  # Draws a texture quad with destination rectangle, source UV rectangle, origin offset, rotation angle, tint, and flip flags.
+  def self.draw_texture_pro(
+    texture : Texture | UInt32,
+    sx : Number, sy : Number, sw : Number, sh : Number,
+    dx : Number, dy : Number, dw : Number, dh : Number,
+    rotation : Number, ox : Number, oy : Number,
+    tint : Color = Color::White,
+    flip_flags : UInt8 = 0_u8
+  )
+  end
+
+  # Loads an indexed CLUT palette file from optical disc or host filesystem.
+  def self.load_palette(path : String) : UInt32
+    1_u32
+  end
+
+  # Creates a 16-color or 256-color palette in GS VRAM from an array of Colors.
+  def self.create_palette(colors : Array(Color)) : UInt32
+    1_u32
+  end
+
+  # Sets active GS CLUT buffer pointer to the specified palette handle.
+  def self.set_palette(palette : Palette | UInt32)
+  end
+
   # Unloads texture from GS VRAM.
   def self.unload_texture(texture : Texture | UInt32)
   end
+
 
   # =========================================================================
   # DualShock 2 Controller Subsystem
@@ -507,7 +754,19 @@ module Citrine
   end
 
   # Stops playback of audio sample `sound_id`.
-  def self.stop_sound(sound_id : UInt32)
+  def self.stop_sound(sound_id : UInt32 | UInt16 | Int32)
+  end
+
+  # Sets the playback volume for an active sound effect.
+  def self.set_sound_volume(sound_id : UInt32 | UInt16 | Int32, vol : Int32)
+  end
+
+  # Sets the playback pitch multiplier for an active sound effect.
+  def self.set_sound_pitch(sound_id : UInt32 | UInt16 | Int32, pitch : Float32 | Float64 | Number)
+  end
+
+  # Unloads sound sample from SPU2 sound memory.
+  def self.unload_sound(sound_id : UInt32 | UInt16 | Int32)
   end
 
   # Plays a CD-DA optical audio track (e.g. track 2..99) streaming directly from the disc drive via SPU2.
@@ -595,6 +854,16 @@ module Citrine
 
   def self.album_name(metadata_path : String = "album_metadata.json") : String
     ""
+  end
+
+  # Compile-time inspection of optical track status strings ("Track 01: TRACK01.CAS (96 kbps SPU2 Stream)")
+  def self.album_optical_tracks(metadata_path : String = "album_metadata.json") : Array(String)
+    [] of String
+  end
+
+  # Compile-time inspection of formatted track duration strings ("02:12", "03:29", etc.)
+  def self.album_track_dur_strings(metadata_path : String = "album_metadata.json") : Array(String)
+    [] of String
   end
 
   # Compile-time inspection of album artist
@@ -926,6 +1195,15 @@ module Citrine
       Citrine.puts("[CITRINE AUDIO] CD-DA Volume set to #{vol}")
       vol
     end
+
+    # Loads album metadata as an Album domain object
+    def self.album(dir : String = "album/")
+      Citrine::Audio::Album.new
+    end
+
+    def self.load_album(dir : String = "album/")
+      Citrine::Audio::Album.new
+    end
   end
 
   # Declarative Disc Asset Baking Stubs (processed at compile-time by MacroExpander)
@@ -955,6 +1233,14 @@ module Citrine
 
   def self.album_track_count(path : String = "album_metadata.json") : Int32
     0
+  end
+
+  def self.album(dir : String = "album/")
+    Citrine::Audio::Album.new
+  end
+
+  def self.load_album(dir : String = "album/")
+    Citrine::Audio::Album.new
   end
 
   def self.disc_files : Array(String)
@@ -1004,6 +1290,14 @@ def album_track_count(path : String = "album_metadata.json") : Int32
   Citrine.album_track_count(path)
 end
 
+def album(dir : String = "album/")
+  Citrine.album(dir)
+end
+
+def load_album(dir : String = "album/")
+  Citrine.load_album(dir)
+end
+
 def disc_files : Array(String)
   Citrine.disc_files
 end
@@ -1033,6 +1327,7 @@ require "./citrine/hardware/iop"
 require "./citrine/hardware/vu0"
 require "./citrine/hardware/virtual_pad"
 require "./citrine/hardware/gif"
+require "./citrine/audio"
 
 module Citrine
   alias WorkerPool = Citrine::Concurrency::WorkerPool
@@ -1056,3 +1351,23 @@ module Citrine
     end
   end
 end
+
+
+# Top-level context declaration block DSL:
+#
+# ```crystal
+# context(:game) do
+#   require "citrine/draw3d"
+#   require "./player"
+# end
+# ```
+macro context(name, &block)
+  {{block.body}}
+end
+
+# Top-level exit keyword breaking the active Citrine.main_loop
+def exit(status : Int = 0)
+  Citrine.exit_loop
+  Process.exit(status)
+end
+

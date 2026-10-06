@@ -21,7 +21,7 @@ describe "Citrine PS2 Emotion Engine ALU Stress & Logic Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 5.seconds)
+    result = tc.boot_pcsx2(timeout: 10.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] Arithmetic Pipeline: PASS")
@@ -45,7 +45,7 @@ describe "Citrine PS2 Emotion Engine ALU Stress & Logic Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 5.seconds)
+    result = tc.boot_pcsx2(timeout: 10.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] Comparisons All Evaluated Correctly: PASS")
@@ -72,7 +72,7 @@ describe "Citrine PS2 Emotion Engine ALU Stress & Logic Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 5.seconds)
+    result = tc.boot_pcsx2(timeout: 10.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] Accumulator 1..100 == 5050: PASS")

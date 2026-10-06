@@ -191,5 +191,21 @@ module Citrine
       col = color || @@fill_color
       Citrine.draw_cube(Vector3.new(x, y, z), radius * 1.5_f32, radius * 1.5_f32, radius * 1.5_f32, col)
     end
+
+    # Renders text with optional rotation and alignment.
+    def self.text(string : String, x : Number, y : Number, size : Int32 = 16, color : Color = Color::White, rotation : Number = 0.0, origin : Vector2? = nil, align : Symbol = :left)
+      Draw2D.text(string, x, y, size: size, color: color, rotation: rotation, origin: origin, align: align)
+    end
+
+    # Draws arbitrary polygon.
+    def self.polygon(points : Array(Vector2), fill : Color? = nil, stroke : Color? = nil)
+      Draw2D.polygon(points, fill: fill, stroke: stroke)
+    end
+
+    # Draws regular star.
+    def self.star(cx : Number, cy : Number, points : Int32 = 5, inner_r : Number = 10.0, outer_r : Number = 25.0, fill : Color? = nil, stroke : Color? = nil)
+      Draw2D.star(cx, cy, points: points, inner_r: inner_r, outer_r: outer_r, fill: fill, stroke: stroke)
+    end
   end
 end
+
