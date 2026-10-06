@@ -668,11 +668,14 @@ void citrine_vm_run(CitrineVM* vm) {
         [OP_FUSED_MADD]  = &&do_fused_madd   // 0x1F
     };
 
-    #define DISPATCH() do { \
+    #define CHECK_WATCHDOG() do { \
         if (++vm->instruction_count > vm->watchdog_limit) { \
             citrine_vm_panic(vm, "Instruction Watchdog Timeout (> 5M instructions without yield)"); \
             return; \
         } \
+    } while (0)
+
+    #define DISPATCH() do { \
         uint32_t instr_word = vm->bytecode[vm->pc++]; \
         uint8_t op = (instr_word >> 27) & 0x1F; \
         goto *primary_dispatch[op]; \
@@ -1174,12 +1177,18 @@ void citrine_vm_run(CitrineVM* vm) {
         uint8_t subop = INSTR_SUBOP(raw);
         if (subop == SUBOP_JUMP_REG) {
             uint8_t dst = INSTR_DST(raw);
-            vm->pc = (uint32_t)regs[dst].as.i;
+            uint32_t target = (uint32_t)regs[dst].as.i;
+            if (target <= vm->pc) { CHECK_WATCHDOG(); }
+            vm->pc = target;
         } else if (subop == SUBOP_JUMP_REL16) {
-            vm->pc += INSTR_SIMM16(raw);
+            int16_t offset = INSTR_SIMM16(raw);
+            if (offset <= 0) { CHECK_WATCHDOG(); }
+            vm->pc += offset;
         } else {
             // SUBOP_JUMP_REL24 (default 24-bit jump covering entire 32MB address space)
-            vm->pc += INSTR_JUMP24(raw);
+            int32_t offset = INSTR_JUMP24(raw);
+            if (offset <= 0) { CHECK_WATCHDOG(); }
+            vm->pc += offset;
         }
         DISPATCH();
     }
@@ -1190,32 +1199,33 @@ void citrine_vm_run(CitrineVM* vm) {
         uint8_t subop = INSTR_SUBOP(raw);
         uint8_t cond_reg = INSTR_DST(raw);
         int16_t offset = INSTR_SIMM16(raw);
+        bool taken = false;
         switch (subop) {
             case SUBOP_BRZ_TRUTHY:
-                if (regs[cond_reg].type == VAL_BOOL && regs[cond_reg].as.i != 0) {
-                    vm->pc += offset;
-                }
+                if (regs[cond_reg].type == VAL_BOOL && regs[cond_reg].as.i != 0) taken = true;
                 break;
             case SUBOP_BRZ_FALSY:
-                if (regs[cond_reg].type == VAL_NIL || (regs[cond_reg].type == VAL_BOOL && regs[cond_reg].as.i == 0)) {
-                    vm->pc += offset;
-                }
+                if (regs[cond_reg].type == VAL_NIL || (regs[cond_reg].type == VAL_BOOL && regs[cond_reg].as.i == 0)) taken = true;
                 break;
             case SUBOP_BRZ_ZERO:
-                if (regs[cond_reg].as.i == 0) vm->pc += offset;
+                if (regs[cond_reg].as.i == 0) taken = true;
                 break;
             case SUBOP_BRZ_NONZERO:
-                if (regs[cond_reg].as.i != 0) vm->pc += offset;
+                if (regs[cond_reg].as.i != 0) taken = true;
                 break;
             case SUBOP_BRZ_POS:
-                if (regs[cond_reg].as.i > 0) vm->pc += offset;
+                if (regs[cond_reg].as.i > 0) taken = true;
                 break;
             case SUBOP_BRZ_NEG:
-                if (regs[cond_reg].as.i < 0) vm->pc += offset;
+                if (regs[cond_reg].as.i < 0) taken = true;
                 break;
             default:
-                if (regs[cond_reg].type == VAL_BOOL && regs[cond_reg].as.i != 0) vm->pc += offset;
+                if (regs[cond_reg].type == VAL_BOOL && regs[cond_reg].as.i != 0) taken = true;
                 break;
+        }
+        if (taken) {
+            if (offset <= 0) { CHECK_WATCHDOG(); }
+            vm->pc += offset;
         }
         DISPATCH();
     }
@@ -1227,36 +1237,42 @@ void citrine_vm_run(CitrineVM* vm) {
         uint8_t r1 = INSTR_DST(raw);
         uint8_t r2 = INSTR_A(raw);
         int8_t offset = INSTR_OFFSET8(raw);
+        bool taken = false;
         if (regs[r1].type == VAL_FLOAT32 || regs[r2].type == VAL_FLOAT32) {
             float fa = (regs[r1].type == VAL_FLOAT32) ? regs[r1].as.f : (float)regs[r1].as.i;
             float fb = (regs[r2].type == VAL_FLOAT32) ? regs[r2].as.f : (float)regs[r2].as.i;
             switch (subop) {
-                case SUBOP_BRCMP_BEQ: if (fa == fb) vm->pc += offset; break;
-                case SUBOP_BRCMP_BNE: if (fa != fb) vm->pc += offset; break;
-                case SUBOP_BRCMP_BLT: if (fa <  fb) vm->pc += offset; break;
-                case SUBOP_BRCMP_BLE: if (fa <= fb) vm->pc += offset; break;
-                case SUBOP_BRCMP_BGT: if (fa >  fb) vm->pc += offset; break;
-                case SUBOP_BRCMP_BGE: if (fa >= fb) vm->pc += offset; break;
+                case SUBOP_BRCMP_BEQ: if (fa == fb) taken = true; break;
+                case SUBOP_BRCMP_BNE: if (fa != fb) taken = true; break;
+                case SUBOP_BRCMP_BLT: if (fa <  fb) taken = true; break;
+                case SUBOP_BRCMP_BLE: if (fa <= fb) taken = true; break;
+                case SUBOP_BRCMP_BGT: if (fa >  fb) taken = true; break;
+                case SUBOP_BRCMP_BGE: if (fa >= fb) taken = true; break;
                 default: break;
             }
         } else {
             int32_t ia = regs[r1].as.i;
             int32_t ib = regs[r2].as.i;
             switch (subop) {
-                case SUBOP_BRCMP_BEQ: if (ia == ib) vm->pc += offset; break;
-                case SUBOP_BRCMP_BNE: if (ia != ib) vm->pc += offset; break;
-                case SUBOP_BRCMP_BLT: if (ia <  ib) vm->pc += offset; break;
-                case SUBOP_BRCMP_BLE: if (ia <= ib) vm->pc += offset; break;
-                case SUBOP_BRCMP_BGT: if (ia >  ib) vm->pc += offset; break;
-                case SUBOP_BRCMP_BGE: if (ia >= ib) vm->pc += offset; break;
+                case SUBOP_BRCMP_BEQ: if (ia == ib) taken = true; break;
+                case SUBOP_BRCMP_BNE: if (ia != ib) taken = true; break;
+                case SUBOP_BRCMP_BLT: if (ia <  ib) taken = true; break;
+                case SUBOP_BRCMP_BLE: if (ia <= ib) taken = true; break;
+                case SUBOP_BRCMP_BGT: if (ia >  ib) taken = true; break;
+                case SUBOP_BRCMP_BGE: if (ia >= ib) taken = true; break;
                 default: break;
             }
+        }
+        if (taken) {
+            if (offset <= 0) { CHECK_WATCHDOG(); }
+            vm->pc += offset;
         }
         DISPATCH();
     }
 
     // 0x12: OP_CALL
     do_call: {
+        CHECK_WATCHDOG();
         uint32_t raw = vm->bytecode[vm->pc - 1];
         uint8_t subop = INSTR_SUBOP(raw);
         uint8_t dst = INSTR_DST(raw);
@@ -1446,21 +1462,56 @@ void citrine_vm_run(CitrineVM* vm) {
         uint8_t dst = INSTR_DST(raw);
         uint8_t a = INSTR_A(raw);
         uint8_t b = INSTR_B(raw);
-        regs[dst].type = VAL_INT32;
         switch (subop) {
+            case SUBOP_MMI_PADDB:
+                regs[dst].type = VAL_COLOR;
+                regs[dst].as.color.r = regs[a].as.color.r + regs[b].as.color.r;
+                regs[dst].as.color.g = regs[a].as.color.g + regs[b].as.color.g;
+                regs[dst].as.color.b = regs[a].as.color.b + regs[b].as.color.b;
+                regs[dst].as.color.a = regs[a].as.color.a + regs[b].as.color.a;
+                break;
             case SUBOP_MMI_PADDW:
-                regs[dst].as.i = regs[a].as.i + regs[b].as.i;
+                if (regs[a].type == VAL_VEC2 || regs[b].type == VAL_VEC2) {
+                    regs[dst].type = VAL_VEC2;
+                    regs[dst].as.vec2.x = regs[a].as.vec2.x + regs[b].as.vec2.x;
+                    regs[dst].as.vec2.y = regs[a].as.vec2.y + regs[b].as.vec2.y;
+                } else {
+                    regs[dst].type = VAL_INT32;
+                    regs[dst].as.i = regs[a].as.i + regs[b].as.i;
+                }
                 break;
             case SUBOP_MMI_PSUBW:
-                regs[dst].as.i = regs[a].as.i - regs[b].as.i;
+                if (regs[a].type == VAL_VEC2 || regs[b].type == VAL_VEC2) {
+                    regs[dst].type = VAL_VEC2;
+                    regs[dst].as.vec2.x = regs[a].as.vec2.x - regs[b].as.vec2.x;
+                    regs[dst].as.vec2.y = regs[a].as.vec2.y - regs[b].as.vec2.y;
+                } else {
+                    regs[dst].type = VAL_INT32;
+                    regs[dst].as.i = regs[a].as.i - regs[b].as.i;
+                }
                 break;
             case SUBOP_MMI_PMAXW:
-                regs[dst].as.i = (regs[a].as.i > regs[b].as.i) ? regs[a].as.i : regs[b].as.i;
+                if (regs[a].type == VAL_VEC2 || regs[b].type == VAL_VEC2) {
+                    regs[dst].type = VAL_VEC2;
+                    regs[dst].as.vec2.x = (regs[a].as.vec2.x > regs[b].as.vec2.x) ? regs[a].as.vec2.x : regs[b].as.vec2.x;
+                    regs[dst].as.vec2.y = (regs[a].as.vec2.y > regs[b].as.vec2.y) ? regs[a].as.vec2.y : regs[b].as.vec2.y;
+                } else {
+                    regs[dst].type = VAL_INT32;
+                    regs[dst].as.i = (regs[a].as.i > regs[b].as.i) ? regs[a].as.i : regs[b].as.i;
+                }
                 break;
             case SUBOP_MMI_PMINW:
-                regs[dst].as.i = (regs[a].as.i < regs[b].as.i) ? regs[a].as.i : regs[b].as.i;
+                if (regs[a].type == VAL_VEC2 || regs[b].type == VAL_VEC2) {
+                    regs[dst].type = VAL_VEC2;
+                    regs[dst].as.vec2.x = (regs[a].as.vec2.x < regs[b].as.vec2.x) ? regs[a].as.vec2.x : regs[b].as.vec2.x;
+                    regs[dst].as.vec2.y = (regs[a].as.vec2.y < regs[b].as.vec2.y) ? regs[a].as.vec2.y : regs[b].as.vec2.y;
+                } else {
+                    regs[dst].type = VAL_INT32;
+                    regs[dst].as.i = (regs[a].as.i < regs[b].as.i) ? regs[a].as.i : regs[b].as.i;
+                }
                 break;
             default:
+                regs[dst].type = VAL_INT32;
                 regs[dst].as.i = regs[a].as.i + regs[b].as.i;
                 break;
         }
@@ -1627,26 +1678,32 @@ void citrine_vm_run(CitrineVM* vm) {
         uint32_t raw = vm->bytecode[vm->pc - 1];
         uint8_t subop = INSTR_SUBOP(raw);
         uint8_t cnt_reg = INSTR_DST(raw);
+        bool taken = false;
+        int32_t offset = 0;
         if (subop == SUBOP_INCBR_LT) {
             uint8_t limit_reg = INSTR_A(raw);
-            int8_t offset = INSTR_OFFSET8(raw);
+            offset = INSTR_OFFSET8(raw);
             regs[cnt_reg].as.i += 1;
             if (regs[cnt_reg].as.i < regs[limit_reg].as.i) {
-                vm->pc += offset;
+                taken = true;
             }
         } else if (subop == SUBOP_DECBR_GEZ) {
-            int16_t offset = INSTR_SIMM16(raw);
+            offset = INSTR_SIMM16(raw);
             regs[cnt_reg].as.i -= 1;
             if (regs[cnt_reg].as.i >= 0) {
-                vm->pc += offset;
+                taken = true;
             }
         } else {
             // SUBOP_DECBR_NZ (default)
-            int16_t offset = INSTR_SIMM16(raw);
+            offset = INSTR_SIMM16(raw);
             regs[cnt_reg].as.i -= 1;
             if (regs[cnt_reg].as.i != 0) {
-                vm->pc += offset;
+                taken = true;
             }
+        }
+        if (taken) {
+            if (offset <= 0) { CHECK_WATCHDOG(); }
+            vm->pc += offset;
         }
         DISPATCH();
     }

@@ -667,12 +667,8 @@ module Citrine
         mips.addiu(T9, S0, 0x0f84) # EnableIntr
         mips.ori(A0, ZERO, 0x24)   # DMA channel 4 (SPU2 Core 0)
         mips.jalr(T9); mips.nop
-
-        mips.addiu(T9, S0, 0x0f84)
         mips.ori(A0, ZERO, 0x28)   # DMA channel 7 (SPU2 Core 1)
         mips.jalr(T9); mips.nop
-
-        mips.addiu(T9, S0, 0x0f84)
         mips.ori(A0, ZERO, 9)      # SPU2 Interrupt
         mips.jalr(T9); mips.nop
 
@@ -683,8 +679,8 @@ module Citrine
 
         # ================= MAIN STREAMING LOOP =================
         mips.label("stream_loop")
-        # DelayThread(20000) -> sleep 20 ms
-        mips.ori(A0, ZERO, 20000)
+        # DelayThread(10000) -> sleep 10 ms (finer polling & responsive controls)
+        mips.ori(A0, ZERO, 10000)
         mips.addiu(T9, S0, 0x10b4) # DelayThread
         mips.jalr(T9)
         mips.nop
@@ -705,15 +701,12 @@ module Citrine
         mips.ori(A0, ZERO, 0x1600)  # SD_S_KOFF (Core 0)
         mips.ori(A1, ZERO, 1)
         mips.jalr(T9); mips.nop
-        mips.addiu(T9, S0, 0x0f14)
         mips.ori(A0, ZERO, 0x1601)  # SD_S_KOFF (Core 1)
         mips.ori(A1, ZERO, 1)
         mips.jalr(T9); mips.nop
-        mips.addiu(T9, S0, 0x0f14)
         mips.ori(A0, ZERO, 0x1600)
         mips.move(A1, ZERO)
         mips.jalr(T9); mips.nop
-        mips.addiu(T9, S0, 0x0f14)
         mips.ori(A0, ZERO, 0x1601)
         mips.move(A1, ZERO)
         mips.jalr(T9); mips.nop
@@ -728,7 +721,6 @@ module Citrine
         mips.ori(A0, ZERO, 0x0200)  # Core 0 pitch = 0
         mips.move(A1, ZERO)
         mips.jalr(T9); mips.nop
-        mips.addiu(T9, S0, 0x0f0c)
         mips.ori(A0, ZERO, 0x0201)  # Core 1 pitch = 0
         mips.move(A1, ZERO)
         mips.jalr(T9); mips.nop
@@ -744,7 +736,6 @@ module Citrine
         mips.ori(A0, ZERO, 0x0200)  # Core 0 pitch
         mips.lw(A1, 0x18EC, S0)     # restore cur_pitch
         mips.jalr(T9); mips.nop
-        mips.addiu(T9, S0, 0x0f0c)
         mips.ori(A0, ZERO, 0x0201)  # Core 1 pitch
         mips.lw(A1, 0x18EC, S0)
         mips.jalr(T9); mips.nop
@@ -807,9 +798,9 @@ module Citrine
         mips.bne(T0, T1, "stream_loop")
         mips.nop
 
-        # Update elapsed timer (+20 ms per loop tick):
+        # Update elapsed timer (+10 ms per loop tick):
         mips.lw(T0, 0x1918, S0) # timer_accum_ms
-        mips.addiu(T0, T0, 20)  # +20 ms
+        mips.addiu(T0, T0, 10)  # +10 ms
         mips.lw(T1, 0x18F0, S0) # bank_dur_ms
         mips.sltu(T2, T0, T1)
         mips.bnez(T2, "timer_bank_not_expired")
@@ -818,6 +809,12 @@ module Citrine
         # Timer expired: Voice 0 has transitioned banks!
         # Subtract bank_dur_ms and refill the newly-freed bank.
         mips.subu(T0, T0, T1)
+        mips.srl(T2, T1, 1) # bank_dur_ms // 2
+        mips.sltu(T3, T2, T0)
+        mips.beqz(T3, "timer_rem_ok")
+        mips.nop
+        mips.move(T0, ZERO)
+        mips.label("timer_rem_ok")
         mips.sw(T0, 0x1918, S0)
 
         # Check which bank needs refill: next_refill_bank at 0x1908
@@ -897,12 +894,17 @@ module Citrine
         mips.addiu(T9, S0, 0x0bec) # sceCdSync (stub at 0x0bec)
         mips.jalr(T9); mips.nop
 
-        # Print refill message
-        mips.addiu(A0, S0, 0x1990)
+        # Print refill message only for initial priming (bank 0 and 1)
         mips.lw(A1, 0x1904, S0) # cur_bank_idx
+        mips.ori(T0, ZERO, 2)
+        mips.sltu(T1, A1, T0)
+        mips.beqz(T1, "skip_refill_print")
+        mips.nop
+        mips.addiu(A0, S0, 0x1990)
         mips.move(A2, S1)        # spu_dest (0x15000 or 0x19000)
         mips.addiu(T9, S0, 0x1030) # printf
         mips.jalr(T9); mips.nop
+        mips.label("skip_refill_print")
 
 
         # Patch ADPCM loop flags:
@@ -943,11 +945,6 @@ module Citrine
         mips.ori(T0, T0, 0x4000) # 16384 bytes
         mips.sw(T0, 16, SP)
         mips.addiu(T9, S0, 0x0f34) # sceSdVoiceTrans
-        mips.jalr(T9); mips.nop
-
-        # Brief delay for DMA initiation (1 ms):
-        mips.ori(A0, ZERO, 1000)
-        mips.addiu(T9, S0, 0x10b4) # DelayThread
         mips.jalr(T9); mips.nop
 
         # Advance cur_bank_idx:
@@ -1008,7 +1005,6 @@ module Citrine
         mips.ori(A0, ZERO, 0x0200)  # Core 0 SD_VP_PITCH
         mips.lw(A1, 0x18EC, S0)
         mips.jalr(T9); mips.nop
-        mips.addiu(T9, S0, 0x0f0c)
         mips.ori(A0, ZERO, 0x0201)  # Core 1 SD_VP_PITCH
         mips.lw(A1, 0x18EC, S0)
         mips.jalr(T9); mips.nop
@@ -1066,16 +1062,13 @@ module Citrine
         mips.ori(A0, ZERO, 0x1600)
         mips.ori(A1, ZERO, 1)
         mips.jalr(T9); mips.nop
-        mips.addiu(T9, S0, 0x0f14)
         mips.ori(A0, ZERO, 0x1601)
         mips.ori(A1, ZERO, 1)
         mips.jalr(T9); mips.nop
 
-        mips.addiu(T9, S0, 0x0f14)
         mips.ori(A0, ZERO, 0x1600)
         mips.move(A1, ZERO)
         mips.jalr(T9); mips.nop
-        mips.addiu(T9, S0, 0x0f14)
         mips.ori(A0, ZERO, 0x1601)
         mips.move(A1, ZERO)
         mips.jalr(T9); mips.nop
@@ -1096,12 +1089,11 @@ module Citrine
 
         # Set Voice 0 SSA and LSA to 0x15000 on Core 0 and Core 1
         mips.move(S6, ZERO)
+        mips.addiu(T9, S0, 0x0f1c) # sceSdSetAddr
         mips.label("addr_core_loop")
         mips.lui(A1, 0x0001); mips.ori(A1, A1, 0x5000)
-        mips.addiu(T9, S0, 0x0f1c) # sceSdSetAddr
         mips.ori(A0, S6, 0x2040)  # SD_VA_SSA
         mips.jalr(T9); mips.nop
-        mips.addiu(T9, S0, 0x0f1c)
         mips.ori(A0, S6, 0x2060)  # SD_VA_LSA
         mips.jalr(T9); mips.nop
         mips.addiu(S6, S6, 1)
@@ -1120,7 +1112,6 @@ module Citrine
         mips.ori(A0, ZERO, 0x1500) # SD_S_KON (Core 0)
         mips.ori(A1, ZERO, 1)
         mips.jalr(T9); mips.nop
-        mips.addiu(T9, S0, 0x0f14)
         mips.ori(A0, ZERO, 0x1501) # SD_S_KON (Core 1)
         mips.ori(A1, ZERO, 1)
         mips.jalr(T9); mips.nop
@@ -1136,23 +1127,18 @@ module Citrine
         mips.sw(RA, 0, SP)
         mips.sw(S1, 4, SP)
         mips.move(S1, ZERO) # S1 = core (0..1)
-        mips.label("vol_core_loop")
         mips.addiu(T9, S0, 0x0f0c) # sceSdSetParam
+        mips.label("vol_core_loop")
         mips.ori(A0, S1, 0x0000); mips.move(A1, S7); mips.jalr(T9); mips.nop # Voice 0 VOLL
-        mips.addiu(T9, S0, 0x0f0c)
         mips.ori(A0, S1, 0x0100); mips.move(A1, S7); mips.jalr(T9); mips.nop # Voice 0 VOLR
-        mips.addiu(T9, S0, 0x0f0c)
         mips.ori(A0, S1, 0x0980); mips.move(A1, S7); mips.jalr(T9); mips.nop # MVOLL
-        mips.addiu(T9, S0, 0x0f0c)
         mips.ori(A0, S1, 0x0a80); mips.move(A1, S7); mips.jalr(T9); mips.nop # MVOLR
         mips.addiu(S1, S1, 1)
         mips.ori(T8, ZERO, 2)
         mips.bne(S1, T8, "vol_core_loop")
         mips.nop
         # Also set Broadcast volumes on Core 1:
-        mips.addiu(T9, S0, 0x0f0c)
         mips.ori(A0, ZERO, 0x0f81); mips.move(A1, S7); mips.jalr(T9); mips.nop # BVOLL
-        mips.addiu(T9, S0, 0x0f0c)
         mips.ori(A0, ZERO, 0x1081); mips.move(A1, S7); mips.jalr(T9); mips.nop # BVOLR
         mips.lw(S1, 4, SP)
         mips.lw(RA, 0, SP)

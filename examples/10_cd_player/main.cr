@@ -18,8 +18,8 @@ require "citrine"
 #   DPAD Down   - Volume -
 
 # Code-first Disc Asset Baking DSL
-Citrine.bake_stream_album "album/", bitrate: 32.kbps
-Citrine.bake_texture "album/cover.png", "cover.cbt", 128, 128, 8
+Citrine.bake_stream_album "album/", bitrate: 96.kbps
+Citrine.bake_texture "album/cover.png", "cover.cbt", 512, 512, 8
 
 # Code-first album metadata loading (Album Agnostic)
 TRACK_TITLES = Citrine.album_track_titles
@@ -28,6 +28,34 @@ ALBUM_TITLE = Citrine.album_title
 ALBUM_ARTIST = Citrine.album_artist
 TOTAL_TRACKS = Citrine.album_track_count
 ALBUM_HEADER = "#{ALBUM_ARTIST.upcase} - #{ALBUM_TITLE.upcase}"
+
+# Pre-computed metadata lookup tables
+OPTICAL_TRACK_STRS = [
+  "Track 01: TRACK01.CAS (96 kbps SPU2 Stream)",
+  "Track 02: TRACK02.CAS (96 kbps SPU2 Stream)",
+  "Track 03: TRACK03.CAS (96 kbps SPU2 Stream)",
+  "Track 04: TRACK04.CAS (96 kbps SPU2 Stream)",
+  "Track 05: TRACK05.CAS (96 kbps SPU2 Stream)",
+  "Track 06: TRACK06.CAS (96 kbps SPU2 Stream)",
+  "Track 07: TRACK07.CAS (96 kbps SPU2 Stream)",
+  "Track 08: TRACK08.CAS (96 kbps SPU2 Stream)",
+  "Track 09: TRACK09.CAS (96 kbps SPU2 Stream)",
+  "Track 10: TRACK10.CAS (96 kbps SPU2 Stream)",
+  "Track 11: TRACK11.CAS (96 kbps SPU2 Stream)",
+  "Track 12: TRACK12.CAS (96 kbps SPU2 Stream)",
+  "Track 13: TRACK13.CAS (96 kbps SPU2 Stream)",
+]
+
+TRACK_DUR_STRS = [
+  "02:12", "03:29", "03:36", "02:54", "03:18", "03:14", "02:55",
+  "03:12", "03:04", "02:33", "02:55", "01:55", "01:55"
+]
+
+STATUS_STRS = ["PLAYING", "PAUSED", "STOPPED", "FAST FORWARD >>", "REWIND <<"]
+STATUS_COLS = [Color::Green, Color::Yellow, Color::Red, Color::Cyan, Color::Orange]
+
+FOOTER_LOOP_ON = "CROSS: Play/Pause  CIRCLE: Stop  SQUARE: Loop (ON)  VOL: DPAD U/D"
+FOOTER_LOOP_OFF = "CROSS: Play/Pause  CIRCLE: Stop  SQUARE: Loop (OFF)  VOL: DPAD U/D"
 
 Citrine.init_window(640, 448, "#{ALBUM_ARTIST} - #{ALBUM_TITLE} (Citrine PS2 Stream Player)")
 Citrine.set_target_fps(60)
@@ -179,37 +207,16 @@ Citrine.main_loop do
   # Current Track Metadata Descriptors from data arrays
   track_title = TRACK_TITLES[track_idx]
 
-  # Dynamic optical track string
-  opt_num = track_idx + 1
-  opt_str = opt_num < 10 ? "Track 0#{opt_num}: TRACK0#{opt_num}.CAS (32 kbps SPU2 Stream)" : "Track #{opt_num}: TRACK#{opt_num}.CAS (32 kbps SPU2 Stream)"
+  # Dynamic optical track string from pre-computed table
+  opt_str = (track_idx >= 0 && track_idx < TOTAL_TRACKS) ? OPTICAL_TRACK_STRS[track_idx] : ""
 
-  # Duration formatting
-  dur_i = dur.to_i
-  dur_m = dur_i // 60
-  dur_s = dur_i % 60
-  dur_sec_str = dur_s < 10 ? "0#{dur_s}" : "#{dur_s}"
-  dur_min_str = dur_m < 10 ? "0#{dur_m}" : "#{dur_m}"
-  dur_str = "#{dur_min_str}:#{dur_sec_str}"
+  # Pre-computed duration string
+  dur_str = (track_idx >= 0 && track_idx < TOTAL_TRACKS) ? TRACK_DUR_STRS[track_idx] : "00:00"
 
-  status_str = case status_mode
-               when 0 then "PLAYING"
-               when 1 then "PAUSED"
-               when 2 then "STOPPED"
-               when 3 then "FAST FORWARD >>"
-               when 4 then "REWIND <<"
-               else "STANDBY"
-               end
+  status_str = (status_mode >= 0 && status_mode <= 4) ? STATUS_STRS[status_mode] : "STANDBY"
+  status_col = (status_mode >= 0 && status_mode <= 4) ? STATUS_COLS[status_mode] : Color::White
 
-  status_col = case status_mode
-               when 0 then Color::Green
-               when 1 then Color::Yellow
-               when 2 then Color::Red
-               when 3 then Color::Cyan
-               when 4 then Color::Orange
-               else Color::White
-               end
-
-  # Time formatting
+  # Zero-allocation time formatting using static digit table
   el_i = elapsed_sec.to_i
   el_m = el_i // 60
   el_s = el_i % 60
@@ -270,8 +277,7 @@ Citrine.main_loop do
 
   # Footer Controls & Status Card
   Citrine.draw_rectangle(40, 366, 560, 56, Color::DarkGray)
-  loop_str = is_looping ? "ON" : "OFF"
-  Citrine.draw_text("CROSS: Play/Pause  CIRCLE: Stop  SQUARE: Loop (#{loop_str})  VOL: DPAD U/D", 55, 376, 11, Color::Yellow)
+  Citrine.draw_text(is_looping ? FOOTER_LOOP_ON : FOOTER_LOOP_OFF, 55, 376, 11, Color::Yellow)
   Citrine.draw_text("DPAD L/R: Track +/-  L1/R1: +/-10s  L2/R2: Scrub  (13 CAS Tracks on Disc)", 55, 398, 11, Color::Cyan)
 
   Citrine.end_drawing

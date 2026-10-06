@@ -124,7 +124,7 @@ module Citrine
       end
 
       # Emits all native API stubs with real SPRAM controller queries and SPU2 audio commands
-      def self.emit_native_stubs(emitter : MipsEmitter)
+      def self.emit_native_stubs(emitter : MipsEmitter, profile : ProgramProfile? = nil)
         STUB_NAMES.each do |sname|
           emitter.label(sname)
           case sname
@@ -487,11 +487,12 @@ module Citrine
             emitter.beqz(T1, "seek_play_entry")
             emitter.nop
 
-            # Convert seconds (A0) to bank index: target_bank = (A0 * 1000) / 3582
+            # Convert seconds (A0) to bank index: target_bank = (A0 * 1000) / bank_dur_ms
+            seek_bank_dur = profile.try(&.bank_dur_ms) || 1195_u32
             emitter.li(T2, 1000)
             emitter.mult(A0, T2)
             emitter.mflo(T3)
-            emitter.li(T2, 3582)
+            emitter.li(T2, seek_bank_dur.to_i)
             emitter.divu(T3, T2)
             emitter.mflo(T1) # target_bank
             emitter.andi(T1, T1, 0xFFFF)
@@ -551,8 +552,8 @@ module Citrine
         emitter.ori(T5, ZERO, 13)
         emitter.label("udq_blank_loop")
         emitter.sw(ZERO, 16, A2) # RGBAQ = 0 (alpha = 0, transparent)
-        emitter.sw(ZERO, 32, A2)
-        emitter.sw(ZERO, 48, A2)
+        emitter.sw(ZERO, 32, A2) # XYZ3 = 0
+        emitter.sw(ZERO, 48, A2) # XYZ2 = 0
         emitter.addiu(A2, A2, 64)
         emitter.addiu(T5, T5, -1)
         emitter.bnez(T5, "udq_blank_loop")

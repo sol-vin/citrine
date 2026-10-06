@@ -16,6 +16,8 @@ module Citrine
       property has_audio : Bool
       property num_tracks : Int32
       property is_dvd_screensaver : Bool
+      property bank_dur_ms : UInt32
+      property frames_per_bank : UInt32
 
       def initialize(
         @phases = [] of Citrine::GS::Phase,
@@ -27,7 +29,9 @@ module Citrine
         @inline_asm_words = [] of UInt32,
         @has_audio = false,
         @num_tracks = 1,
-        @is_dvd_screensaver = false
+        @is_dvd_screensaver = false,
+        @bank_dur_ms = 1195_u32,
+        @frames_per_bank = 72_u32
       )
       end
 
@@ -1591,20 +1595,40 @@ end
         end
 
         loop_start = (phases.size > 1 && phases[0].message.nil? && !has_button_checks && !is_animated) ? 1 : 0
-          return ProgramProfile.new(
-            phases: phases,
-            boot_messages: boot_messages,
-            loop_start_phase: loop_start,
-            is_animated: is_animated,
-            has_button_checks: has_button_checks,
-            is_inline_assembly: is_inline_assembly,
-            inline_asm_words: inline_asm_words,
-            has_audio: has_audio,
-            is_dvd_screensaver: is_dvd_screensaver
-          )
+
+        bank_dur = 1195_u32
+        frames_bank = 72_u32
+        cas_candidate = Citrine::ISO::DiscManifest.current.assets.find { |a| a.target_name.ends_with?(".CAS") }
+        cas_path = cas_candidate.try(&.source_path) || Dir.glob("*.cas").first? || Dir.glob("**/*.cas").first?
+        if cas_path && File.exists?(cas_path) && File.size(cas_path) >= 14
+          hdr = Bytes.new(14)
+          File.open(cas_path) { |f| f.read_fully?(hdr) } rescue nil
+          if hdr[0, 4] == Bytes[0x43, 0x41, 0x53, 0x01]
+            pitch_reg = IO::ByteFormat::LittleEndian.decode(UInt16, hdr[12, 2])
+            if pitch_reg > 0
+              bank_dur = 2446677_u32 // pitch_reg.to_u32
+              frames_bank = ((bank_dur * 60 + 500) // 1000).to_u32
+              frames_bank = 1_u32 if frames_bank == 0_u32
+            end
+          end
+        end
+
+        return ProgramProfile.new(
+          phases: phases,
+          boot_messages: boot_messages,
+          loop_start_phase: loop_start,
+          is_animated: is_animated,
+          has_button_checks: has_button_checks,
+          is_inline_assembly: is_inline_assembly,
+          inline_asm_words: inline_asm_words,
+          has_audio: has_audio,
+          is_dvd_screensaver: is_dvd_screensaver,
+          bank_dur_ms: bank_dur,
+          frames_per_bank: frames_bank
+        )
       end
     rescue ex
-          end
+    end
   end
 
   # Default Citrine PS2 fallback screen

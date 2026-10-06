@@ -38,17 +38,31 @@ module Citrine
 
         emitter.lui(T0, 0x7000)      # SPRAM base: 0x70000000
 
-        # Zero out 16KB SPRAM (0x70000000 .. 0x70003FFF)
-        emitter.move(T1, ZERO)
-        emitter.ori(T2, ZERO, 4096)  # 4096 words = 16384 bytes
+        # Fast 128-bit Quadword SPRAM Zeroing (16 KB = 256 iterations x 64 bytes)
+        emitter.ori(T1, ZERO, 256)
         emitter.label("spram_clear_loop")
-        emitter.sw(ZERO, 0, T0)
-        emitter.addiu(T0, T0, 4)
-        emitter.addiu(T1, T1, 1)
-        emitter.bne(T1, T2, "spram_clear_loop")
+        emitter.sq(ZERO, 0, T0)
+        emitter.sq(ZERO, 16, T0)
+        emitter.sq(ZERO, 32, T0)
+        emitter.sq(ZERO, 48, T0)
+        emitter.addiu(T0, T0, 64)
+        emitter.addiu(T1, T1, -1)
+        emitter.bnez(T1, "spram_clear_loop")
         emitter.nop
 
         emitter.lui(T0, 0x7000)
+
+        # Write SPRAM Canary Word at 0x70000000: 0xDEADBEEF
+        emitter.lui(T1, 0xDEAD)
+        emitter.ori(T1, T1, 0xBEEF)
+        emitter.sw(T1, 0, T0)
+
+        # Pin $k0 (Register Base) to 0x70000100 in zero-wait-state SPRAM
+        emitter.lui(K0, 0x7000)
+        emitter.ori(K0, K0, 0x0100)
+
+        # Reset Per-Frame Zero-GC Scratch Bump Arena at 0x70003100
+        emitter.sw(ZERO, 0x3100, T0)
 
         # Neutral analog sticks: RX=128, RY=128, LX=128, LY=128 (0x80808080) at 0x70000020
         emitter.lui(T1, 0x8080)
@@ -172,6 +186,9 @@ module Citrine
         emitter.lw(T1, 4, T0)
         emitter.addiu(T1, T1, 1)
         emitter.sw(T1, 4, T0)
+
+        # Reset per-frame Zero-GC Scratch Bump Arena at 0x70003100
+        emitter.sw(ZERO, 0x3100, T0)
 
         # Render Primary Phase Draw Packet
         if @rodata.phase_addrs.empty?
@@ -1091,8 +1108,8 @@ module Citrine
           emitter.addiu(T5, T5, 600)
           emitter.sw(T5, 0x80, T0)
 
-          # Send seek command to S.IRX: target_bank = T5 / 215
-          emitter.ori(T6, ZERO, 215)
+          # Send seek command to S.IRX: target_bank = T5 / frames_per_bank
+          emitter.ori(T6, ZERO, @profile.frames_per_bank.to_i)
           emitter.divu(T5, T6)
           emitter.mflo(T1)
           emitter.andi(T1, T1, 0xFFFF)
@@ -1125,8 +1142,8 @@ module Citrine
           emitter.label("l1_sub_ok")
           emitter.sw(T5, 0x80, T0)
 
-          # Send seek command to S.IRX: target_bank = T5 / 215
-          emitter.ori(T6, ZERO, 215)
+          # Send seek command to S.IRX: target_bank = T5 / frames_per_bank
+          emitter.ori(T6, ZERO, @profile.frames_per_bank.to_i)
           emitter.divu(T5, T6)
           emitter.mflo(T1)
           emitter.andi(T1, T1, 0xFFFF)
@@ -1155,8 +1172,8 @@ module Citrine
           emitter.addiu(T5, T5, 240)
           emitter.sw(T5, 0x80, T0)
 
-          # Send seek command to S.IRX: target_bank = T5 / 215
-          emitter.ori(T6, ZERO, 215)
+          # Send seek command to S.IRX: target_bank = T5 / frames_per_bank
+          emitter.ori(T6, ZERO, @profile.frames_per_bank.to_i)
           emitter.divu(T5, T6)
           emitter.mflo(T1)
           emitter.andi(T1, T1, 0xFFFF)
@@ -1189,8 +1206,8 @@ module Citrine
           emitter.label("l2_sub_ok")
           emitter.sw(T5, 0x80, T0)
 
-          # Send seek command to S.IRX: target_bank = T5 / 215
-          emitter.ori(T6, ZERO, 215)
+          # Send seek command to S.IRX: target_bank = T5 / frames_per_bank
+          emitter.ori(T6, ZERO, @profile.frames_per_bank.to_i)
           emitter.divu(T5, T6)
           emitter.mflo(T1)
           emitter.andi(T1, T1, 0xFFFF)
@@ -1515,9 +1532,12 @@ module Citrine
         RuntimeSubroutines.emit_dma02_wait(emitter)
         RuntimeSubroutines.emit_dma_reset(emitter)
         RuntimeSubroutines.emit_debug_puts(emitter)
-        RuntimeSubroutines.emit_native_stubs(emitter)
+        RuntimeSubroutines.emit_native_stubs(emitter, @profile)
         RuntimeSubroutines.emit_inline_asm(emitter, @profile.inline_asm_words)
         RuntimeSubroutines.emit_digit_quad_updater(emitter, @rodata.digit_table_addr)
+
+        # Optimize branch delay slots across the entire EE .text segment
+        emitter.optimize_delay_slots!
 
         # Pad .text to 16,384 bytes
         emitter.pad_to(TEXT_SIZE.to_i32)

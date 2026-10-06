@@ -109,6 +109,17 @@ module Citrine
         emit((0x3F_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
       end
 
+      # Load Quadword (128-bit) - EE MIPS R5900
+      def lq(rt : Int32, offset : Int32, base : Int32)
+        emit((0x1E_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
+      end
+
+      # Store Quadword (128-bit) - EE MIPS R5900
+      def sq(rt : Int32, offset : Int32, base : Int32)
+        emit((0x1F_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
+      end
+
+
       def lbu(rt : Int32, offset : Int32, base : Int32)
         emit((0x24_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
       end
@@ -240,6 +251,243 @@ module Citrine
       def bal(target_label : String)
         @fixups << {@words.size, target_label, :bal}
         emit((0x01_u32 << 26) | (0x11_u32 << 16))
+      end
+
+      # Performs branch delay slot optimization pass:
+      # If a branch or jump at index `i` is followed by a `nop` at `i + 1`,
+      # and the preceding instruction at `i - 1` is safe to move into the delay slot:
+      # 1. Swaps `cand` into `i + 1` (replacing `nop`)
+      # 2. Removes `cand` at `i - 1`
+      # 3. Updates all label addresses and fixup indices accordingly.
+      # Must be called BEFORE resolve!.
+      def optimize_delay_slots! : Int32
+        optimized_count = 0
+        i = 1
+
+        label_addrs = @labels.values.to_set
+        delay_slots = Set(Int32).new
+
+        while i < @words.size - 1
+          branch_word = @words[i]
+          next_word = @words[i + 1]
+
+          if next_word == 0_u32 && is_branch_or_jump?(branch_word)
+            cand_idx = i - 1
+            cand_word = @words[cand_idx]
+
+            cand_vaddr = @base_vaddr + (cand_idx.to_u32 * 4)
+            branch_vaddr = @base_vaddr + (i.to_u32 * 4)
+            delay_vaddr = @base_vaddr + ((i + 1).to_u32 * 4)
+
+            if !delay_slots.includes?(cand_idx) &&
+               !label_addrs.includes?(cand_vaddr) &&
+               !label_addrs.includes?(branch_vaddr) &&
+               !label_addrs.includes?(delay_vaddr) &&
+               can_fill_delay_slot?(cand_word, branch_word)
+
+              # Relocate cand_word into delay slot (replacing nop at i + 1)
+              @words[i + 1] = cand_word
+              # Delete cand_word at i - 1
+              @words.delete_at(cand_idx)
+
+              # Update all labels with virtual address > cand_vaddr: subtract 4 bytes
+              @labels.each do |lname, laddr|
+                if laddr > cand_vaddr
+                  @labels[lname] = laddr - 4_u32
+                end
+              end
+              label_addrs = @labels.values.to_set
+
+              # Update fixups:
+              # For any fixup with index == i: it was at i, now at i - 1
+              # For any fixup with index > i: index decreases by 1
+              @fixups.map! do |fidx, flabel, ftype|
+                if fidx == i
+                  {fidx - 1, flabel, ftype}
+                elsif fidx > i
+                  {fidx - 1, flabel, ftype}
+                else
+                  {fidx, flabel, ftype}
+                end
+              end
+
+              # Mark the new delay slot position (which is now at index i)
+              delay_slots.add(i)
+
+              optimized_count += 1
+              # The branch is now at index i - 1, its delay slot is at i.
+              # Proceed to i + 1 for subsequent instructions
+              i += 1
+              next
+            end
+          end
+
+          i += 1
+        end
+
+        optimized_count
+      end
+
+      private def is_branch_or_jump?(word : UInt32) : Bool
+        opcode = (word >> 26) & 0x3F
+        case opcode
+        when 0x00 # SPECIAL: jr (0x08), jalr (0x09)
+          funct = word & 0x3F
+          funct == 0x08_u32 || funct == 0x09_u32
+        when 0x01 # REGIMM: bltz (0x00), bgez (0x01), bal (0x11)
+          rt = (word >> 16) & 0x1F
+          rt == 0x00_u32 || rt == 0x01_u32 || rt == 0x11_u32
+        when 0x02, 0x03, 0x04, 0x05, 0x06, 0x07 # j, jal, beq, bne, blez, bgtz
+          true
+        else
+          false
+        end
+      end
+
+      private def branch_reads_registers(word : UInt32) : Array(Int32)
+        opcode = (word >> 26) & 0x3F
+        rs = ((word >> 21) & 0x1F).to_i
+        rt = ((word >> 16) & 0x1F).to_i
+
+        case opcode
+        when 0x00 # SPECIAL: jr, jalr
+          funct = word & 0x3F
+          (funct == 0x08_u32 || funct == 0x09_u32) ? [rs] : [] of Int32
+        when 0x01 # REGIMM: bltz, bgez, bal
+          [rs]
+        when 0x02, 0x03 # j, jal
+          [] of Int32
+        when 0x04, 0x05 # beq, bne
+          [rs, rt]
+        when 0x06, 0x07 # blez, bgtz
+          [rs]
+        else
+          [] of Int32
+        end
+      end
+
+      private def branch_writes_registers(word : UInt32) : Array(Int32)
+        opcode = (word >> 26) & 0x3F
+        case opcode
+        when 0x03 # jal
+          [31]
+        when 0x01 # REGIMM: bal
+          rt = ((word >> 16) & 0x1F).to_i
+          rt == 0x11 ? [31] : [] of Int32
+        when 0x00 # SPECIAL: jalr
+          funct = word & 0x3F
+          if funct == 0x09
+            rd = ((word >> 11) & 0x1F).to_i
+            rd > 0 ? [rd] : [31]
+          else
+            [] of Int32
+          end
+        else
+          [] of Int32
+        end
+      end
+
+      private def instruction_writes_register(word : UInt32) : Int32?
+        opcode = (word >> 26) & 0x3F
+        case opcode
+        when 0x00 # SPECIAL
+          funct = word & 0x3F
+          case funct
+          when 0x08 # jr
+            nil
+          when 0x09 # jalr (writes rd, default RA=31)
+            rd = ((word >> 11) & 0x1F).to_i
+            rd > 0 ? rd : 31
+          when 0x18, 0x19, 0x1A, 0x1B, 0x0C, 0x0D # mult, multu, div, divu, syscall, break
+            nil
+          else
+            rd = ((word >> 11) & 0x1F).to_i
+            rd > 0 ? rd : nil
+          end
+        when 0x01 # REGIMM: bal writes RA (31)
+          rt = ((word >> 16) & 0x1F).to_i
+          rt == 0x11 ? 31 : nil
+        when 0x03 # jal
+          31
+        when 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F # addi, addiu, slti, sltiu, andi, ori, xori, lui
+          rt = ((word >> 16) & 0x1F).to_i
+          rt > 0 ? rt : nil
+        when 0x1E, 0x20, 0x21, 0x23, 0x24, 0x25, 0x37 # loads: lq, lb, lh, lw, lbu, lhu, ld
+          rt = ((word >> 16) & 0x1F).to_i
+          rt > 0 ? rt : nil
+        else
+          nil
+        end
+      end
+
+      private def instruction_reads_registers(word : UInt32) : Array(Int32)
+        opcode = (word >> 26) & 0x3F
+        rs = ((word >> 21) & 0x1F).to_i
+        rt = ((word >> 16) & 0x1F).to_i
+
+        case opcode
+        when 0x00 # SPECIAL
+          funct = word & 0x3F
+          case funct
+          when 0x00, 0x02, 0x03 # sll, srl, sra (reads rt)
+            rt > 0 ? [rt] : [] of Int32
+          when 0x10, 0x12 # mfhi, mflo
+            [] of Int32
+          when 0x08, 0x09 # jr, jalr (reads rs)
+            rs > 0 ? [rs] : [] of Int32
+          else
+            reads = [] of Int32
+            reads << rs if rs > 0
+            reads << rt if rt > 0
+            reads
+          end
+        when 0x0F # lui (reads nothing)
+          [] of Int32
+        when 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E # addi, addiu, slti, sltiu, andi, ori, xori
+          rs > 0 ? [rs] : [] of Int32
+        when 0x1E, 0x20, 0x21, 0x23, 0x24, 0x25, 0x37 # loads: base = rs (including lq)
+          rs > 0 ? [rs] : [] of Int32
+        when 0x1F, 0x28, 0x29, 0x2B, 0x3F # stores: reads rt and base rs (including sq)
+          reads = [] of Int32
+          reads << rs if rs > 0
+          reads << rt if rt > 0
+          reads
+        else
+          reads = [] of Int32
+          reads << rs if rs > 0
+          reads << rt if rt > 0
+          reads
+        end
+      end
+
+      private def can_fill_delay_slot?(cand_word : UInt32, branch_word : UInt32) : Bool
+        return false if cand_word == 0_u32 # Don't relocate nop into nop
+        return false if is_branch_or_jump?(cand_word)
+
+        cand_opcode = (cand_word >> 26) & 0x3F
+        return false if cand_opcode == 0x10 || cand_opcode == 0x12 # COP0, COP2
+        if cand_opcode == 0x00
+          funct = cand_word & 0x3F
+          return false if funct == 0x0C || funct == 0x0D # syscall, break
+          return false if cand_word == 0x0000040F_u32     # sync.p
+        end
+
+        branch_reads = branch_reads_registers(branch_word)
+        branch_writes = branch_writes_registers(branch_word)
+
+        if wr = instruction_writes_register(cand_word)
+          return false if branch_reads.includes?(wr)
+        end
+
+        branch_writes.each do |bw|
+          if wr = instruction_writes_register(cand_word)
+            return false if wr == bw
+          end
+          cand_reads = instruction_reads_registers(cand_word)
+          return false if cand_reads.includes?(bw)
+        end
+
+        true
       end
 
       def resolve!

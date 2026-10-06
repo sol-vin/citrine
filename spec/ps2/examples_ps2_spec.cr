@@ -192,5 +192,17 @@ describe "Citrine PS2 Examples Runner Suite" do
     result.should_boot_cleanly
     result.should_preserve_spram
   end
+
+  it "boots and verifies Example 17: Inline Assembly & COP0 Telemetry" do
+    tc = Citrine::Spec::Ps2TestCase.new("17_inline_assembly")
+    tc.target("examples/17_inline_assembly/main.cr")
+    bytes, sm = tc.compile
+    bytes.size.should be > 18
+    tc.max_registers.should be <= 1024
+
+    result = tc.boot_pcsx2(timeout: 2.seconds)
+    result.should_boot_cleanly
+    result.should_preserve_spram
+  end
 end
 

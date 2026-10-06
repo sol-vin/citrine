@@ -152,6 +152,150 @@ module Citrine
             known_ints.delete(dst)
           end
 
+        when Opcode::Bitwise
+          dst = inst.dst
+          a = inst.a
+          b = inst.b
+          subop = inst.subop
+          case subop
+          when BitwiseSubOp::And.value
+            if known_ints.has_key?(a) && known_ints.has_key?(b)
+              val = known_ints[a] & known_ints[b]
+              result[idx] = Instruction.encode_r_imm(Opcode::LoadImm, LoadImmSubOp::Int16.value, dst, (val & 0xFFFF).to_u16)
+              known_ints[dst] = val
+            elsif (known_ints.has_key?(b) && known_ints[b] == 0) || (known_ints.has_key?(a) && known_ints[a] == 0)
+              result[idx] = Instruction.encode_r_imm(Opcode::LoadImm, LoadImmSubOp::Zero.value, dst, 0_u16)
+              known_ints[dst] = 0
+            elsif known_ints.has_key?(b) && known_ints[b] == -1
+              result[idx] = Instruction.encode_rrr(Opcode::Move, MoveSubOp::Move32.value, dst, a, 0_u8)
+              if known_ints.has_key?(a)
+                known_ints[dst] = known_ints[a]
+              else
+                known_ints.delete(dst)
+              end
+            elsif known_ints.has_key?(a) && known_ints[a] == -1
+              result[idx] = Instruction.encode_rrr(Opcode::Move, MoveSubOp::Move32.value, dst, b, 0_u8)
+              if known_ints.has_key?(b)
+                known_ints[dst] = known_ints[b]
+              else
+                known_ints.delete(dst)
+              end
+            else
+              known_ints.delete(dst)
+            end
+
+          when BitwiseSubOp::Or.value
+            if known_ints.has_key?(a) && known_ints.has_key?(b)
+              val = known_ints[a] | known_ints[b]
+              result[idx] = Instruction.encode_r_imm(Opcode::LoadImm, LoadImmSubOp::Int16.value, dst, (val & 0xFFFF).to_u16)
+              known_ints[dst] = val
+            elsif known_ints.has_key?(b) && known_ints[b] == 0
+              result[idx] = Instruction.encode_rrr(Opcode::Move, MoveSubOp::Move32.value, dst, a, 0_u8)
+              if known_ints.has_key?(a)
+                known_ints[dst] = known_ints[a]
+              else
+                known_ints.delete(dst)
+              end
+            elsif known_ints.has_key?(a) && known_ints[a] == 0
+              result[idx] = Instruction.encode_rrr(Opcode::Move, MoveSubOp::Move32.value, dst, b, 0_u8)
+              if known_ints.has_key?(b)
+                known_ints[dst] = known_ints[b]
+              else
+                known_ints.delete(dst)
+              end
+            else
+              known_ints.delete(dst)
+            end
+
+          when BitwiseSubOp::Xor.value
+            if known_ints.has_key?(a) && known_ints.has_key?(b)
+              val = known_ints[a] ^ known_ints[b]
+              result[idx] = Instruction.encode_r_imm(Opcode::LoadImm, LoadImmSubOp::Int16.value, dst, (val & 0xFFFF).to_u16)
+              known_ints[dst] = val
+            elsif a == b
+              result[idx] = Instruction.encode_r_imm(Opcode::LoadImm, LoadImmSubOp::Zero.value, dst, 0_u16)
+              known_ints[dst] = 0
+            elsif known_ints.has_key?(b) && known_ints[b] == 0
+              result[idx] = Instruction.encode_rrr(Opcode::Move, MoveSubOp::Move32.value, dst, a, 0_u8)
+              if known_ints.has_key?(a)
+                known_ints[dst] = known_ints[a]
+              else
+                known_ints.delete(dst)
+              end
+            elsif known_ints.has_key?(a) && known_ints[a] == 0
+              result[idx] = Instruction.encode_rrr(Opcode::Move, MoveSubOp::Move32.value, dst, b, 0_u8)
+              if known_ints.has_key?(b)
+                known_ints[dst] = known_ints[b]
+              else
+                known_ints.delete(dst)
+              end
+            else
+              known_ints.delete(dst)
+            end
+          else
+            known_ints.delete(dst)
+          end
+
+        when Opcode::Shift
+          dst = inst.dst
+          a = inst.a
+          b = inst.b
+          subop = inst.subop
+          case subop
+          when ShiftSubOp::Sll.value
+            if known_ints.has_key?(a) && known_ints.has_key?(b)
+              shamt = known_ints[b] & 31
+              val = known_ints[a] << shamt
+              result[idx] = Instruction.encode_r_imm(Opcode::LoadImm, LoadImmSubOp::Int16.value, dst, (val & 0xFFFF).to_u16)
+              known_ints[dst] = val
+            elsif known_ints.has_key?(b) && known_ints[b] == 0
+              result[idx] = Instruction.encode_rrr(Opcode::Move, MoveSubOp::Move32.value, dst, a, 0_u8)
+              if known_ints.has_key?(a)
+                known_ints[dst] = known_ints[a]
+              else
+                known_ints.delete(dst)
+              end
+            else
+              known_ints.delete(dst)
+            end
+
+          when ShiftSubOp::Srl.value
+            if known_ints.has_key?(a) && known_ints.has_key?(b)
+              shamt = known_ints[b] & 31
+              val = ((known_ints[a].to_u32) >> shamt).to_i32
+              result[idx] = Instruction.encode_r_imm(Opcode::LoadImm, LoadImmSubOp::Int16.value, dst, (val & 0xFFFF).to_u16)
+              known_ints[dst] = val
+            elsif known_ints.has_key?(b) && known_ints[b] == 0
+              result[idx] = Instruction.encode_rrr(Opcode::Move, MoveSubOp::Move32.value, dst, a, 0_u8)
+              if known_ints.has_key?(a)
+                known_ints[dst] = known_ints[a]
+              else
+                known_ints.delete(dst)
+              end
+            else
+              known_ints.delete(dst)
+            end
+
+          when ShiftSubOp::Sra.value
+            if known_ints.has_key?(a) && known_ints.has_key?(b)
+              shamt = known_ints[b] & 31
+              val = known_ints[a] >> shamt
+              result[idx] = Instruction.encode_r_imm(Opcode::LoadImm, LoadImmSubOp::Int16.value, dst, (val & 0xFFFF).to_u16)
+              known_ints[dst] = val
+            elsif known_ints.has_key?(b) && known_ints[b] == 0
+              result[idx] = Instruction.encode_rrr(Opcode::Move, MoveSubOp::Move32.value, dst, a, 0_u8)
+              if known_ints.has_key?(a)
+                known_ints[dst] = known_ints[a]
+              else
+                known_ints.delete(dst)
+              end
+            else
+              known_ints.delete(dst)
+            end
+          else
+            known_ints.delete(dst)
+          end
+
         when Opcode::Call, Opcode::CallNative, Opcode::FiberOp, Opcode::Ps2Hw, Opcode::InlineAsm
           known_ints.clear
 
@@ -266,6 +410,57 @@ module Citrine
           end
         end
 
+        # 4. Fused Multiply-Subtract: OP_MUL + OP_SUB -> OP_FUSED_MADD (MsubI32)
+        if inst1.opcode == Opcode::Mul && inst2.opcode == Opcode::Sub
+          prod_reg = inst1.dst
+          sub_dst = inst2.dst
+          if inst2.a == sub_dst && inst2.b == prod_reg
+            result[i] = Instruction.encode_rrr(Opcode::Sys, SysSubOp::Nop.value, 0_u8, 0_u8, 0_u8)
+            result[i + 1] = Instruction.encode_fused_madd(FusedMaddSubOp::MsubI32, sub_dst, inst1.a, inst1.b)
+            i += 2
+            next
+          end
+        end
+
+        # 5. Fused Float MADD & MSUB: OP_FLOAT_ALU(Mul) + OP_FLOAT_ALU(Add/Sub) -> OP_FUSED_MADD
+        if inst1.opcode == Opcode::FloatAlu && inst1.subop == FloatAluSubOp::Fmul.value && inst2.opcode == Opcode::FloatAlu
+          prod_reg = inst1.dst
+          float_dst = inst2.dst
+          if inst2.subop == FloatAluSubOp::Fadd.value && ((inst2.a == prod_reg && inst2.b == float_dst) || (inst2.b == prod_reg && inst2.a == float_dst))
+            result[i] = Instruction.encode_rrr(Opcode::Sys, SysSubOp::Nop.value, 0_u8, 0_u8, 0_u8)
+            result[i + 1] = Instruction.encode_fused_madd(FusedMaddSubOp::MaddF32, float_dst, inst1.a, inst1.b)
+            i += 2
+            next
+          elsif inst2.subop == FloatAluSubOp::Fsub.value && (inst2.a == float_dst && inst2.b == prod_reg)
+            result[i] = Instruction.encode_rrr(Opcode::Sys, SysSubOp::Nop.value, 0_u8, 0_u8, 0_u8)
+            result[i + 1] = Instruction.encode_fused_madd(FusedMaddSubOp::MsubF32, float_dst, inst1.a, inst1.b)
+            i += 2
+            next
+          end
+        end
+
+        # 6. Fused Vector2 Dot Product: OP_VEC2_MATH(Mul) + OP_FLOAT_ALU(Add)/OP_ADD -> OP_FUSED_MADD (DotProductVec2)
+        if inst1.opcode == Opcode::Vec2Math && inst1.subop == Vec2MathSubOp::Mul.value
+          prod_reg = inst1.dst
+          if inst2.opcode == Opcode::FloatAlu && inst2.subop == FloatAluSubOp::Fadd.value
+            dot_dst = inst2.dst
+            if (inst2.a == prod_reg && inst2.b == dot_dst) || (inst2.b == prod_reg && inst2.a == dot_dst)
+              result[i] = Instruction.encode_rrr(Opcode::Sys, SysSubOp::Nop.value, 0_u8, 0_u8, 0_u8)
+              result[i + 1] = Instruction.encode_fused_madd(FusedMaddSubOp::DotProductVec2, dot_dst, inst1.a, inst1.b)
+              i += 2
+              next
+            end
+          elsif inst2.opcode == Opcode::Add
+            dot_dst = inst2.dst
+            if (inst2.a == prod_reg && inst2.b == dot_dst) || (inst2.b == prod_reg && inst2.a == dot_dst)
+              result[i] = Instruction.encode_rrr(Opcode::Sys, SysSubOp::Nop.value, 0_u8, 0_u8, 0_u8)
+              result[i + 1] = Instruction.encode_fused_madd(FusedMaddSubOp::DotProductVec2, dot_dst, inst1.a, inst1.b)
+              i += 2
+              next
+            end
+          end
+        end
+
         i += 1
       end
 
@@ -280,6 +475,19 @@ module Citrine
       result.each_with_index do |inst, idx|
         if jump_targets.includes?(idx)
           dead = false
+        end
+
+        # Redundant unconditional jump to the immediately following instruction
+        if inst.opcode == Opcode::Jump
+          target = if inst.subop == JumpSubOp::JumpRel24.value
+                     idx + 1 + inst.jump_offset24
+                   else
+                     idx + 1 + inst.branch_offset.to_i32
+                   end
+          if target == idx + 1
+            result[idx] = Instruction.encode_rrr(Opcode::Sys, SysSubOp::Nop.value, 0_u8, 0_u8, 0_u8)
+            next
+          end
         end
 
         if dead

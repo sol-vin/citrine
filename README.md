@@ -1,113 +1,186 @@
-# Citrine: Crystal Virtual Machine & Toolkit for PlayStation 2
+<p align="center">
+  <img src="logo.png" alt="Citrine PS2 SDK" width="220" />
+</p>
 
-[![Citrine CI](https://github.com/sol-vin/citrine/actions/workflows/ci.yml/badge.svg)](https://github.com/sol-vin/citrine/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Crystal](https://img.shields.io/badge/Crystal->=1.10.0-black?logo=crystal)](https://crystal-lang.org/)
+<h1 align="center">Citrine</h1>
 
-**Citrine** brings the expressive elegance, safety, and joy of the **Crystal programming language** to homebrew game development on the **Sony PlayStation 2 (PS2)**.
+<p align="center">
+  <strong>Crystal Virtual Machine, Compiler & Toolkit for Sony PlayStation 2</strong>
+</p>
 
-Rather than forcing developers to install a massive MIPS cross-compilation toolchain or fight the Emotion Engine's non-standard R5900 core, Citrine uses a **custom, hardware-tailored Virtual Machine (`citrine-vm`)** and a **high-performance Raylib-style C runtime (`citrine-rt`)**.
-
-Games are compiled into compact **Citrine ByteCode (`.cbc`)** in **under 50 milliseconds**, executed on a pre-compiled PS2 runner ELF (`citrine_runner.elf`), and **hot-reloaded live on the console in real time**.
+<p align="center">
+  <a href="https://github.com/sol-vin/citrine/actions/workflows/ci.yml"><img src="https://github.com/sol-vin/citrine/actions/workflows/ci.yml/badge.svg" alt="Citrine CI" /></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT" /></a>
+  <a href="https://crystal-lang.org/"><img src="https://img.shields.io/badge/Crystal->=1.10.0-black?logo=crystal" alt="Crystal" /></a>
+  <a href="https://github.com/sol-vin/citrine"><img src="https://img.shields.io/badge/Target-PS2%20EE%20R5900-blue?logo=playstation" alt="Target: PS2 EE R5900" /></a>
+</p>
 
 ---
 
-## Architecture Overview
+## Overview
+
+**Citrine** brings the expressive elegance, type safety, and developer joy of the **Crystal programming language** to homebrew game development on the **Sony PlayStation 2 (PS2)**.
+
+Rather than wrestling with complex MIPS cross-compilation toolchains, fragile Docker containers, or the intricacies of the Emotion Engine's non-standard R5900 core, Citrine provides:
+
+1. **Citrine-32 Virtual Machine (`citrine-vm`)**: A hardware-tailored virtual machine designed specifically for the Emotion Engine architecture with 32 compact opcodes, 128-bit QWORD register values, and zero-wait-state SPRAM execution.
+2. **Native MIPS R5900 JIT & Machine Code Emitter (`Citrine::ElfBuilder`)**: Emits native PlayStation 2 executable ELFs with direct register mapping, peephole instruction fusion, and zero-overhead C runtime bindings.
+3. **Raylib-Style Game Engine (`citrine-rt`)**: Simple, productive immediate-mode rendering for the Graphics Synthesizer (GS), DualShock 2 controller polling with analog pressure and rumble, and hardware-accelerated sound.
+4. **Hardware Optical Audio Streaming (`S.IRX` & `.cas`)**: Asynchronous double-buffered optical disc streaming running on the IOP coprocessor and SPU2 audio processor for gapless CD-DA background music.
+5. **Zero-Dependency Disc Packaging (`Citrine::IsoBuilder`)**: Pure-Crystal ISO9660 disc generator that outputs bootable PS2 discs in milliseconds with no external dependencies like `mkisofs`.
+6. **Sub-50ms Compile & Live Hot-Reloading**: Instant compilation, disc creation, and automated boot in PCSX2 or real console hardware via `citrine run --watch`.
+
+---
+
+## Architecture
 
 ```
-+-------------------------------------------------------------+
-|                      Crystal Game Code                      |
-|                  (Raylib-Style Game Logic)                  |
-+-------------------------------------------------------------+
-                              |
-                     [citrine compile]
-                     (Crystal::Parser)
-                              |
-       +----------------------+----------------------+
-       |                                             |
-       v                                             v
-+---------------+                             +---------------+
-|   game.cbc    |                             |  game.cbcsym  |
-|  (Bytecode)   |                             | (Source Map)  |
-+---------------+                             +---------------+
-       |                                             |
-       |  (PCSX2 host: / PS2Link Network)            |
-       v                                             v
-+-------------------------------------------------------------+
-|               PlayStation 2 (Emotion Engine)                |
-|                                                             |
-|  [Citrine-VM Core]                                          |
-|    * 128-bit QWORD Values (Single sq/lq cycle)             |
-|    * 1,024 Register Window pinned in 16KB SPRAM (0x70000000)|
-|    * Computed goto Direct-Threaded Dispatch                 |
-|    * Zero-GC Memory (Frame Bump Arena + Level Arena)        |
-|                                                             |
-|  [citrine-rt (PS2 Native Engine)]                           |
-|    * GS 2D Primitives, Textures, and Sprites (GIF-DMA)      |
-|    * DualShock 2 Controller Polling & Rumble (libpad)       |
-|    * SPU2 Sound Effects & BGM Streaming (audsrv)            |
-|    * On-Screen Crash Screen & Diagnostic HUD Overlay        |
-+-------------------------------------------------------------+
-                               ^
-                               | (TCP GDB Port 1234)
-                      [cradare2 Debugger]
++--------------------------------------------------------------------------+
+|                            Crystal Game Code                             |
+|             (Raylib-Style API, InputMap, Fibers, Math, Audio)            |
++--------------------------------------------------------------------------+
+                                     |
+                       [citrine compile / citrine run]
+                      (Crystal Parser & AST Lowering)
+                                     |
+           +-------------------------+-------------------------+
+           v                                                   v
+   +---------------+                                   +---------------+
+   |   game.cbc    | (Citrine-32 Bytecode)             |  game.cbcsym  | (Source Map)
+   +---------------+                                   +---------------+
+           |                                                   |
+           v                                                   |
++---------------------+                                        |
+| Citrine::IsoBuilder |                                        |
+|  * Pure Crystal     |                                        |
+|  * ISO9660 Disc     |                                        |
+|  * SYSTEM.CNF       |                                        |
++---------------------+                                        |
+           |                                                   |
+           v                                                   |
+   +---------------+                                           |
+   |   game.iso    |                                           |
+   +---------------+                                           |
+           |                                                   |
+   (PCSX2 / Hardware)                                          |
+           v                                                   v
++--------------------------------------------------------------------------+
+|                      Sony PlayStation 2 Hardware                         |
+|                                                                          |
+|  [Emotion Engine CPU (MIPS R5900 @ 294.912 MHz)]                         |
+|    * Citrine-32 ISA: 32 compact opcodes, 128-byte cache-locked dispatch  |
+|    * 128-bit QWORD Values: Single-cycle copies via native lq and sq      |
+|    * SPRAM Register Window: $k0 pinned to 0x70000100 (Zero cache miss)   |
+|    * 0xDEADBEEF Stack Canary: Hardware register overrun protection       |
+|    * 4-Tier Zero-GC Memory: Frame Scratch Pool + Scene Context Arenas    |
+|    * Inline MIPS Assembly: First-class asm, COP0 timers, VU0 SIMD        |
+|                                                                          |
+|  [Graphics Synthesizer (GS @ 147.456 MHz)]                               |
+|    * 4 MB internal eDRAM (48 GB/s fillrate)                              |
+|    * GIF DMA Packet Engine: 2D primitives, CLUT textures, 3D wireframes  |
+|                                                                          |
+|  [IOP Coprocessor & SPU2 Sound Subsystem]                                |
+|    * S.IRX: Embedded asynchronous optical disc streaming sound driver   |
+|    * Double-buffered ping-pong DMA buffers (SPU2 0x15000 / 0x19000)      |
+|    * .cas ADPCM streaming container with real-time seeking and volume   |
+|                                                                          |
+|  [On-Screen Diagnostic HUD & Crash Screen]                               |
+|    * Real-time 60 FPS split-meter, CPU/GS time, and SPRAM allocation     |
+|    * Styled PS2 BSOD crash handler showing source file, line, and state  |
++--------------------------------------------------------------------------+
+                                     ^
+                                     | (TCP GDB Port 1234 / 28011)
+                       [cradare2 / radare2 Debugger]
 ```
 
 ---
 
 ## Why a Custom VM for PlayStation 2?
 
-1. **128-Bit QWORD Values**:
-   The Emotion Engine CPU natively processes 128-bit Quadwords. Citrine’s fundamental `Value` is a 16-byte aligned tagged union. Register copies execute in a single CPU cycle via the EE's native `lq` (Load Quadword) and `sq` (Store Quadword) instructions.
-2. **Zero Cache Latency in 16KB SPRAM**:
-   The EE CPU has an 8KB D-cache that easily thrashes. Citrine avoids this by pinning the active **1,024 VM virtual registers directly into the 16KB Scratchpad RAM (SPRAM at `0x70000000`)**, guaranteeing 0-cycle cache latency.
-3. **Zero-GC Memory Design**:
-   Traditional tracing garbage collectors cause frame stutters. Citrine uses a tiered zero-GC architecture:
-   - **Value Types**: `Vector2`, `Color`, integers, floats, and handles reside on the SPRAM register stack.
-   - **Frame Bump Arena**: Temporary strings and tables are allocated in a bump arena that resets to zero every frame at `Citrine.end_drawing`.
-   - **Level Arena**: Long-lived assets are allocated per level and freed in bulk on scene transition.
-   - **Result**: Locked 60 FPS deterministic gameplay.
-4. **No Cross-Compiler Needed**:
-   Game creators only need the `crystal` compiler. You do not need Docker, PS2SDK, or MIPS GCC installed on your PC to make PS2 games!
+Running high-level game code at locked 60 FPS on a 294 MHz in-order MIPS processor requires bypassing the severe architectural bottlenecks of the console:
+
+### 1. 128-bit QWORD Values (Single-Cycle Memory)
+The Emotion Engine CPU natively processes 128-bit Quadwords. Citrine’s fundamental `Value` is a 16-byte aligned tagged union. Register copies and value transfers execute in a single CPU cycle via the EE's native `lq` (Load Quadword) and `sq` (Store Quadword) instructions.
+
+### 2. SPRAM-Locked Register Window ($k0 @ `0x70000100`)
+The EE's L1 Data Cache is only 8 KB (or 16 KB 2-way) and thrashes heavily when game logic and 3D rendering share memory. Citrine completely bypasses L1 D-Cache thrashing by pinning the active **VM register window directly into the 16 KB Scratchpad RAM (SPRAM at `0x70000000`)** with register base pointer `$k0 = 0x70000100`. Virtual register reads and writes operate with **zero wait-states** and zero cache latency.
+
+### 3. Citrine-32 Instruction Set Architecture
+Citrine-32 compresses all VM semantics into **32 compact primary opcodes** with 32-bit fixed-width instruction words. The primary dispatch table is only 128 bytes, fitting entirely within **two L1 cache lines**. Hand-scheduled peephole fusions (`BranchCmp`, `LoopDecBr`, `FusedMadd`) combine comparisons and jumps into single-dispatch execution units.
+
+### 4. 4-Tier Deterministic Zero-GC Memory Architecture
+Stop-the-world garbage collection pauses cause frame drops and audio hitches. Citrine eliminates GC pauses entirely through a 4-tier hybrid memory model:
+- **Tier 1: Per-Frame Scratch Pool (256 KB @ `0x00400000`)**: String interpolations, temporary structs, and vector math buffers are allocated via bump pointer and wiped unconditionally at V-Blank (`Citrine.end_drawing`) in 2 CPU cycles.
+- **Tier 2: VM Context Arenas (`make_vm_context(:level)`)**: Scene-specific entities and game states are allocated in isolated memory arenas and wiped in bulk upon scene transitions.
+- **Tier 3: Explicit Pointer RAII (`Pointer.malloc` / `Pointer.free`)**: Long-lived textures, VRAM allocations, and audio buffers use deterministic 8-byte aligned lifecycle management.
+- **Tier 4: Idle V-Blank Mark-Sweep**: An optional background safety net that runs exclusively during idle VSync intervals when the CPU waits on the Graphics Synthesizer.
+
+### 5. Hardware-Accelerated Optical Audio Streaming (`S.IRX`)
+Optical disc drives cannot handle random small seeks while maintaining high transfer rates. Citrine features a dedicated embedded sound driver (`S.IRX`) running on the IOP coprocessor. By double-buffering audio blocks between SPU2 memory addresses `0x15000` and `0x19000` using asynchronous DMA, the engine streams stereo audio up to 96 kbps with zero impact on the EE's 60 FPS graphics pipeline.
 
 ---
 
 ## CLI Toolkit (`citrine`)
 
-Install the shard or build the CLI:
+Install the shard or build the CLI executable:
 
 ```bash
 shards build citrine
 ```
 
-### Commands
+The compiled binary will be placed at `bin/citrine` (or `bin/citrine.exe` on Windows).
 
-| Command | Description |
-| :--- | :--- |
-| `citrine new <project_name>` | Scaffold a new PS2 game project with template code and assets |
-| `citrine compile <file.cr> [-o <out.cbc>]` | Compile Crystal source into `.cbc` bytecode and `.cbcsym` source map |
-| `citrine run <file.cr> [--watch]` | Compile and boot game in PCSX2 with live hot-reloading |
-| `citrine disasm <file.cbc>` | Disassemble bytecode into human-readable assembly with source lines |
-| `citrine monitor [--port <port>]` | Connect live telemetry monitor to PS2 / PCSX2 GDB stub |
-| `citrine version` | Display Citrine version |
+### CLI Command Reference
+
+| Command | Usage | Description |
+| :--- | :--- | :--- |
+| `citrine ui` / `tui` | `citrine ui` | Launch the interactive Opal Terminal Dashboard for managing projects, builds, disassemblies, and tests |
+| `citrine compile` | `citrine compile <file.cr> [-o <out.cbc>] [--release]` | Compile Crystal source into Citrine ByteCode (`.cbc`) and source maps (`.cbcsym`) |
+| `citrine iso` | `citrine iso <file.cr \| file.cbc> [-o game.iso] [--release]` | Package compiled bytecode and assets into a bootable PlayStation 2 ISO9660 disc image |
+| `citrine run` | `citrine run [file.cr \| file.cbc \| game.iso] [options]` | Compile source, generate ISO, and boot in PCSX2 with live log streaming |
+| `citrine debug` | `citrine debug <file.cbc> [--port <port>]` | Launch an interactive radare2 debugging session connected to the PCSX2 GDB stub |
+| `citrine mem-check` | `citrine mem-check [file] [--gdb <port>] [--timeout <s>] [--r2]` | Audit memory leaks, SPRAM canary integrity, and crash states via supervised execution |
+| `citrine test` | `citrine test [spec_path \| iso]` | Run the automated test suite, bytecode verifications, and headless PCSX2 hardware tests |
+| `citrine import` | `citrine import <type> <file> [options]` | Transcode and optimize media via Fluorite and FFmpeg (`video`, `audio`, `cdda`, `texture`, `auto`) |
+| `citrine disasm` | `citrine disasm <file.cbc>` | Disassemble bytecode into human-readable assembly with source maps and symbol annotations |
+| `citrine monitor` | `citrine monitor [--port <port>]` | Connect live telemetry monitor to PS2 / PCSX2 GDB stub for real-time memory inspection |
+| `citrine new` | `citrine new <project_name>` | Scaffold a new Citrine PS2 project structure with templates, config, and assets |
+| `citrine version` | `citrine version` | Display the Citrine toolkit version and target environment information |
+
+### Key `citrine run` Options
+- `--watch`: Watch Crystal source files and asset directories, automatically recompiling and hot-reloading the game on save.
+- `--batch`: Run PCSX2 in headless batch mode for automated test suites and continuous integration.
+- `--host`: Run in the local desktop host simulator (`citrine_host_runner.exe`).
+
+### Key `citrine import` Subcommands
+- `citrine import video cutscene.mp4 --fps 15 --resolution 512x448`: Convert video to PS2 IPU MPEG-2 Program Stream (`.pss`).
+- `citrine import audio track.wav`: Convert audio to Sony SPU2 4-bit ADPCM (`.vag`) or streamed ADPCM container (`.cas`).
+- `citrine import cdda album.wav`: Transcode audio into Red Book CD-DA raw sector streams (2352 bytes/sector).
+- `citrine import texture sprite.png`: Convert images to GS CLUT paletted textures (`.cbt`).
+- `citrine import auto ./assets -o ./build`: Batch-transcode an entire folder of game assets.
 
 ---
 
 ## Writing Games in Crystal
 
-Here is a complete, working game written in Crystal for the PS2:
+Here is a complete game demonstrating the Raylib-style API, DualShock 2 controller input, 2D rendering, and audio:
 
 ```crystal
 require "citrine"
 
+# Initialize 640x448 NTSC display framebuffer
 Citrine.init_window(640, 448, "My PS2 Game")
 Citrine.set_target_fps(60)
+
+# Load background music stream and sound effect
+Citrine.audio_stream_open("cdrom0:\\TRACK01.CAS;1")
+Citrine.audio_stream_play
 
 pos = Vector2.new(320.0, 224.0)
 speed = 4.0
 
 Citrine.main_loop do
-  # DualShock 2 D-Pad & Analog input
+  # DualShock 2 D-Pad & Analog Stick Input
   if Citrine.button_down?(Button::Right)
     pos.x += speed
   elsif Citrine.button_down?(Button::Left)
@@ -120,13 +193,14 @@ Citrine.main_loop do
     pos.y -= speed
   end
 
-  # Rendering
+  # Rendering Pass
   Citrine.begin_drawing
   Citrine.clear_background(Color::Black)
 
-  Citrine.draw_rectangle(pos.x, pos.y, 40, 40, Color::Red)
-  Citrine.draw_circle(pos.x + 20.0, pos.y + 20.0, 10.0, Color::Yellow)
-  Citrine.draw_text("Hello from Crystal on PlayStation 2!", 30, 30, 16, Color::White)
+  # Draw 2D primitives and text
+  Citrine.draw_rectangle(pos.x, pos.y, 48, 48, Color::Red)
+  Citrine.draw_circle(pos.x + 24.0, pos.y + 24.0, 12.0, Color::Yellow)
+  Citrine.draw_text("Hello from Crystal on PlayStation 2!", 30, 30, 18, Color::White)
 
   Citrine.end_drawing
 end
@@ -136,9 +210,9 @@ Citrine.close_window
 
 ---
 
-## Safety Guarantees & Resource Auditing
+## Hardware Safety Guarantees & Budget Auditing
 
-Every time you compile code with `citrine compile`, the **Hardware Budget Checker** statically audits your code:
+Every time you compile code with `citrine compile` or `citrine run`, the **Hardware Budget Checker** statically audits your code:
 
 ```
 [Citrine] Compiling main.cr -> game.cbc...
@@ -152,64 +226,90 @@ Bytecode Size:         618 bytes
 Budget Status: PASSED (Hardware limits verified).
 ```
 
-- **SPRAM Budget**: Warns if any function requests $> 128$ registers; errors if $> 1024$.
-- **VRAM Estimator**: Audits resident texture footprints against the GS 4MB eDRAM pool (~550KB resident texture budget).
-- **SPRAM Stack Canary**: Detects register overruns at runtime before memory corruption can occur.
-- **Infinite Loop Watchdog**: Traps runaway loops executing $> 5,000,000$ instructions without yielding.
-- **On-Screen Crash Handler (PS2 BSOD)**: Upon an exception or panic, freezes gameplay and displays a styled crash screen with the exact Crystal source file, line number, and SPRAM register state.
+- **SPRAM Register Budget**: Audits register pressure per function; warns if any routine requests $> 128$ registers, and halts if $> 1024$.
+- **VRAM Estimator**: Audits resident texture footprints against the GS 4 MB eDRAM pool (~550 KB resident texture budget).
+- **SPRAM Stack Canary (`0xDEADBEEF`)**: Injects runtime sentinel canaries into the register frame boundary to trap stack overruns before memory corruption can occur.
+- **Infinite Loop Watchdog**: Traps runaway loops executing $> 5,000,000$ bytecode cycles without yielding to the frame loop.
+- **On-Screen Crash Handler (PS2 BSOD)**: If an exception or panic occurs, freezes execution and displays an emergency diagnostic screen with the exact Crystal source file, line number, registers, and stack trace.
 
 ---
 
-## Diagnostics & cradare2 Debugging
+## Diagnostics & cradare2 Integration
 
 ### In-Engine Profiler HUD
-Toggle the diagnostic HUD anytime with `Citrine.debug_overlay = true` or `Button::Select`:
-- Real-time FPS & frame pacing (59.94 FPS / 16.6ms).
-- EE CPU split-meter (VM bytecode execution time vs. native C engine time).
-- GS GPU draw rasterization time.
-- SPRAM active registers count / 1,024 slots.
-- Frame Arena usage bytes.
+Toggle the diagnostic overlay at any time via `Citrine.debug_overlay = true` or by pressing `Button::Select` on the controller:
+- **FPS & Frame Pacing**: Real-time 59.94 FPS / 16.6ms frame pacing indicator.
+- **EE CPU Split-Meter**: Microsecond breakdown between VM bytecode execution and native C runtime engine routines.
+- **GS GPU Rasterization**: eDRAM drawing and rasterization timing.
+- **SPRAM Utilization**: Real-time count of active registers out of the 1,024 register window.
+- **Frame Arena Footprint**: High-water mark of Tier 1 bump allocations.
 
-### radare2 & cradare2 Integration
-Citrine seamlessly bridges with [`cradare2`](https://github.com/sol-vin/cradare2):
-- **Source Maps (`.cbcsym`)**: Maps every bytecode instruction to its originating Crystal file, line, and function.
-- **TCP GDB Client**: Connects to PCSX2's GDB stub (`127.0.0.1:1234`) or PS2Link to inspect the Emotion Engine MIPS core, read 16-byte SPRAM `Value` registers, and perform source-level stepping.
-- **Disassembler Script (`r2-citrine`)**: Auto-generates radare2 flags and memory map definitions for PS2 memory spaces (`0x70000000` SPRAM, GS framebuffers).
-
----
-
-## Examples
-
-Check the `examples/` directory:
-- [`01_hello_pad`](examples/01_hello_pad/main.cr): DualShock 2 gamepad input handling, color cycling, and GS 2D rendering.
-- [`02_shapes_and_text`](examples/02_shapes_and_text/main.cr): 2D primitives, colors, text, and interactive profiler HUD overlay.
-- [`03_entity_fibers`](examples/03_entity_fibers/main.cr): Entity AI patrol logic with cooperative coroutines/fibers.
-- [`04_safety_and_panic`](examples/04_safety_and_panic/main.cr): Demonstrates hardware safety guards and the on-screen crash screen.
-- [`05_hello_world`](examples/05_hello_world/main.cr): Classic DVD-style bouncing logo benchmark.
-- [`06_dvd_bounce`](examples/06_dvd_bounce/main.cr): High-performance multi-logo DVD bounce stress test.
-- [`07_primitives_2d_3d`](examples/07_primitives_2d_3d/main.cr): Combined 2D rasterization and 3D wireframe rendering.
-- [`08_controller_tester`](examples/08_controller_tester/main.cr): Full DualShock 2 hardware pad diagnostic suite (pressure buttons, analog sticks, vibration motors).
-- [`09_concurrency_showcase`](examples/09_concurrency_showcase/main.cr): CSP channels, wait groups, and fiber scheduling.
-- [`10_cd_player`](examples/10_cd_player/main.cr): Night Tempo - Moonrise CD-DA multi-track optical playback and SPU2 audio.
-- [`11_macro_ecs_showcase`](examples/11_macro_ecs_showcase/main.cr): High-performance macro-driven Entity Component System.
-- [`12_immediate_ui`](examples/12_immediate_ui/main.cr): Immediate-mode GUI controls, sliders, and button widgets.
-- [`13_physics_and_particles`](examples/13_physics_and_particles/main.cr): Particle systems and 2D physics integration.
-- [`14_creative_coding`](examples/14_creative_coding/main.cr): Procedural generative art and mathematical visualizations.
-- [`15_rigid_body_physics`](examples/15_rigid_body_physics/main.cr): 3D rigid body dynamics and collision detection.
-- [`16_shaders_and_postfx`](examples/16_shaders_and_postfx/main.cr): GS rasterization effects and post-processing filters.
-- [`17_inline_assembly`](examples/17_inline_assembly/main.cr): First-class MIPS R5900 inline assembly (`asm`), COP0 cycle counter profiling, VU0 Macro Mode SIMD, and CD-DA optical audio streaming.
+### radare2 & cradare2 Debugging
+Citrine bridges directly with [`cradare2`](https://github.com/sol-vin/cradare2) and standard radare2:
+- **Source Maps (`.cbcsym`)**: Maps every bytecode instruction and emitted MIPS machine instruction back to its originating Crystal file, line number, and AST block.
+- **GDB Remote Protocol**: Connects to PCSX2's built-in GDB stub (`127.0.0.1:1234` or custom port) for interactive hardware breakpoints, register inspection, and single-stepping.
+- **Automated Memory Audits (`citrine mem-check`)**: Automatically executes headless test runs in PCSX2, parses emulog traces, inspects canary health, and reports any leaks or illegal memory accesses.
 
 ---
 
-## Testing
+## Showcase Examples Catalog
 
-Run the full automated test suite:
+Explore the `examples/` directory for ready-to-run showcases:
+
+| Example | Path | Highlights |
+| :--- | :--- | :--- |
+| **01 Hello World** | [`examples/01_hello_world`](examples/01_hello_world/main.cr) | Frame loop execution, dynamic frame counting, GS 2D primitives, and live blinking badge |
+| **02 Shapes & Text** | [`examples/02_shapes_and_text`](examples/02_shapes_and_text/main.cr) | 2D primitives, color palettes, typography rendering, and interactive profiler HUD overlay |
+| **03 Entity Fibers** | [`examples/03_entity_fibers`](examples/03_entity_fibers/main.cr) | Entity AI patrol logic with cooperative lightweight coroutines/fibers |
+| **04 Safety & Panic** | [`examples/04_safety_and_panic`](examples/04_safety_and_panic/main.cr) | Hardware safety guards, SPRAM stack canary auditing, and on-screen crash handler (PS2 BSOD) |
+| **05 Hello World (InputMap)** | [`examples/05_hello_world`](examples/05_hello_world/main.cr) | Classic DVD-style bouncing logo benchmark with Godot-style InputMap and RNG |
+| **06 DVD Bounce** | [`examples/06_dvd_bounce`](examples/06_dvd_bounce/main.cr) | High-performance multi-logo DVD bounce stress test pushing GS primitive rasterization |
+| **07 Primitives 2D/3D** | [`examples/07_primitives_2d_3d`](examples/07_primitives_2d_3d/main.cr) | Combined 2D rasterization, textured quads, and 3D wireframe rendering |
+| **08 Controller Tester** | [`examples/08_controller_tester`](examples/08_controller_tester/main.cr) | Full DualShock 2 hardware diagnostic suite (pressure buttons, analog sticks, vibration rumble motors) |
+| **09 Concurrency Showcase** | [`examples/09_concurrency_showcase`](examples/09_concurrency_showcase/main.cr) | CSP channels, wait groups, and fiber scheduling on the Emotion Engine |
+| **10 CD Player** | [`examples/10_cd_player`](examples/10_cd_player/main.cr) | Night Tempo - Moonrise CD-DA multi-track optical playback and double-buffered SPU2 audio streaming |
+| **11 Macro ECS Showcase** | [`examples/11_macro_ecs_showcase`](examples/11_macro_ecs_showcase/main.cr) | High-performance macro-driven Entity Component System tailored for 32 MB console memory |
+| **12 Immediate UI** | [`examples/12_immediate_ui`](examples/12_immediate_ui/main.cr) | Immediate-mode GUI controls, sliders, toggle switches, and button widgets |
+| **13 Physics & Particles** | [`examples/13_physics_and_particles`](examples/13_physics_and_particles/main.cr) | Particle systems, emitter physics, and 2D kinematics integration |
+| **14 Creative Coding** | [`examples/14_creative_coding`](examples/14_creative_coding/main.cr) | Procedural generative art, geometric pattern generators, and mathematical visualizations |
+| **15 Rigid Body Physics** | [`examples/15_rigid_body_physics`](examples/15_rigid_body_physics/main.cr) | 3D rigid body dynamics, bounding box collisions, and impulse physics |
+| **16 Shaders & Post-FX** | [`examples/16_shaders_and_postfx`](examples/16_shaders_and_postfx/main.cr) | GS rasterization effects, color filtering, and post-processing passes |
+| **17 Inline Assembly** | [`examples/17_inline_assembly`](examples/17_inline_assembly/main.cr) | First-class MIPS R5900 inline assembly (`asm`), COP0 cycle counter profiling, and VU0 SIMD |
+
+---
+
+## Testing & Quality Assurance
+
+Run the complete automated test suite:
 
 ```bash
+# Run all unit tests, compiler specs, and MIPS emitter tests
 crystal spec
+
+# Or use the Citrine CLI test runner
+citrine test
 ```
 
-All 16 test suites verify parser fidelity, opcode generation, register allocation, budget auditing, disassembly roundtripping, and cradare2 integration.
+### Automated PCSX2 Hardware Tests
+To execute end-to-end hardware tests in PCSX2:
+
+```bash
+citrine test spec/ps2/
+```
+
+This compiles test targets, generates disc images via `Citrine::IsoBuilder`, launches PCSX2 headlessly, attaches programmatic debuggers, and asserts real console behavioral correctness.
+
+---
+
+## Contributing
+
+Contributions are welcome! Please submit issues, fork the repository, and open pull requests.
+
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
 ---
 

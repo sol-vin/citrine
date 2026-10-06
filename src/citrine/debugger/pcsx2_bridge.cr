@@ -521,46 +521,48 @@ module Citrine
         resp.to_s
       end
 
-      # Connects to PCSX2's GDB stub (port 28011 by default) and reads a block of EE memory.
-      def read_memory_gdb(address : UInt64, length : Int32, port : Int32 = 28011) : Bytes?
-        begin
-          socket = TCPSocket.new("127.0.0.1", port, connect_timeout: 1.second)
-          socket.read_timeout = 2.seconds
-
-          # Send interrupt byte (0x03) to briefly halt EE CPU if running
-          socket.write_byte(0x03_u8)
-          socket.flush
-          sleep 0.05.seconds
-
-          # Drain any stop packet
-          socket.read_timeout = 0.2.seconds
+      # Connects to PCSX2's GDB stub (port 28011 by default) and reads a block of EE memory,
+      # with automatic retry to wait for PCSX2 GDB stub initialization.
+      def read_memory_gdb(address : UInt64, length : Int32, port : Int32 = 28011, retries : Int32 = 8) : Bytes?
+        retries.times do |attempt|
           begin
-            buf = Bytes.new(128)
-            socket.read(buf)
-          rescue
-          end
-          socket.read_timeout = 2.seconds
+            socket = TCPSocket.new("127.0.0.1", port, connect_timeout: 1.second)
+            socket.read_timeout = 2.seconds
 
-          # GDB command: m<hex_addr>,<hex_length>
-          cmd = "m#{address.to_s(16)},#{length.to_s(16)}"
-          resp = Pcsx2Bridge.send_gdb_packet(socket, cmd)
+            # Send interrupt byte (0x03) to briefly halt EE CPU if running
+            socket.write_byte(0x03_u8)
+            socket.flush
+            sleep 0.05.seconds
 
-          # Send continue '$c#63' so EE execution resumes seamlessly
-          Pcsx2Bridge.send_gdb_packet(socket, "c") rescue nil
-          socket.close rescue nil
-
-          if resp && !resp.starts_with?("E")
-            bytes = Bytes.new(resp.size // 2)
-            (0...bytes.size).each do |i|
-              bytes[i] = resp[i * 2, 2].to_u8(16)
+            # Drain any stop packet
+            socket.read_timeout = 0.2.seconds
+            begin
+              buf = Bytes.new(128)
+              socket.read(buf)
+            rescue
             end
-            bytes
-          else
-            nil
+            socket.read_timeout = 2.seconds
+
+            # GDB command: m<hex_addr>,<hex_length>
+            cmd = "m#{address.to_s(16)},#{length.to_s(16)}"
+            resp = Pcsx2Bridge.send_gdb_packet(socket, cmd)
+
+            # Send continue '$c#63' so EE execution resumes seamlessly
+            Pcsx2Bridge.send_gdb_packet(socket, "c") rescue nil
+            socket.close rescue nil
+
+            if resp && !resp.starts_with?("E")
+              bytes = Bytes.new(resp.size // 2)
+              (0...bytes.size).each do |i|
+                bytes[i] = resp[i * 2, 2].to_u8(16)
+              end
+              return bytes
+            end
+          rescue
+            sleep 0.3.seconds
           end
-        rescue
-          nil
         end
+        nil
       end
 
       # Reads the 32-bit SPRAM canary at 0x70000000 via GDB
