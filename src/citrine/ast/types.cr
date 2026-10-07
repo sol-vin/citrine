@@ -186,6 +186,8 @@ module Citrine
     AudioGetCDDAStatus = 222
     AudioSetVolume   = 223
     AudioSeekStream  = 224
+    AudioPauseStream = 225
+    AudioResumeStream = 226
     DrawRectangleRotated = 230
     DrawRoundedRectangle = 231
     DrawTextRotated      = 232

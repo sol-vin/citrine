@@ -2212,6 +2212,33 @@ module Citrine
         instructions << Instruction.encode_rrr(Opcode::Bitwise, BitwiseSubOp::Nor.value, dest, inner_reg, 0_u8)
         allocator.free_temp(inner_reg)
         return dest
+      elsif node.name == "clamp" && node.obj && node.args.size == 2
+        val_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+        min_reg = compile_node(node.args[0], allocator, instructions, fn)
+        max_reg = compile_node(node.args[1], allocator, instructions, fn)
+
+        instructions << Instruction.encode_abc(Opcode::Move, dest, val_reg, 0_u8)
+
+        # If dest < min_reg -> dest = min_reg
+        cmp_reg = allocator.alloc_temp
+        instructions << Instruction.encode_cmp(CompareSubOp::Lt, cmp_reg, dest, min_reg)
+        skip_min_j = instructions.size
+        instructions << Instruction.encode_branch(Opcode::BranchZ, cmp_reg, 0_i16)
+        instructions << Instruction.encode_abc(Opcode::Move, dest, min_reg, 0_u8)
+        instructions[skip_min_j] = Instruction.encode_branch(Opcode::BranchZ, cmp_reg, (instructions.size - skip_min_j - 1).to_i16)
+
+        # If dest > max_reg -> dest = max_reg
+        instructions << Instruction.encode_cmp(CompareSubOp::Gt, cmp_reg, dest, max_reg)
+        skip_max_j = instructions.size
+        instructions << Instruction.encode_branch(Opcode::BranchZ, cmp_reg, 0_i16)
+        instructions << Instruction.encode_abc(Opcode::Move, dest, max_reg, 0_u8)
+        instructions[skip_max_j] = Instruction.encode_branch(Opcode::BranchZ, cmp_reg, (instructions.size - skip_max_j - 1).to_i16)
+
+        allocator.free_temp(cmp_reg)
+        allocator.free_temp(max_reg)
+        allocator.free_temp(min_reg)
+        allocator.free_temp(val_reg)
+        return dest
       end
 
       # Number conversions: .to_i, .to_i32, .to_i64, .to_u8, .to_u16, .to_u32, .to_u64, .to_f, .to_f32, .to_f64
@@ -4298,7 +4325,9 @@ module Citrine
       when "batch_transform_points", "vu0_batch_transform" then NativeId::VU0BatchTransform
       when "batch_dot_product", "vu0_batch_dot" then NativeId::VU0BatchDot
       when "play_cdda_track", "play_cdda", "play_stream", "play_music" then NativeId::AudioPlayCDDA
-      when "stop_cdda", "stop_stream", "stop_music", "pause_stream", "pause_music" then NativeId::AudioStopCDDA
+      when "stop_cdda", "stop_stream", "stop_music" then NativeId::AudioStopCDDA
+      when "pause_stream", "pause_music" then NativeId::AudioPauseStream
+      when "resume_stream", "resume_music" then NativeId::AudioResumeStream
       when "cdda_status", "get_cdda_status", "stream_status", "music_status", "music_playing?" then NativeId::AudioGetCDDAStatus
       when "set_volume", "set_audio_volume", "set_cdda_volume", "set_stream_volume", "set_music_volume", "master_volume=" then NativeId::AudioSetVolume
       when "seek_stream", "stream_seek", "seek_music" then NativeId::AudioSeekStream

@@ -39,7 +39,7 @@ cover_tex = Citrine.load_texture("cover.cbt")
 
 track_idx = 0
 is_playing = true
-is_looping = true
+is_looping = false
 art_showcase = false
 elapsed_frames = 0
 elapsed_sec = 0
@@ -67,9 +67,13 @@ Citrine.main_loop do
       Citrine::Audio.pause_stream
       status_mode = 1 # PAUSED
     else
-      # Resume playback from current position
+      # Resume playback from current position or restart
       is_playing = true
-      album.play(track_idx)
+      if status_mode == 1
+        Citrine::Audio.resume_stream
+      else
+        album.play(track_idx)
+      end
       status_mode = 0 # PLAYING
     end
   end
@@ -118,6 +122,7 @@ Citrine.main_loop do
   # When scrub buttons are released, commit seek to audio hardware
   if pad.button_released?(Button::R2) || pad.button_released?(Button::L2)
     Citrine::Audio.seek_music(elapsed_sec)
+    status_mode = is_playing ? 0 : 1
   end
 
   # 5. Jump: +10s (R1) / -10s (L1)
@@ -145,6 +150,8 @@ Citrine.main_loop do
     elapsed_sec = 0
     if is_playing
       album.play(track_idx)
+    else
+      status_mode = 2 # Reset pause to stopped on track change
     end
   elsif pad.button_pressed?(Button::Left)
     track_idx = (track_idx + total_tracks - 1) % total_tracks
@@ -152,6 +159,8 @@ Citrine.main_loop do
     elapsed_sec = 0
     if is_playing
       album.play(track_idx)
+    else
+      status_mode = 2 # Reset pause to stopped on track change
     end
   end
   dur = album[track_idx].duration
@@ -177,17 +186,25 @@ Citrine.main_loop do
     elapsed_sec = elapsed_frames // 60
     if elapsed_sec >= dur
       if is_looping
-        # Auto-advance to next track
-        track_idx = (track_idx + 1) % total_tracks
+        # Loop mode ON: repeat current track
         elapsed_frames = 0
         elapsed_sec = 0
         album.play(track_idx)
       else
-        is_playing = false
-        elapsed_sec = dur
-        elapsed_frames = dur * 60
-        status_mode = 2 # STOPPED
-        Citrine::Audio.stop_stream
+        # Loop mode OFF: auto-advance to next track across album
+        if track_idx + 1 < total_tracks
+          track_idx += 1
+          elapsed_frames = 0
+          elapsed_sec = 0
+          album.play(track_idx)
+        else
+          # End of album reached: stop playback
+          is_playing = false
+          elapsed_sec = dur
+          elapsed_frames = dur * 60
+          status_mode = 2 # STOPPED
+          Citrine::Audio.stop_stream
+        end
       end
     end
   end
@@ -263,7 +280,11 @@ Citrine.main_loop do
     # Scrubber Bar in showcase
     Citrine.draw_rectangle(32, 308, 576, 8, Color::DarkGray)
     scrub_w = (dur > 0) ? ((elapsed_sec * 576) // dur) : 0
-    scrub_w = scrub_w.clamp(0, 576)
+    if scrub_w < 0
+      scrub_w = 0
+    elsif scrub_w > 576
+      scrub_w = 576
+    end
     Citrine.draw_rectangle(32, 308, scrub_w, 8, Color::Cyan)
 
     # Footer
@@ -306,7 +327,11 @@ Citrine.main_loop do
     # Timeline Scrubber Bar
     Citrine.draw_rectangle(32, 204, 576, 10, Color::DarkGray)
     scrub_w = (dur > 0) ? ((elapsed_sec * 576) // dur) : 0
-    scrub_w = scrub_w.clamp(0, 576)
+    if scrub_w < 0
+      scrub_w = 0
+    elsif scrub_w > 576
+      scrub_w = 576
+    end
     Citrine.draw_rectangle(32, 204, scrub_w, 10, Color::Cyan)
     Citrine.draw_rectangle(32 + scrub_w - 3, 200, 6, 18, Color::White)
 

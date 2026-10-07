@@ -832,10 +832,8 @@ module Citrine
         mips.addiu(T9, S0, 0x0f84) # EnableIntr
         mips.ori(A0, ZERO, 0x24)   # DMA channel 4 (SPU2 Core 0)
         mips.jalr(T9); mips.nop
-        mips.addiu(T9, S0, 0x0f84)
         mips.ori(A0, ZERO, 0x28)   # DMA channel 7 (SPU2 Core 1)
         mips.jalr(T9); mips.nop
-        mips.addiu(T9, S0, 0x0f84)
         mips.ori(A0, ZERO, 9)      # SPU2 Interrupt
         mips.jalr(T9); mips.nop
 
@@ -843,6 +841,15 @@ module Citrine
         mips.addiu(S2, S0, 0x0f0c) # sceSdSetParam
         mips.addiu(S3, S0, 0x0f14) # sceSdSetSwitch
         mips.addiu(S4, S0, 0x0f1c) # sceSdSetAddr
+
+        # Open Core 0/1 Master Volume and Core 1 Broadcast to maximum (0x3FFF) once at startup:
+        mips.ori(A1, ZERO, 0x3FFF)
+        mips.ori(A0, ZERO, 0x0980); mips.jalr(S2); mips.nop # Core 0 MVOLL
+        mips.ori(A0, ZERO, 0x0a80); mips.jalr(S2); mips.nop # Core 0 MVOLR
+        mips.ori(A0, ZERO, 0x0f81); mips.jalr(S2); mips.nop # Core 1 BVOLL
+        mips.ori(A0, ZERO, 0x1081); mips.jalr(S2); mips.nop # Core 1 BVOLR
+        mips.ori(A0, ZERO, 0x0981); mips.jalr(S2); mips.nop # Core 1 MVOLL
+        mips.ori(A0, ZERO, 0x0a81); mips.jalr(S2); mips.nop # Core 1 MVOLR
 
         # ================= MAIN STREAMING LOOP =================
         mips.label("stream_loop")
@@ -887,30 +894,54 @@ module Citrine
         # Case 0: Stop
         mips.bnez(T0, "chk_cmd_pause")
         mips.nop
+        # Key off Voice 0
         mips.ori(A0, ZERO, 0x1600)  # SD_S_KOFF (Core 0)
         mips.ori(A1, ZERO, 1)
         mips.jalr(S3); mips.nop
         mips.ori(A0, ZERO, 0x1600)
         mips.move(A1, ZERO)
         mips.jalr(S3); mips.nop
+        # Reset state
+        mips.sw(ZERO, 0x1904, S0)   # cur_bank_idx = 0
+        mips.sw(ZERO, 0x1908, S0)   # next_refill_bank = 0
+        mips.sw(ZERO, 0x1918, S0)   # timer_accum_ms = 0
         mips.sw(ZERO, 0x190c, S0)   # play_state = 0 (stopped)
-        mips.beq(ZERO, ZERO, "process_cmd_loop"); mips.nop
+        mips.beq(ZERO, ZERO, "mute_voice0")
+        mips.nop
 
         mips.label("chk_cmd_pause")
         mips.ori(T2, ZERO, 2)       # Pause
         mips.bne(T0, T2, "chk_cmd_resume")
         mips.nop
+        mips.ori(T2, ZERO, 2)
+        mips.sw(T2, 0x190c, S0)     # play_state = 2 (paused)
+
+        mips.label("mute_voice0")
         mips.ori(A0, ZERO, 0x0200)  # Core 0 pitch = 0
         mips.move(A1, ZERO)
         mips.jalr(S2); mips.nop
-        mips.ori(T2, ZERO, 2)
-        mips.sw(T2, 0x190c, S0)     # play_state = 2 (paused)
+        mips.ori(A0, ZERO, 0x0000)  # Core 0 VOLL = 0
+        mips.move(A1, ZERO)
+        mips.jalr(S2); mips.nop
+        mips.ori(A0, ZERO, 0x0100)  # Core 0 VOLR = 0
+        mips.move(A1, ZERO)
+        mips.jalr(S2); mips.nop
         mips.beq(ZERO, ZERO, "process_cmd_loop"); mips.nop
 
         mips.label("chk_cmd_resume")
         mips.ori(T2, ZERO, 3)       # Resume
         mips.bne(T0, T2, "chk_cmd_play")
         mips.nop
+        mips.label("do_resume")
+        # Restore Voice 0 volume from S7 (cur_vol at 0x1910)
+        mips.lw(S7, 0x1910, S0)
+        mips.ori(A0, ZERO, 0x0000)  # Core 0 VOLL
+        mips.move(A1, S7)
+        mips.jalr(S2); mips.nop
+        mips.ori(A0, ZERO, 0x0100)  # Core 0 VOLR
+        mips.move(A1, S7)
+        mips.jalr(S2); mips.nop
+        # Restore pitch
         mips.ori(A0, ZERO, 0x0200)  # Core 0 pitch
         mips.lw(A1, 0x18EC, S0)     # restore cur_pitch
         mips.jalr(S2); mips.nop
@@ -924,7 +955,7 @@ module Citrine
         mips.nop
         mips.lw(T2, 0x190c, S0)
         mips.ori(T3, ZERO, 2)
-        mips.beq(T2, T3, "chk_cmd_resume") # If paused, resume
+        mips.beq(T2, T3, "do_resume") # If paused, resume
         mips.nop
         mips.move(A0, ZERO)
         mips.bal("start_track")
@@ -1085,8 +1116,7 @@ module Citrine
 
         # Print refill message only for initial priming (bank 0 and 1)
         mips.lw(A1, 0x1904, S0) # cur_bank_idx
-        mips.ori(T0, ZERO, 2)
-        mips.sltu(T1, A1, T0)
+        mips.sltiu(T1, A1, 2)
         mips.beqz(T1, "skip_refill_print")
         mips.nop
         mips.addiu(A0, S0, 0x1990)
@@ -1171,7 +1201,6 @@ module Citrine
         mips.addiu(T9, S0, 0x1030) # printf
         mips.jalr(T9); mips.nop
 
-
         # Set cur_track = S6
         mips.sw(S6, 0x1900, S0)
 
@@ -1227,7 +1256,6 @@ module Citrine
         mips.move(A1, S6)
         mips.addiu(T9, S0, 0x1030) # printf
         mips.jalr(T9); mips.nop
-
 
         # Set cur_bank_idx = target_bank
         mips.sw(S6, 0x1904, S0)
@@ -1301,20 +1329,7 @@ module Citrine
 
         # Route Core 0 Voice 0 to both Left and Right stereo channels at volume S7:
         mips.ori(A0, ZERO, 0x0000); mips.move(A1, S7); mips.jalr(S2); mips.nop # Core 0 Voice 0 VOLL
-        mips.ori(A0, ZERO, 0x0100); mips.move(A1, S7); mips.jalr(S2); mips.nop # Core 0 Voice 0 VOLR
-
-        # Open Core 0 Master Volume to maximum (0x3FFF):
-        mips.ori(A1, ZERO, 0x3FFF)
-        mips.ori(A0, ZERO, 0x0980); mips.jalr(S2); mips.nop # Core 0 MVOLL
-        mips.ori(A0, ZERO, 0x0a80); mips.jalr(S2); mips.nop # Core 0 MVOLR
-
-        # Open Core 1 Broadcast In to maximum (0x3FFF) to route Core 0 stereo bus into Core 1:
-        mips.ori(A0, ZERO, 0x0f81); mips.jalr(S2); mips.nop # Core 1 BVOLL
-        mips.ori(A0, ZERO, 0x1081); mips.jalr(S2); mips.nop # Core 1 BVOLR
-
-        # Open Core 1 Master Volume to maximum (0x3FFF) to drive physical DAC output:
-        mips.ori(A0, ZERO, 0x0981); mips.jalr(S2); mips.nop # Core 1 MVOLL
-        mips.ori(A0, ZERO, 0x0a81); mips.jalr(S2); mips.nop # Core 1 MVOLR
+        mips.ori(A0, ZERO, 0x0100); mips.jalr(S2); mips.nop # Core 0 Voice 0 VOLR
 
         mips.lw(RA, 0, SP)
         mips.addiu(SP, SP, 16)

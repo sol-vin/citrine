@@ -924,6 +924,15 @@ module Citrine
         when 224 # AudioSeekStream
           emitter.lw(A0, (base * 4), FP)
           emitter.call("Citrine_AudioSeekStream")
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 225 # AudioPauseStream
+          emitter.call("Citrine_PauseStream")
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 226 # AudioResumeStream
+          emitter.call("Citrine_ResumeStream")
+          emitter.sw(V0, (dst * 4), FP)
         when 237 # DrawTexturePro
           emitter.lw(A0, (base * 4), FP)        # tex_id
           emitter.lw(A1, ((base + 5) * 4), FP)  # dx

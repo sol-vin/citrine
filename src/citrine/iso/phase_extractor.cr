@@ -2330,6 +2330,12 @@ end
               time_sec = regs[base_r]
               boot_messages << "[CITRINE AUDIO] Stream seeking to #{time_sec}s"
               regs[dst_r] = 1_i64
+            when 225 # AudioPauseStream
+              boot_messages << "[CITRINE AUDIO] Stream paused"
+              regs[dst_r] = 1_i64
+            when 226 # AudioResumeStream
+              boot_messages << "[CITRINE AUDIO] Stream resumed"
+              regs[dst_r] = 1_i64
             when 245 # CpuCycleCount
               cycle_counter &+= 147_456_u64
               regs[dst_r] = (cycle_counter & 0xFFFFFFFF_u64).to_i64

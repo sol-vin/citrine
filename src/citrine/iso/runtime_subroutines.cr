@@ -51,6 +51,8 @@ module Citrine
         "Citrine_GetCDDAStatus",
         "Citrine_SetVolume",
         "Citrine_AudioSeekStream",
+        "Citrine_PauseStream",
+        "Citrine_ResumeStream",
         "Citrine_CdvdSeekEntropy",
         "citrine_vm_panic",
         "Citrine_ObjectNew",
@@ -1069,6 +1071,30 @@ module Citrine
             emitter.jalr(T9)
             emitter.nop
             emitter.ori(V0, ZERO, 1) # Return success (1)
+            emitter.lw(RA, 28, SP)
+            emitter.jr(RA)
+            emitter.addiu(SP, SP, 32)
+
+          when "Citrine_PauseStream"
+            emitter.addiu(SP, SP, -32)
+            emitter.sw(RA, 28, SP)
+            emitter.ori(A0, ZERO, 2) # cmd 2 = Pause
+            emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+            emitter.jalr(T9)
+            emitter.nop
+            emitter.ori(V0, ZERO, 1)
+            emitter.lw(RA, 28, SP)
+            emitter.jr(RA)
+            emitter.addiu(SP, SP, 32)
+
+          when "Citrine_ResumeStream"
+            emitter.addiu(SP, SP, -32)
+            emitter.sw(RA, 28, SP)
+            emitter.ori(A0, ZERO, 3) # cmd 3 = Resume
+            emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
+            emitter.jalr(T9)
+            emitter.nop
+            emitter.ori(V0, ZERO, 1)
             emitter.lw(RA, 28, SP)
             emitter.jr(RA)
             emitter.addiu(SP, SP, 32)
