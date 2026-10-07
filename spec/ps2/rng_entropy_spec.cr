@@ -48,6 +48,7 @@ describe "Citrine PS2 Hardware Multi-Entropy & RNG Suite" do
     tc2.compile
     res2 = tc2.boot_pcsx2(timeout: 7.seconds)
     res2.should_boot_cleanly
+    next unless res1.pcsx2_available? && res2.pcsx2_available?
 
     line1 = res1.lines.find { |l| l.includes?("[SEED_TEST_1]") }
     line2 = res2.lines.find { |l| l.includes?("[SEED_TEST_2]") }

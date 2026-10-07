@@ -96,6 +96,7 @@ describe "Citrine PS2 Boot Splash Screen, Memory Reclamation & Physical Entropy"
     bytes2, _ = tc2.compile
     res2 = tc2.boot_pcsx2(timeout: 8.seconds)
     res2.should_boot_cleanly
+    next unless res1.pcsx2_available? && res2.pcsx2_available?
 
     # Extract the random output lines from both cold boots
     line1 = res1.lines.find { |l| l.includes?("[BOOT1 RAND]") }
