@@ -888,9 +888,27 @@ module Citrine
           emitter.addu(V0, T0, T1)
           emitter.sw(V0, (dst * 4), FP)
 
-        when 164, 165, 166, 167 # PointerAddress, PointerNew, BoxNew, BoxUnbox
+        when 164, 165 # PointerAddress, PointerNew
           emitter.lw(T0, (base * 4), FP)
           emitter.sw(T0, (dst * 4), FP)
+
+        when 166 # BoxNew: allocate 16 bytes on heap, store val at heap_ptr
+          emitter.lui(T0, 0x7000)
+          emitter.lw(V0, 0x8C, T0)       # current heap_ptr
+          emitter.bnez(V0, "box_heap_ok_#{fn_idx}_#{pc}")
+          emitter.nop
+          emitter.lui(V0, 0x0022)        # default heap base 0x00220000
+          emitter.label("box_heap_ok_#{fn_idx}_#{pc}")
+          emitter.addiu(T1, V0, 16)
+          emitter.sw(T1, 0x8C, T0)       # update heap_ptr
+          emitter.lw(T2, (base * 4), FP) # load val
+          emitter.sw(T2, 0, V0)          # store val at box address
+          emitter.sw(V0, (dst * 4), FP)  # return box address
+
+        when 167 # BoxUnbox: load val from box address
+          emitter.lw(T0, (base * 4), FP) # load box pointer
+          emitter.lw(V0, 0, T0)          # dereference box
+          emitter.sw(V0, (dst * 4), FP)  # store unboxed value
 
         when 168 # PointerFree
           emitter.sw(ZERO, (dst * 4), FP)

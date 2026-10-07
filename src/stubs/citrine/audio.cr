@@ -56,7 +56,7 @@ module Citrine
       property title : String
       property artist : String
       property album : String
-      property duration : Int32
+      property duration : Float32
       property duration_s : String
       property stream_file : String
       property optical_str : String
@@ -67,11 +67,12 @@ module Citrine
         @title : String = "",
         @artist : String = "",
         @album : String = "",
-        @duration : Int32 = 0,
+        duration : Number = 0,
         @duration_s : String = "00:00",
         @stream_file : String = "",
         @optical_str : String = ""
       )
+        @duration = duration.to_f32
       end
 
       # Formatted track title with zero-padded number (e.g. "01 Overture")
@@ -130,7 +131,7 @@ module Citrine
 
       # Total duration of all tracks in seconds
       def total_duration : Int32
-        @tracks.sum(&.duration)
+        @tracks.sum(&.duration.to_i)
       end
 
       # Total duration formatted as MM:SS

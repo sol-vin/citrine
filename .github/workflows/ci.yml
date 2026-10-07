@@ -181,7 +181,7 @@ jobs:
           if [ ! -f "$HOME/Documents/PCSX2/bios/SCPH-39001_BIOS_V7_USA_160.BIN" ] && [ ! -f "C:/Program Files/PCSX2/bios/SCPH-39001_BIOS_V7_USA_160.BIN" ]; then
             echo "::warning::PCSX2 BIOS file is not present. Skipping live emulation spec."
           else
-            crystal spec spec/ps2/hardware_bridge_spec.cr spec/ps2/examples_ps2_spec.cr
+            crystal spec spec/ps2/hardware_bridge_spec.cr spec/ps2/examples_ps2_spec.cr spec/ps2/language_deep_arrays_spec.cr spec/ps2/language_deep_conditionals_and_loops_spec.cr spec/ps2/language_deep_types_and_unboxing_spec.cr
           fi
 
       - name: Verify All Examples Bytecode Compilation (.cbc)

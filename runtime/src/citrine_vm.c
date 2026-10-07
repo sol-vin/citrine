@@ -2365,6 +2365,45 @@ static void native_dispatch(CitrineVM* vm, uint16_t native_id, Value* args, uint
             *out_ret = args[2];
             break;
         }
+
+        case 164: // PointerAddress(ptr)
+        case 165: { // PointerNew(addr)
+            *out_ret = args[0];
+            break;
+        }
+        case 166: { // BoxNew(val)
+            Value* box_ptr = (Value*)calloc(1, sizeof(Value));
+            if (box_ptr) {
+                *box_ptr = args[0];
+                out_ret->type = VAL_OBJECT;
+                out_ret->as.ptr = box_ptr;
+            } else {
+                out_ret->type = VAL_NIL;
+            }
+            break;
+        }
+        case 167: { // BoxUnbox(box_ptr)
+            if (args[0].type == VAL_OBJECT && args[0].as.ptr) {
+                *out_ret = *(Value*)args[0].as.ptr;
+            } else {
+                *out_ret = args[0];
+            }
+            break;
+        }
+        case 168: { // PointerFree(ptr)
+            out_ret->type = VAL_NIL;
+            break;
+        }
+        case 170: { // TypeIsA(val, target_id)
+            out_ret->type = VAL_BOOL;
+            out_ret->as.i = 1;
+            break;
+        }
+        case 171: { // TypeAsCast(val, target_id)
+            *out_ret = args[0];
+            break;
+        }
+
         case 180: { // ContextSet(ctx_id, subsys_mask)
 
             uint16_t cid = (uint16_t)args[0].as.i;
