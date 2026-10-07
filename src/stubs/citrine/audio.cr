@@ -56,7 +56,7 @@ module Citrine
       property title : String
       property artist : String
       property album : String
-      property duration : Float32
+      property duration : Int32
       property duration_s : String
       property stream_file : String
       property optical_str : String
@@ -67,7 +67,7 @@ module Citrine
         @title : String = "",
         @artist : String = "",
         @album : String = "",
-        @duration : Float32 = 0.0_f32,
+        @duration : Int32 = 0,
         @duration_s : String = "00:00",
         @stream_file : String = "",
         @optical_str : String = ""
@@ -82,7 +82,7 @@ module Citrine
 
       # Plays this track through the streaming music engine
       def play : Bool
-        Audio.play_music(self)
+        Citrine.play_stream(@index)
       end
 
       # Stops playback of this track
@@ -129,13 +129,13 @@ module Citrine
       end
 
       # Total duration of all tracks in seconds
-      def total_duration : Float32
+      def total_duration : Int32
         @tracks.sum(&.duration)
       end
 
       # Total duration formatted as MM:SS
       def total_duration_s : String
-        tot = total_duration.to_i
+        tot = total_duration
         m = tot // 60
         s = tot % 60
         m_str = m < 10 ? "0#{m}" : "#{m}"
@@ -150,11 +150,7 @@ module Citrine
 
       # Plays specified track by index
       def play(track_idx : Int32) : Bool
-        if t = @tracks[track_idx]?
-          t.play
-        else
-          Citrine.play_stream(track_idx)
-        end
+        Citrine.play_stream(track_idx)
       end
 
       # Pre-formatted array of track titles
@@ -402,7 +398,7 @@ module Citrine
     @@music_volume : Float32 = 1.0_f32
     @@sfx_volume : Float32 = 1.0_f32
     @@voice_volume : Float32 = 1.0_f32
-    @@muted_buses = Set(Bus).new
+    @@muted_buses_mask : UInt32 = 0_u32
 
     # Music Engine State
     @@music_playing : Bool = false
@@ -473,7 +469,7 @@ module Citrine
       @@music_volume = 1.0_f32
       @@sfx_volume = 1.0_f32
       @@voice_volume = 1.0_f32
-      @@muted_buses.clear
+      @@muted_buses_mask = 0_u32
     end
 
     def self.set_bus_volume(bus : Symbol | Bus, vol : Number)
@@ -538,18 +534,20 @@ module Citrine
     end
 
     def self.mute(bus : Symbol | Bus)
-      @@muted_buses << resolve_bus(bus)
-      update_hardware_stream_volume if resolve_bus(bus) == Bus::Music || resolve_bus(bus) == Bus::Master
+      b = resolve_bus(bus)
+      @@muted_buses_mask |= (1_u32 << b.value)
+      update_hardware_stream_volume if b == Bus::Music || b == Bus::Master
     end
 
     def self.unmute(bus : Symbol | Bus)
-      @@muted_buses.delete(resolve_bus(bus))
-      update_hardware_stream_volume if resolve_bus(bus) == Bus::Music || resolve_bus(bus) == Bus::Master
+      b = resolve_bus(bus)
+      @@muted_buses_mask &= ~(1_u32 << b.value)
+      update_hardware_stream_volume if b == Bus::Music || b == Bus::Master
     end
 
     def self.muted?(bus : Symbol | Bus) : Bool
       b = resolve_bus(bus)
-      @@muted_buses.includes?(b) || @@muted_buses.includes?(Bus::Master)
+      ((@@muted_buses_mask & (1_u32 << b.value)) != 0_u32) || ((@@muted_buses_mask & (1_u32 << Bus::Master.value)) != 0_u32)
     end
 
     # Computes hardware volume (0..255) after bus attenuation and mute mask
@@ -707,11 +705,7 @@ module Citrine
         @@music_time = 0.0_f32
         @@music_playing = true
         @@music_paused = false
-        if !track_or_path.stream_file.empty?
-          Citrine.play_stream(track_or_path.stream_file)
-        else
-          Citrine.play_stream(track_or_path.index)
-        end
+        Citrine.play_stream(track_or_path.index)
       when String
         @@music_time = 0.0_f32
         @@music_playing = true

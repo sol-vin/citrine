@@ -1,6 +1,7 @@
 require "file_utils"
 require "./elf_builder"
 require "./sound_irx_builder"
+require "../importers/sound_importer"
 
 module Citrine
   # Constructs standard ISO9660 filesystem images (.iso) bootable on PlayStation 2 (PCSX2 or real hardware).
@@ -31,6 +32,30 @@ module Citrine
                          vag_entries.map(&.[1])
                        end
 
+      startup_vag_asset : Bytes? = nil
+      if all_vag_tracks.empty?
+        startup_path = File.exists?("startup.wav") ? "startup.wav" : (File.exists?(File.join(Dir.current, "startup.wav")) ? File.join(Dir.current, "startup.wav") : nil)
+        if startup_path
+          begin
+            wav_bytes = File.read(startup_path).to_slice
+            asset = Citrine::Importers::SoundImporter.import_wav(wav_bytes)
+            # Boot splash screen displays for 2.0 seconds (120 frames at 60 Hz NTSC).
+            # Tune the startup sound duration to ~2.0s (e.g. 63,504 samples / 2.0s = 31,752 Hz / Concert A 440 Hz):
+            if asset.pcm_samples.size > 0
+              target_rate = (asset.pcm_samples.size.to_f / 2.0).round.to_i
+              asset.sample_rate = target_rate.clamp(11025, 48000)
+            end
+            startup_vag = asset.to_vag("startup", loop_audio: false)
+            all_vag_tracks = [startup_vag]
+            startup_vag_asset = startup_vag
+          rescue
+            # Ignore invalid/corrupted wav
+          end
+        end
+      else
+        startup_vag_asset = all_vag_tracks.first?
+      end
+
       # Normalize and deduplicate extra_files case-insensitively
       dedup_extra = Hash(String, Bytes).new
       extra_files.each do |k, v|
@@ -39,7 +64,7 @@ module Citrine
       end
       extra_files = dedup_extra
 
-      cas_files = extra_files.select { |k, _| k.ends_with?(".CAS") }.to_a.sort_by do |k, _|
+      cas_files = extra_files.select { |k, _| k.downcase.ends_with?(".cas") }.to_a.sort_by do |k, _|
         if md = k.match(/(\d+)/)
           md[1].to_i
         else
@@ -49,13 +74,13 @@ module Citrine
 
       if !cas_files.empty?
         # Enforce .cas exclusivity: eliminate any .vag files or audio_tracks
-        extra_files.reject! { |k, _| k.ends_with?(".VAG") }
+        extra_files.reject! { |k, _| k.downcase.ends_with?(".vag") }
         vag_files = [] of Tuple(String, Bytes)
         all_vag_tracks = [] of Bytes
         vag_bytes = nil
         audio_tracks = [] of String
       else
-        vag_files = extra_files.select { |k, _| k.ends_with?(".VAG") }.to_a.sort_by do |k, _|
+        vag_files = extra_files.select { |k, _| k.downcase.ends_with?(".vag") }.to_a.sort_by do |k, _|
           if md = k.match(/(\d+)/)
             md[1].to_i
           else
@@ -71,7 +96,7 @@ module Citrine
         end
       end
 
-      non_stream_files = extra_files.reject { |k, _| k == "S.IRX" || k == "S.IRX;1" || k.ends_with?(".VAG") || k.ends_with?(".CAS") }.to_a
+      non_stream_files = extra_files.reject { |k, _| k.upcase == "S.IRX" || k.upcase == "S.IRX;1" || k.downcase.ends_with?(".vag") || k.downcase.ends_with?(".cas") }.to_a
 
       has_custom_sirx = extra_files.has_key?("S.IRX") || extra_files.has_key?("S.IRX;1")
       use_streaming = !has_custom_sirx && (!cas_files.empty? || vag_files.size > 1 || all_vag_tracks.size > 1 || vag_files.any? { |_, d| d.size > 131072 } || all_vag_tracks.any? { |d| d.size > 131072 })
@@ -109,7 +134,7 @@ module Citrine
         sec_cbc = sec_cursor
         sec_cursor += ((cbc_bytes.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
 
-        dummy_sirx = SoundIrxBuilder.build_streaming([] of SoundIrxBuilder::TrackInfo)
+        dummy_sirx = SoundIrxBuilder.build_streaming([] of SoundIrxBuilder::TrackInfo, startup_vag: startup_vag_asset)
         s_irx_sec = ((dummy_sirx.size + SECTOR_SIZE - 1) // SECTOR_SIZE).to_u32
         sec_sirx = sec_cursor
         sec_cursor += s_irx_sec
@@ -146,7 +171,7 @@ module Citrine
           end
         end
 
-        s_irx_bytes = SoundIrxBuilder.build_streaming(track_table)
+        s_irx_bytes = SoundIrxBuilder.build_streaming(track_table, startup_vag: startup_vag_asset)
 
         files << IsoFile.new("SYSTEM.CNF;1", system_cnf, sec_system_cnf, system_cnf.size.to_u32)
         files << IsoFile.new("CITRINE.ELF;1", elf_data, sec_elf, elf_data.size.to_u32)

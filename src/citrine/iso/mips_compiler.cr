@@ -506,6 +506,10 @@ module Citrine
             emitter.nop
           end
 
+        when Opcode::FloatAlu
+          emitter.lw(T0, (a.to_i32 * 4), FP)
+          emitter.sw(T0, (dst.to_i32 * 4), FP)
+
         else
           emitter.nop
         end
@@ -540,6 +544,59 @@ module Citrine
         when 4 # SetTargetFPS
           emitter.ori(V0, ZERO, 60)
           emitter.sw(V0, (dst * 4), FP)
+
+        when 5 # GetFPS
+          emitter.ori(V0, ZERO, 60)
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 6 # GetDeltaTime
+          emitter.lui(V0, 0x3C88)
+          emitter.ori(V0, V0, 0x8889)
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 35 # LoadSound
+          emitter.lw(A0, (base * 4), FP)
+          emitter.call("Citrine_LoadSound")
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 36 # PlaySound
+          emitter.lw(A0, (base * 4), FP)
+          emitter.call("Citrine_PlaySound")
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 37 # StopSound
+          emitter.call("Citrine_StopSound")
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 43 # GetAnalog(port, axis)
+          emitter.lw(A0, (base * 4), FP)
+          emitter.lw(A1, ((base + 1) * 4), FP)
+          emitter.call("Citrine_GetAnalog")
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 44 # SetRumble(port, small, large)
+          emitter.lw(A0, (base * 4), FP)
+          emitter.lw(A1, ((base + 1) * 4), FP)
+          emitter.lw(A2, ((base + 2) * 4), FP)
+          emitter.call("Citrine_SetRumble")
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 65 # Sleep(frames)
+          emitter.lw(T4, (base * 4), FP)
+          emitter.bgtz(T4, "sleep_start_#{fn_idx}_#{pc}")
+          emitter.nop
+          emitter.ori(T4, ZERO, 1)
+          emitter.label("sleep_start_#{fn_idx}_#{pc}")
+          emitter.label("sleep_loop_#{fn_idx}_#{pc}")
+          emitter.vsync_wait("slp_#{fn_idx}_#{pc}")
+          emitter.addiu(T4, T4, -1)
+          emitter.bgtz(T4, "sleep_loop_#{fn_idx}_#{pc}")
+          emitter.nop
+          emitter.sw(ZERO, (dst * 4), FP)
+
+        when 99 # Panic(msg)
+          emitter.lw(A0, (base * 4), FP)
+          emitter.call("citrine_vm_panic")
 
         when 10 # BeginDrawing
           emitter.call("Citrine_BeginDrawing")
@@ -598,21 +655,53 @@ module Citrine
           emitter.addiu(SP, SP, 32)
           emitter.sw(V0, (dst * 4), FP)
 
+        when 30 # LoadTexture
+          emitter.lw(A0, (base * 4), FP)
+          emitter.call("Citrine_LoadTexture")
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 31 # DrawTexture
+          emitter.lw(A0, (base * 4), FP)
+          emitter.lw(A1, ((base + 1) * 4), FP)
+          emitter.lw(A2, ((base + 2) * 4), FP)
+          emitter.ori(A3, ZERO, 128)
+          emitter.addiu(SP, SP, -32)
+          emitter.ori(T0, ZERO, 128)
+          emitter.sw(T0, 16, SP)
+          emitter.call("Citrine_DrawTexture")
+          emitter.addiu(SP, SP, 32)
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 32 # DrawTextureRec
+          emitter.lw(A0, (base * 4), FP)        # tex_id
+          emitter.lw(A1, ((base + 5) * 4), FP)  # dx
+          emitter.lw(A2, ((base + 6) * 4), FP)  # dy
+          emitter.lw(A3, ((base + 3) * 4), FP)  # dw
+          emitter.lw(T0, ((base + 4) * 4), FP)  # dh
+          emitter.addiu(SP, SP, -32)
+          emitter.sw(T0, 16, SP)
+          emitter.call("Citrine_DrawTexture")
+          emitter.addiu(SP, SP, 32)
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 33 # UnloadTexture
+          emitter.sw(ZERO, (dst * 4), FP)
+
         when 40 # ButtonDown
-          emitter.ori(A0, ZERO, 0) # Port 0
-          emitter.lw(A1, (base * 4), FP)
+          emitter.lw(A0, (base * 4), FP)
+          emitter.lw(A1, ((base + 1) * 4), FP)
           emitter.call("Citrine_ButtonDown")
           emitter.sw(V0, (dst * 4), FP)
 
         when 41 # ButtonPressed
-          emitter.ori(A0, ZERO, 0)
-          emitter.lw(A1, (base * 4), FP)
+          emitter.lw(A0, (base * 4), FP)
+          emitter.lw(A1, ((base + 1) * 4), FP)
           emitter.call("Citrine_ButtonPressed")
           emitter.sw(V0, (dst * 4), FP)
 
         when 42 # ButtonReleased
-          emitter.ori(A0, ZERO, 0)
-          emitter.lw(A1, (base * 4), FP)
+          emitter.lw(A0, (base * 4), FP)
+          emitter.lw(A1, ((base + 1) * 4), FP)
           emitter.call("Citrine_ButtonReleased")
           emitter.sw(V0, (dst * 4), FP)
 
@@ -738,9 +827,122 @@ module Citrine
           emitter.call("Citrine_StringEndsWith")
           emitter.sw(V0, (dst * 4), FP)
 
+        when 195 # StringConcat(s1, s2)
+          emitter.lw(A0, (base * 4), FP)
+          emitter.lw(A1, ((base + 1) * 4), FP)
+          emitter.call("Citrine_StringConcat")
+          emitter.sw(V0, (dst * 4), FP)
+
         when 196 # ToString(int_val)
           emitter.lw(A0, (base * 4), FP)
           emitter.call("Citrine_ToString")
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 160 # PointerMalloc: dest = malloc(count * 4)
+          emitter.lw(A0, (base * 4), FP) # element count
+          emitter.sll(A0, A0, 2)         # bytes = count * 4
+          emitter.lui(T0, 0x7000)
+          emitter.lw(V0, 0x8C, T0)       # current heap_ptr
+          emitter.bnez(V0, "malloc_heap_ok_#{fn_idx}_#{pc}")
+          emitter.nop
+          emitter.lui(V0, 0x0022)        # default heap base 0x00220000
+          emitter.label("malloc_heap_ok_#{fn_idx}_#{pc}")
+          emitter.addiu(T1, A0, 15)
+          emitter.andi(T1, T1, 0xFFF0)   # 16-byte align
+          emitter.addu(T2, V0, T1)
+          emitter.sw(T2, 0x8C, T0)       # store updated heap_ptr
+          # zero allocated memory
+          emitter.move(T3, V0)
+          emitter.label("malloc_zero_loop_#{fn_idx}_#{pc}")
+          emitter.beqz(T1, "malloc_zero_done_#{fn_idx}_#{pc}")
+          emitter.nop
+          emitter.sw(ZERO, 0, T3)
+          emitter.addiu(T3, T3, 4)
+          emitter.addiu(T1, T1, -4)
+          emitter.jump("malloc_zero_loop_#{fn_idx}_#{pc}")
+          emitter.nop
+          emitter.label("malloc_zero_done_#{fn_idx}_#{pc}")
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 161 # PointerGet: dest = *(ptr + idx * 4)
+          emitter.lw(T0, (base * 4), FP)       # ptr
+          emitter.lw(T1, ((base + 1) * 4), FP) # idx
+          emitter.sll(T1, T1, 2)
+          emitter.addu(T0, T0, T1)             # address
+          emitter.lw(V0, 0, T0)                # load word from address
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 162 # PointerSet: *(ptr + idx * 4) = val
+          emitter.lw(T0, (base * 4), FP)       # ptr
+          emitter.lw(T1, ((base + 1) * 4), FP) # idx
+          emitter.lw(T2, ((base + 2) * 4), FP) # val
+          emitter.sll(T1, T1, 2)
+          emitter.addu(T0, T0, T1)
+          emitter.sw(T2, 0, T0)                # store word
+          emitter.sw(T2, (dst * 4), FP)
+
+        when 163 # PointerOffset: dest = ptr + idx * 4
+          emitter.lw(T0, (base * 4), FP)       # ptr
+          emitter.lw(T1, ((base + 1) * 4), FP) # idx
+          emitter.sll(T1, T1, 2)
+          emitter.addu(V0, T0, T1)
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 164, 165, 166, 167 # PointerAddress, PointerNew, BoxNew, BoxUnbox
+          emitter.lw(T0, (base * 4), FP)
+          emitter.sw(T0, (dst * 4), FP)
+
+        when 168 # PointerFree
+          emitter.sw(ZERO, (dst * 4), FP)
+
+        when 170 # TypeIsA
+          emitter.ori(V0, ZERO, 1)
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 171 # TypeAsCast
+          emitter.lw(T0, (base * 4), FP)
+          emitter.sw(T0, (dst * 4), FP)
+
+        when 220 # AudioPlayCDDA
+          emitter.lw(A0, (base * 4), FP)
+          emitter.call("Citrine_PlaySound")
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 221 # AudioStopCDDA
+          emitter.call("Citrine_StopSound")
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 222 # AudioGetCDDAStatus
+          emitter.call("Citrine_GetCDDAStatus")
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 223 # AudioSetVolume
+          emitter.lw(A0, (base * 4), FP)
+          emitter.call("Citrine_SetVolume")
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 224 # AudioSeekStream
+          emitter.lw(A0, (base * 4), FP)
+          emitter.call("Citrine_AudioSeekStream")
+        when 237 # DrawTexturePro
+          emitter.lw(A0, (base * 4), FP)        # tex_id
+          emitter.lw(A1, ((base + 5) * 4), FP)  # dx
+          emitter.lw(A2, ((base + 6) * 4), FP)  # dy
+          emitter.lw(A3, ((base + 7) * 4), FP)  # dw
+          emitter.lw(T0, ((base + 8) * 4), FP)  # dh
+          emitter.addiu(SP, SP, -32)
+          emitter.sw(T0, 16, SP)
+          emitter.call("Citrine_DrawTexture")
+          emitter.addiu(SP, SP, 32)
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 245 # CpuCycleCount: mfc0 $v0, $9
+          emitter.emit((0x10_u32 << 26) | (2_u32 << 16) | (9_u32 << 11))
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 246 # CdvdSeekEntropy
+          emitter.lw(A0, (base * 4), FP)
+          emitter.call("Citrine_CdvdSeekEntropy")
           emitter.sw(V0, (dst * 4), FP)
 
         else

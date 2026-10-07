@@ -30,11 +30,6 @@ total_tracks = album.size
 album_header = album.header
 album_title = album.title
 
-STATUS_STRS = ["PLAYING", "PAUSED", "STOPPED", "FAST FORWARD >>", "REWIND <<"]
-STATUS_COLS = [Color::Green, Color::Yellow, Color::Red, Color::Cyan, Color::Orange]
-
-FOOTER_LOOP_ON = "CROSS: Play/Pause  TRIANGLE: Art View  SQUARE: Loop (ON)  VOL: DPAD U/D"
-FOOTER_LOOP_OFF = "CROSS: Play/Pause  TRIANGLE: Art View  SQUARE: Loop (OFF)  VOL: DPAD U/D"
 
 Citrine.init_window(640, 448, "#{album.artist} - #{album.title} (Citrine PS2 Stream Player)")
 Citrine.set_target_fps(60)
@@ -46,7 +41,8 @@ track_idx = 0
 is_playing = true
 is_looping = true
 art_showcase = false
-elapsed_sec = 0.0_f32
+elapsed_frames = 0
+elapsed_sec = 0
 master_vol = 240
 frame_pulse = 0
 status_mode = 0 # 0=PLAYING, 1=PAUSED, 2=STOPPED, 3=FAST FORWARD, 4=REWIND
@@ -81,7 +77,8 @@ Citrine.main_loop do
   # 2. Transport: Stop (Circle)
   if pad.button_pressed?(Button::Circle)
     is_playing = false
-    elapsed_sec = 0.0_f32
+    elapsed_frames = 0
+    elapsed_sec = 0
     Citrine::Audio.stop_stream
     status_mode = 2 # STOPPED
   end
@@ -99,17 +96,20 @@ Citrine.main_loop do
   # 4. Seeking: Fast Forward (R2 held) / Rewind (L2 held)
   if pad.button_down?(Button::R2)
     # Scrub forward at 4x speed
-    elapsed_sec += (4.0_f32 / 60.0_f32)
+    elapsed_frames += 4
+    elapsed_sec = elapsed_frames // 60
     if elapsed_sec > dur
       elapsed_sec = dur
+      elapsed_frames = dur * 60
     end
     status_mode = 3 # FAST FORWARD
   elsif pad.button_down?(Button::L2)
     # Scrub backward at 4x speed
-    elapsed_sec -= (4.0_f32 / 60.0_f32)
-    if elapsed_sec < 0.0_f32
-      elapsed_sec = 0.0_f32
+    elapsed_frames -= 4
+    if elapsed_frames < 0
+      elapsed_frames = 0
     end
+    elapsed_sec = elapsed_frames // 60
     status_mode = 4 # REWIND
   elsif is_playing
     status_mode = 0 # Normal PLAYING
@@ -117,40 +117,39 @@ Citrine.main_loop do
 
   # When scrub buttons are released, commit seek to audio hardware
   if pad.button_released?(Button::R2) || pad.button_released?(Button::L2)
-    if is_playing
-      Citrine::Audio.seek_music(elapsed_sec)
-    end
+    Citrine::Audio.seek_music(elapsed_sec)
   end
 
   # 5. Jump: +10s (R1) / -10s (L1)
   if pad.button_pressed?(Button::R1)
-    elapsed_sec += 10.0_f32
+    elapsed_frames += 600
+    elapsed_sec = elapsed_frames // 60
     if elapsed_sec > dur
       elapsed_sec = dur
+      elapsed_frames = dur * 60
     end
-    if is_playing
-      Citrine::Audio.seek_music(elapsed_sec)
-    end
+    Citrine::Audio.seek_music(elapsed_sec)
   elsif pad.button_pressed?(Button::L1)
-    elapsed_sec -= 10.0_f32
-    if elapsed_sec < 0.0_f32
-      elapsed_sec = 0.0_f32
+    elapsed_frames -= 600
+    if elapsed_frames < 0
+      elapsed_frames = 0
     end
-    if is_playing
-      Citrine::Audio.seek_music(elapsed_sec)
-    end
+    elapsed_sec = elapsed_frames // 60
+    Citrine::Audio.seek_music(elapsed_sec)
   end
 
   # 6. Track Selection: Next (DPAD Right) / Previous (DPAD Left)
   if pad.button_pressed?(Button::Right)
     track_idx = (track_idx + 1) % total_tracks
-    elapsed_sec = 0.0_f32
+    elapsed_frames = 0
+    elapsed_sec = 0
     if is_playing
       album.play(track_idx)
     end
   elsif pad.button_pressed?(Button::Left)
     track_idx = (track_idx + total_tracks - 1) % total_tracks
-    elapsed_sec = 0.0_f32
+    elapsed_frames = 0
+    elapsed_sec = 0
     if is_playing
       album.play(track_idx)
     end
@@ -174,16 +173,19 @@ Citrine.main_loop do
 
   # Advance playback timer at 60 FPS
   if is_playing && !pad.button_down?(Button::R2) && !pad.button_down?(Button::L2)
-    elapsed_sec += (1.0_f32 / 60.0_f32)
+    elapsed_frames += 1
+    elapsed_sec = elapsed_frames // 60
     if elapsed_sec >= dur
       if is_looping
         # Auto-advance to next track
         track_idx = (track_idx + 1) % total_tracks
-        elapsed_sec = 0.0_f32
+        elapsed_frames = 0
+        elapsed_sec = 0
         album.play(track_idx)
       else
         is_playing = false
         elapsed_sec = dur
+        elapsed_frames = dur * 60
         status_mode = 2 # STOPPED
         Citrine::Audio.stop_stream
       end
@@ -196,15 +198,29 @@ Citrine.main_loop do
   opt_str = curr_track.optical_str
   dur_str = curr_track.duration_s
 
-  status_str = (status_mode >= 0 && status_mode <= 4) ? STATUS_STRS[status_mode] : "STANDBY"
-  status_col = (status_mode >= 0 && status_mode <= 4) ? STATUS_COLS[status_mode] : Color::White
+  status_str = case status_mode
+               when 0 then "PLAYING"
+               when 1 then "PAUSED"
+               when 2 then "STOPPED"
+               when 3 then "FAST FORWARD >>"
+               when 4 then "REWIND <<"
+               else "STANDBY"
+               end
+
+  status_col = case status_mode
+               when 0 then Color::Green
+               when 1 then Color::Yellow
+               when 2 then Color::Red
+               when 3 then Color::Cyan
+               when 4 then Color::Orange
+               else Color::White
+               end
 
   # Zero-allocation time formatting using static digit table
-  el_i = elapsed_sec.to_i
-  el_m = el_i // 60
-  el_s = el_i % 60
-  time_sec_str = el_s < 10 ? "0#{el_s}" : "#{el_s}"
-  time_min_str = el_m < 10 ? "0#{el_m}" : "#{el_m}"
+  el_min = elapsed_sec // 60
+  el_sec = elapsed_sec % 60
+  time_sec_str = el_sec < 10 ? "0#{el_sec}" : "#{el_sec}"
+  time_min_str = el_min < 10 ? "0#{el_min}" : "#{el_min}"
   time_str = "TIME: #{time_min_str}:#{time_sec_str} / #{dur_str}"
 
   Citrine.begin_drawing
@@ -215,11 +231,11 @@ Citrine.main_loop do
     # High-Resolution Album Art Showcase Mode (Draw2D Pipeline)
     # =========================================================================
     Citrine.draw_rectangle(0, 0, 640, 36, Color::Blue)
-    Citrine.draw_text("ALBUM ART SHOWCASE: #{album_title.upcase}", 40, 8, 18, Color::White)
+    Citrine.draw_text("ALBUM ART SHOWCASE: #{album_title.upcase}", 32, 10, 16, Color::White)
 
     # Dynamic Spinning Vinyl Record behind cover art
-    vinyl_x = 310
-    vinyl_y = 195
+    vinyl_x = 290
+    vinyl_y = 175
     Citrine.draw_circle(vinyl_x, vinyl_y, 95, Color.new(20_u8, 20_u8, 26_u8, 255_u8))
     Citrine.draw_circle(vinyl_x, vinyl_y, 88, Color.new(35_u8, 35_u8, 45_u8, 255_u8))
     Citrine.draw_circle(vinyl_x, vinyl_y, 65, Color.new(20_u8, 20_u8, 26_u8, 255_u8))
@@ -227,36 +243,43 @@ Citrine.main_loop do
     Citrine.draw_circle(vinyl_x, vinyl_y, 8, Color.new(12_u8, 14_u8, 22_u8, 255_u8))
 
     # High-Resolution 512x512 Cover Art (236x236 on screen)
-    Citrine.draw_rectangle(48, 78, 240, 240, Color::DarkGray)
-    Citrine.draw_rectangle(50, 80, 236, 236, Color::Black)
-    Citrine.draw_texture_pro(cover_tex, 0, 0, 512, 512, 50, 80, 236, 236, 0.0_f32, 0, 0, Color::White)
+    Citrine.draw_rectangle(32, 54, 240, 240, Color::DarkGray)
+    Citrine.draw_rectangle(34, 56, 236, 236, Color::Black)
+    Citrine.draw_texture_pro(cover_tex, 0, 0, 512, 512, 34, 56, 236, 236, 0.0_f32, 0, 0, Color::White)
 
     # Showcase Metadata Panel
-    Citrine.draw_rectangle(380, 78, 220, 240, Color.new(20_u8, 24_u8, 36_u8, 255_u8))
-    Citrine.draw_text(album_header, 395, 92, 12, Color::Yellow)
-    Citrine.draw_text(track_title, 395, 116, 12, Color::White)
-    Citrine.draw_text(opt_str, 395, 140, 10, Color::LightGray)
-    Citrine.draw_text(status_str, 395, 168, 14, status_col)
-    Citrine.draw_text(time_str, 395, 196, 12, Color::Cyan)
-    Citrine.draw_text("512x512 High-Res PSMT8", 395, 230, 11, Color::Green)
-    Citrine.draw_text("Draw2D Texture Pipeline", 395, 250, 11, Color::LightGray)
+    Citrine.draw_rectangle(300, 54, 308, 240, Color::DarkGray)
+    Citrine.draw_rectangle(302, 56, 304, 236, Color.new(20_u8, 24_u8, 36_u8, 255_u8))
+    Citrine.draw_text(album_header, 314, 66, 10, Color::Yellow)
+    Citrine.draw_text(track_title, 314, 86, 10, Color::White)
+    Citrine.draw_text(opt_str, 314, 106, 10, Color::LightGray)
+    Citrine.draw_text("STATUS: #{status_str}  #{is_looping ? "[LOOP: ON]" : "[LOOP: OFF]"}", 314, 126, 10, status_col)
+    Citrine.draw_text(time_str, 314, 146, 12, Color::Cyan)
+    Citrine.draw_text("TEXTURE: 512x512 High-Res PSMT8 CLUT8", 314, 172, 10, Color::Green)
+    Citrine.draw_text("PIPELINE: Draw2D Hardware Accelerated", 314, 192, 10, Color::LightGray)
+    Citrine.draw_text("DISC: Red Book Multi-Track Mixed Mode", 314, 212, 10, Color::LightGray)
+    Citrine.draw_text("PRESS TRIANGLE TO RETURN TO PLAYER", 314, 236, 10, Color::Yellow)
 
     # Scrubber Bar in showcase
-    Citrine.draw_rectangle(50, 335, 540, 8, Color::DarkGray)
-    scrub_w = (dur > 0.0_f32) ? ((elapsed_sec / dur) * 540.0_f32).to_i : 0
-    scrub_w = scrub_w.clamp(0, 540)
-    Citrine.draw_rectangle(50, 335, scrub_w, 8, Color::Cyan)
+    Citrine.draw_rectangle(32, 308, 576, 8, Color::DarkGray)
+    scrub_w = (dur > 0) ? ((elapsed_sec * 576) // dur) : 0
+    scrub_w = scrub_w.clamp(0, 576)
+    Citrine.draw_rectangle(32, 308, scrub_w, 8, Color::Cyan)
 
     # Footer
-    Citrine.draw_rectangle(40, 366, 560, 56, Color::DarkGray)
-    Citrine.draw_text("TRIANGLE: Return to Player Controls  |  CROSS: Play/Pause  |  L1/R1: +/-10s", 55, 386, 12, Color::Yellow)
+    Citrine.draw_rectangle(32, 328, 576, 96, Color::DarkGray)
+    Citrine.draw_rectangle(34, 330, 572, 92, Color.new(16_u8, 20_u8, 30_u8, 255_u8))
+    Citrine.draw_text("TRIANGLE: Return to Player Controls   CROSS: Play/Pause   CIRCLE: Stop", 46, 342, 10, Color::Yellow)
+    Citrine.draw_text("DPAD LEFT/RIGHT: Prev/Next Track   DPAD UP/DOWN: Master Volume +/-", 46, 364, 10, Color::Cyan)
+    Citrine.draw_text("L1/R1: +/- 10s Skip   L2/R2 (Hold): 4x Rewind / Fast Forward", 46, 386, 10, Color::LightGray)
+    Citrine.draw_text("SQUARE: Toggle Loop Mode   (13 High-Fidelity Audio Tracks)", 46, 408, 10, Color::LightGray)
   else
     # =========================================================================
     # Standard Player View (with Crisp High-Res Downsampling via Draw2D)
     # =========================================================================
     # Header Bar
     Citrine.draw_rectangle(0, 0, 640, 36, Color::Blue)
-    Citrine.draw_text("CITRINE PS2: OPTICAL AUDIO STREAM PLAYER", 40, 8, 18, Color::White)
+    Citrine.draw_text("CITRINE PS2: OPTICAL AUDIO STREAM PLAYER", 32, 10, 16, Color::White)
 
     # Dynamic CD Optical Indicator
     Citrine.draw_circle(590, 18, 10, Color.new(24_u8, 28_u8, 48_u8, 255_u8))
@@ -264,48 +287,54 @@ Citrine.main_loop do
     Citrine.draw_line(578, 18, 602, 18, Color::Cyan)
     Citrine.draw_line(590, 6, 590, 30, Color::Cyan)
 
-    # Album Cover Card (High-Res 512x512 downsampled cleanly)
-    Citrine.draw_rectangle(62, 52, 134, 134, Color::DarkGray)
-    Citrine.draw_rectangle(64, 54, 130, 130, Color::Black)
-    Citrine.draw_texture(cover_tex, 65, 55)
+    # Album Cover Card (High-Res 512x512 downsampled cleanly via Draw2D)
+    Citrine.draw_rectangle(32, 48, 146, 146, Color::DarkGray)
+    Citrine.draw_rectangle(34, 50, 142, 142, Color::Black)
+    Citrine.draw_texture(cover_tex, 41, 57)
 
     # Track Info Card
-    Citrine.draw_rectangle(206, 52, 372, 134, Color::DarkGray)
-    Citrine.draw_rectangle(208, 54, 368, 130, Color.new(20_u8, 24_u8, 36_u8, 255_u8))
+    Citrine.draw_rectangle(188, 48, 420, 146, Color::DarkGray)
+    Citrine.draw_rectangle(190, 50, 416, 142, Color.new(20_u8, 24_u8, 36_u8, 255_u8))
 
-    Citrine.draw_text(album_header, 220, 62, 13, Color::Yellow)
-    Citrine.draw_text(track_title, 220, 84, 12, Color::White)
-    Citrine.draw_text(opt_str, 220, 106, 11, Color::LightGray)
-    Citrine.draw_text(status_str, 220, 128, 13, status_col)
-    Citrine.draw_text(time_str, 220, 150, 12, Color::Cyan)
+    Citrine.draw_text(album_header, 204, 58, 10, Color::Yellow)
+    Citrine.draw_text(track_title, 204, 78, 10, Color::White)
+    Citrine.draw_text(opt_str, 204, 98, 10, Color::LightGray)
+    Citrine.draw_text("STATUS: #{status_str}  #{is_looping ? "[LOOP: ON]" : "[LOOP: OFF]"}", 204, 118, 10, status_col)
+    Citrine.draw_text(time_str, 204, 138, 12, Color::Cyan)
+    Citrine.draw_text("DISC: SONY SPU-2 STREAMING ENGINE (CD-DA MIXED MODE)", 204, 166, 10, Color::Green)
 
     # Timeline Scrubber Bar
-    Citrine.draw_rectangle(62, 204, 516, 10, Color::DarkGray)
-    scrub_w = (dur > 0.0_f32) ? ((elapsed_sec / dur) * 516.0_f32).to_i : 0
-    scrub_w = scrub_w.clamp(0, 516)
-    Citrine.draw_rectangle(62, 204, scrub_w, 10, Color::Cyan)
-    Citrine.draw_rectangle(62 + scrub_w - 3, 200, 6, 18, Color::White)
+    Citrine.draw_rectangle(32, 204, 576, 10, Color::DarkGray)
+    scrub_w = (dur > 0) ? ((elapsed_sec * 576) // dur) : 0
+    scrub_w = scrub_w.clamp(0, 576)
+    Citrine.draw_rectangle(32, 204, scrub_w, 10, Color::Cyan)
+    Citrine.draw_rectangle(32 + scrub_w - 3, 200, 6, 18, Color::White)
 
     # Volume Bar Meter
-    Citrine.draw_text("VOL:", 62, 226, 11, Color::LightGray)
-    Citrine.draw_rectangle(100, 228, 120, 8, Color::DarkGray)
-    vol_w = (master_vol * 120) // 255
-    Citrine.draw_rectangle(100, 228, vol_w, 8, Color::Yellow)
+    Citrine.draw_text("VOL:", 32, 226, 10, Color::LightGray)
+    Citrine.draw_rectangle(68, 227, 130, 8, Color::DarkGray)
+    vol_w = (master_vol * 130) // 255
+    Citrine.draw_rectangle(68, 227, vol_w, 8, Color::Yellow)
+    Citrine.draw_text("#{master_vol * 100 // 255}%", 206, 226, 10, Color::Yellow)
+    Citrine.draw_text("TRACK #{track_idx + 1} OF #{total_tracks}", 490, 226, 10, Color::Green)
 
-    # Spectrum Equalizer (Visual profile per track - 12 retro spectrum bars)
-    eq_x = 62
-    while eq_x < 578
+    # Spectrum Equalizer (Visual profile per track - 16 retro spectrum bars)
+    eq_x = 34
+    while eq_x < 600
       eq_active = is_playing || status_mode == 3 || status_mode == 4
-      eq_h = eq_active ? (12 + ((eq_x * 11 + track_idx * 17) % 40)) : 6
+      bar_idx = (eq_x - 34) // 36
+      eq_h = eq_active ? (10 + ((bar_idx * 13 + track_idx * 17 + frame_pulse) % 65)) : 6
       eq_col = eq_active ? Color::Green : Color::DarkGray
-      Citrine.draw_rectangle(eq_x, 345 - eq_h, 30, eq_h, eq_col)
-      eq_x += 44
+      Citrine.draw_rectangle(eq_x, 345 - eq_h, 26, eq_h, eq_col)
+      eq_x += 36
     end
 
     # Footer Controls & Status Card
-    Citrine.draw_rectangle(40, 366, 560, 56, Color::DarkGray)
-    Citrine.draw_text(is_looping ? FOOTER_LOOP_ON : FOOTER_LOOP_OFF, 55, 376, 11, Color::Yellow)
-    Citrine.draw_text("DPAD L/R: Track +/-  L1/R1: +/-10s  L2/R2: Scrub  (13 CAS Tracks on Disc)", 55, 398, 11, Color::Cyan)
+    Citrine.draw_rectangle(32, 356, 576, 76, Color::DarkGray)
+    Citrine.draw_rectangle(34, 358, 572, 72, Color.new(16_u8, 20_u8, 30_u8, 255_u8))
+    Citrine.draw_text("CROSS: Play/Pause   CIRCLE: Stop   SQUARE: Loop   TRIANGLE: Album Art View", 46, 368, 10, Color::Yellow)
+    Citrine.draw_text("DPAD LEFT/RIGHT: Prev/Next Track   DPAD UP/DOWN: Master Volume +/-", 46, 388, 10, Color::Cyan)
+    Citrine.draw_text("L1/R1: +/- 10s   L2/R2 (Hold): Rewind/Fast Forward   (13 Optical CAS Tracks)", 46, 408, 10, Color::LightGray)
   end
 
   Citrine.end_drawing

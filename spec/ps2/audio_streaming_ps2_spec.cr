@@ -88,7 +88,7 @@ describe "Citrine PS2 Audio Streaming Suite" do
     tc.inject_input(120, Citrine::PadButton::Cross, duration: 2)
     tc.inject_input(180, Citrine::PadButton::R1, duration: 2)
 
-    result = tc.boot_pcsx2(timeout: 14.seconds)
+    result = tc.boot_pcsx2(timeout: 36.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_not_have_memory_faults

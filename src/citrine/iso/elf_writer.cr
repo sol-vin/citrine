@@ -49,7 +49,9 @@ module Citrine
         symbols : Array(SymbolDef),
         entry_point : UInt32 = 0x00100000_u32,
         pad_payload : Bytes? = PadRuntimePayload.bytes,
-        rodata_vaddr : UInt32 = 0x00500000_u32
+        rodata_vaddr : UInt32 = 0x00500000_u32,
+        splash_payload : Bytes? = nil,
+        splash_vaddr : UInt32 = 0x00220000_u32
       ) : Bytes
         # .strtab
         strtab = IO::Memory.new
@@ -94,6 +96,7 @@ module Citrine
           text:     add_shstr.call(".text"),
           rodata:   add_shstr.call(".rodata"),
           pad:      pad_payload ? add_shstr.call(".pad") : 0_u32,
+          splash:   splash_payload ? add_shstr.call(".splash") : 0_u32,
           data:     add_shstr.call(".data"),
           spram:    add_shstr.call(".spram"),
           symtab:   add_shstr.call(".symtab"),
@@ -102,22 +105,24 @@ module Citrine
         }
         shstrtab_data = shstrtab.to_slice
 
-        num_ph = pad_payload ? 4_u16 : 3_u16
-        shnum = pad_payload ? 9_u16 : 8_u16
-        shstrndx = pad_payload ? 8_u16 : 7_u16
+        num_ph = 3_u16 + (pad_payload ? 1_u16 : 0_u16) + (splash_payload ? 1_u16 : 0_u16)
+        shnum = 8_u16 + (pad_payload ? 1_u16 : 0_u16) + (splash_payload ? 1_u16 : 0_u16)
+        shstrndx = (shnum - 1_u16).to_u16
 
         # Segment and section alignment (4096 bytes = 2 CD-ROM sectors, meeting PS2 CDVD DMA & page alignment)
-        seg_align       = 0x1000_u32
-        offset_text     = 0x1000_u32
-        offset_rodata   = (offset_text + text_data.size.to_u32 + seg_align - 1) & ~(seg_align - 1)
-        raw_pad_offset  = offset_rodata + rodata_data.size.to_u32
-        offset_pad      = (raw_pad_offset + seg_align - 1) & ~(seg_align - 1)
-        raw_data_offset = pad_payload ? (offset_pad + pad_payload.size.to_u32) : raw_pad_offset
-        offset_data     = (raw_data_offset + seg_align - 1) & ~(seg_align - 1)
-        offset_symtab   = offset_data + data_data.size.to_u32
-        offset_strtab   = offset_symtab + symtab_data.size.to_u32
-        offset_shstrtab = offset_strtab + strtab_data.size.to_u32
-        shoff           = (offset_shstrtab + shstrtab_data.size.to_u32 + 3) & ~3_u32
+        seg_align         = 0x1000_u32
+        offset_text       = 0x1000_u32
+        offset_rodata     = (offset_text + text_data.size.to_u32 + seg_align - 1) & ~(seg_align - 1)
+        raw_pad_offset    = offset_rodata + rodata_data.size.to_u32
+        offset_pad        = (raw_pad_offset + seg_align - 1) & ~(seg_align - 1)
+        raw_splash_offset = pad_payload ? (offset_pad + pad_payload.size.to_u32) : raw_pad_offset
+        offset_splash     = (raw_splash_offset + seg_align - 1) & ~(seg_align - 1)
+        raw_data_offset   = splash_payload ? (offset_splash + splash_payload.size.to_u32) : raw_splash_offset
+        offset_data       = (raw_data_offset + seg_align - 1) & ~(seg_align - 1)
+        offset_symtab     = offset_data + data_data.size.to_u32
+        offset_strtab     = offset_symtab + symtab_data.size.to_u32
+        offset_shstrtab   = offset_strtab + strtab_data.size.to_u32
+        shoff             = (offset_shstrtab + shstrtab_data.size.to_u32 + 3) & ~3_u32
 
         io = IO::Memory.new
 
@@ -166,7 +171,19 @@ module Citrine
           io.write_bytes(0x1000_u32, IO::ByteFormat::LittleEndian)
         end
 
-        # PH 2 (or 1): Read-Only Data (.rodata at rodata_vaddr)
+        if sp = splash_payload
+          # PH: Splash Screen Packet (.splash at splash_vaddr)
+          io.write_bytes(PT_LOAD, IO::ByteFormat::LittleEndian)
+          io.write_bytes(offset_splash, IO::ByteFormat::LittleEndian)
+          io.write_bytes(splash_vaddr, IO::ByteFormat::LittleEndian)
+          io.write_bytes(splash_vaddr, IO::ByteFormat::LittleEndian)
+          io.write_bytes(sp.size.to_u32, IO::ByteFormat::LittleEndian)
+          io.write_bytes(sp.size.to_u32, IO::ByteFormat::LittleEndian)
+          io.write_bytes(PF_R | PF_W, IO::ByteFormat::LittleEndian)
+          io.write_bytes(0x1000_u32, IO::ByteFormat::LittleEndian)
+        end
+
+        # Read-Only Data (.rodata at rodata_vaddr)
         io.write_bytes(PT_LOAD, IO::ByteFormat::LittleEndian)
         io.write_bytes(offset_rodata, IO::ByteFormat::LittleEndian)
         io.write_bytes(rodata_vaddr, IO::ByteFormat::LittleEndian)
@@ -176,7 +193,7 @@ module Citrine
         io.write_bytes(PF_R | PF_W, IO::ByteFormat::LittleEndian)
         io.write_bytes(0x1000_u32, IO::ByteFormat::LittleEndian)
 
-        # PH 3 (or 2): Data (.data)
+        # Data (.data)
         data_vaddr = ((rodata_vaddr + rodata_data.size.to_u32 + 0xFFF) & ~0xFFF_u32)
 
         io.write_bytes(PT_LOAD, IO::ByteFormat::LittleEndian)
@@ -205,6 +222,13 @@ module Citrine
             io.write_byte(0_u8)
           end
           io.write(pp)
+        end
+
+        if sp = splash_payload
+          while io.pos < offset_splash
+            io.write_byte(0_u8)
+          end
+          io.write(sp)
         end
 
         while io.pos < offset_data
@@ -263,7 +287,21 @@ module Citrine
           io.write_bytes(0_u32, IO::ByteFormat::LittleEndian)
         end
 
-        # [3 or 4] .data
+        if sp = splash_payload
+          # .splash
+          io.write_bytes(sh_names[:splash], IO::ByteFormat::LittleEndian)
+          io.write_bytes(SHT_PROGBITS, IO::ByteFormat::LittleEndian)
+          io.write_bytes(SHF_ALLOC | SHF_WRITE, IO::ByteFormat::LittleEndian)
+          io.write_bytes(splash_vaddr, IO::ByteFormat::LittleEndian)
+          io.write_bytes(offset_splash, IO::ByteFormat::LittleEndian)
+          io.write_bytes(sp.size.to_u32, IO::ByteFormat::LittleEndian)
+          io.write_bytes(0_u32, IO::ByteFormat::LittleEndian)
+          io.write_bytes(0_u32, IO::ByteFormat::LittleEndian)
+          io.write_bytes(16_u32, IO::ByteFormat::LittleEndian)
+          io.write_bytes(0_u32, IO::ByteFormat::LittleEndian)
+        end
+
+        # .data
         io.write_bytes(sh_names[:data], IO::ByteFormat::LittleEndian)
         io.write_bytes(SHT_PROGBITS, IO::ByteFormat::LittleEndian)
         io.write_bytes(SHF_ALLOC | SHF_WRITE, IO::ByteFormat::LittleEndian)
@@ -275,7 +313,7 @@ module Citrine
         io.write_bytes(4_u32, IO::ByteFormat::LittleEndian)
         io.write_bytes(0_u32, IO::ByteFormat::LittleEndian)
 
-        # [4 or 5] .spram
+        # .spram
         io.write_bytes(sh_names[:spram], IO::ByteFormat::LittleEndian)
         io.write_bytes(SHT_NOBITS, IO::ByteFormat::LittleEndian)
         io.write_bytes(SHF_ALLOC | SHF_WRITE, IO::ByteFormat::LittleEndian)
@@ -287,8 +325,8 @@ module Citrine
         io.write_bytes(16_u32, IO::ByteFormat::LittleEndian)
         io.write_bytes(0_u32, IO::ByteFormat::LittleEndian)
 
-        # [5 or 6] .symtab
-        strtab_idx = pad_payload ? 7_u32 : 6_u32
+        # .symtab
+        strtab_idx = (shnum - 2_u16).to_u32
         io.write_bytes(sh_names[:symtab], IO::ByteFormat::LittleEndian)
         io.write_bytes(SHT_SYMTAB, IO::ByteFormat::LittleEndian)
         io.write_bytes(0_u32, IO::ByteFormat::LittleEndian)

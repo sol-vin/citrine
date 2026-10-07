@@ -2,6 +2,7 @@ require "../gs/gif_packet_builder"
 require "./phase_extractor"
 
 require "./digit_quad_table"
+require "./font_quad_table"
 
 module Citrine
   module ISO
@@ -40,6 +41,8 @@ module Citrine
       property button_msg_addrs : Hash(String, UInt32)
       property phase_msg_addrs : Hash(Int32, UInt32)
       property digit_table_addr : UInt32
+      property font_table_addr : UInt32
+      property texture_table_addr : UInt32
       property time_text_present : Bool
       property min_tens_offset : UInt32
       property min_ones_offset : UInt32
@@ -68,6 +71,8 @@ module Citrine
         @button_msg_addrs = Hash(String, UInt32).new,
         @phase_msg_addrs = Hash(Int32, UInt32).new,
         @digit_table_addr = 0_u32,
+        @font_table_addr = 0_u32,
+        @texture_table_addr = 0_u32,
         @time_text_present = false,
         @min_tens_offset = 0_u32,
         @min_ones_offset = 0_u32,
@@ -377,6 +382,46 @@ module Citrine
         end
         curr_addr = RODATA_VADDR + out_mem.size.to_u32
 
+        # 7. Font Quad Table (12,160 bytes for 95 ASCII characters 0x20..0x7E)
+        pad = (16 - (out_mem.size % 16)) % 16
+        pad.times { out_mem.write_byte(0_u8) }
+        font_table_addr = RODATA_VADDR + out_mem.size.to_u32
+        FontQuadTable::DATA.each do |w|
+          out_mem.write_bytes(w, IO::ByteFormat::LittleEndian)
+        end
+        curr_addr = RODATA_VADDR + out_mem.size.to_u32
+
+        # 8. Texture Span Table
+        texture_table_addr = 0_u32
+        cbt_candidate = Citrine::ISO::DiscManifest.current.assets.find { |a| a.target_name.downcase.ends_with?(".cbt") }
+        cbt_file = if cbt_candidate && File.exists?(cbt_candidate.source_path)
+                     cbt_candidate.source_path
+                   elsif File.exists?("cover.cbt")
+                     "cover.cbt"
+                   elsif File.exists?("examples/10_cd_player/cover.cbt")
+                     "examples/10_cd_player/cover.cbt"
+                   else
+                     Dir.glob("**/*.cbt").first?
+                   end
+        if cbt_file && File.exists?(cbt_file)
+          spans = extract_cbt_spans(cbt_file, grid_res: 32)
+          if !spans.empty?
+            pad = (16 - (out_mem.size % 16)) % 16
+            pad.times { out_mem.write_byte(0_u8) }
+            texture_table_addr = RODATA_VADDR + out_mem.size.to_u32
+            out_mem.write_bytes(32_u32, IO::ByteFormat::LittleEndian) # grid_res
+            out_mem.write_bytes(spans.size.to_u32, IO::ByteFormat::LittleEndian) # span_count
+            spans.each do |s|
+              out_mem.write_byte(s.gx1)
+              out_mem.write_byte(s.gy1)
+              out_mem.write_byte(s.gx2)
+              out_mem.write_byte(s.gy2)
+              out_mem.write_bytes(s.color, IO::ByteFormat::LittleEndian)
+            end
+            curr_addr = RODATA_VADDR + out_mem.size.to_u32
+          end
+        end
+
         f_info = phase_infos.first? || PhaseWidgetInfo.new
 
         RodataResult.new(
@@ -392,6 +437,8 @@ module Citrine
           button_msg_addrs: button_msg_addrs,
           phase_msg_addrs: phase_msg_addrs,
           digit_table_addr: digit_table_addr,
+          font_table_addr: font_table_addr,
+          texture_table_addr: texture_table_addr,
           time_text_present: f_info.time_text_present,
           min_tens_offset: f_info.min_tens_offset,
           min_ones_offset: f_info.min_ones_offset,
@@ -407,6 +454,59 @@ module Citrine
           frame_text_scale: f_info.frame_text_scale,
           time_text_scale: f_info.time_text_scale
         )
+      end
+
+      record TextureSpan, gx1 : UInt8, gy1 : UInt8, gx2 : UInt8, gy2 : UInt8, color : UInt32
+
+      private def extract_cbt_spans(path : String, grid_res : Int32 = 32) : Array(TextureSpan)
+        spans = [] of TextureSpan
+        return spans unless File.exists?(path)
+        bytes = File.read(path).to_slice
+        return spans unless bytes.size > 16 && String.new(bytes[0, 4]) == "CBT1"
+
+        w = IO::ByteFormat::LittleEndian.decode(UInt16, bytes[4, 2]).to_i
+        h = IO::ByteFormat::LittleEndian.decode(UInt16, bytes[6, 2]).to_i
+        pal_size = IO::ByteFormat::LittleEndian.decode(UInt32, bytes[10, 4]).to_i
+        pal = bytes[14, pal_size]
+        pixels = bytes[14 + pal_size + 4, w * h]
+
+        step_x = w // grid_res
+        step_y = h // grid_res
+
+        grid_res.times do |gy|
+          gx = 0
+          while gx < grid_res
+            px = (gx * step_x).clamp(0, w - 1)
+            py = (gy * step_y).clamp(0, h - 1)
+            pal_idx = pixels[py * w + px].to_i
+            r = pal[pal_idx * 4].to_u32
+            g = pal[pal_idx * 4 + 1].to_u32
+            b = pal[pal_idx * 4 + 2].to_u32
+            color = 0xFF000000_u32 | (b << 16) | (g << 8) | r
+
+            span_len = 1
+            while (gx + span_len) < grid_res
+              npx = ((gx + span_len) * step_x).clamp(0, w - 1)
+              npal_idx = pixels[py * w + npx].to_i
+              nr = pal[npal_idx * 4].to_u32
+              ng = pal[npal_idx * 4 + 1].to_u32
+              nb = pal[npal_idx * 4 + 2].to_u32
+              ncolor = 0xFF000000_u32 | (nb << 16) | (ng << 8) | nr
+              break if ncolor != color
+              span_len += 1
+            end
+
+            spans << TextureSpan.new(
+              gx1: gx.to_u8,
+              gy1: gy.to_u8,
+              gx2: (gx + span_len).to_u8,
+              gy2: (gy + 1).to_u8,
+              color: color
+            )
+            gx += span_len
+          end
+        end
+        spans
       end
 
       private def emit_digit_slot(io : IO::Memory, ch : Char, cx : Int32, cy : Int32, scale : Int32, r : UInt8, g : UInt8, b : UInt8)

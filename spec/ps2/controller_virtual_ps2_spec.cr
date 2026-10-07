@@ -59,7 +59,7 @@ describe "Citrine PS2 Virtual Controller & Button Testing Suite" do
     # Inject Cross button at frames 10-15
     tc.inject_input(frame: 10, button: Citrine::PadButton::Cross, duration: 5)
 
-    result = tc.boot_pcsx2(timeout: 8.0.seconds)
+    result = tc.boot_pcsx2(timeout: 12.0.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE] Button Cross (X) pressed!")

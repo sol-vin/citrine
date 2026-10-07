@@ -1,6 +1,8 @@
 # Citrine Random Number Generation Suite
 # Deterministic PRNG (XorShift64* / PCG), Gaussian Distribution (Box-Muller & Irwin-Hall), and Coherent Perlin Gradient Noise
 
+require "./rng/secure"
+
 module Citrine
   # Pseudo-random number generators, continuous probability distributions,
   # and coherent multidimensional Perlin gradient noise for procedural generation.
@@ -14,6 +16,17 @@ module Citrine
       # Creates a new PRNG with optional initial 64-bit `seed`.
       def initialize(seed : UInt64 = 0x853c49e6748fea9b_u64)
         @state = seed == 0_u64 ? 0x853c49e6748fea9b_u64 : seed
+      end
+
+      # Reseeds PRNG state from live PS2 hardware entropy pool
+      def reseed_from_hardware
+        ptr = Pointer(UInt32).new(0x700000E0_u32)
+        val = ptr[0].to_u64
+        if val == 0_u64
+          ptr2 = Pointer(UInt32).new(0x70000034_u32)
+          val = ptr2[0].to_u64
+        end
+        @state = val == 0_u64 ? 0x853c49e6748fea9b_u64 : (val | (val << 32))
       end
 
       # Reseeds the generator.
@@ -217,21 +230,24 @@ module Citrine
     end
 
     # Shared default PRNG stream for module-level convenience calls.
-    GLOBAL_PRNG = PRNG.new
+    GLOBAL_PRNG = PRNG.new(0x853c49e6748fea9b_u64)
 
     # Returns pseudo-random float in `[0.0, 1.0)`.
     def self.rand_float : Float32
+      if GLOBAL_PRNG.state == 0x853c49e6748fea9b_u64
+        GLOBAL_PRNG.reseed_from_hardware
+      end
       GLOBAL_PRNG.next_float
     end
 
     # Returns pseudo-random integer in `[0, max]`.
     def self.rand_int(max : Int32) : Int32
-      GLOBAL_PRNG.next_int(0, max)
+      Secure.next_int(0, max)
     end
 
     # Returns pseudo-random integer in range `[min, max]`.
     def self.rand(min : Int32, max : Int32) : Int32
-      GLOBAL_PRNG.next_int(min, max)
+      Secure.next_int(min, max)
     end
 
     # Returns normally distributed float with given `mean` and `std_dev`.
@@ -247,6 +263,16 @@ module Citrine
 
   # Module-level convenience method returning random integer `[min, max]`.
   def self.rand(min : Int32, max : Int32) : Int32
-    RNG::GLOBAL_PRNG.next_int(min, max)
+    RNG::Secure.next_int(min, max)
+  end
+
+  # Module-level convenience method returning random float `[0.0, 1.0)`.
+  def self.rand_float : Float32
+    RNG::Secure.next_float
+  end
+
+  # Module-level convenience method returning random boolean.
+  def self.rand_bool : Bool
+    (RNG::Secure.next_u32 & 1_u32) == 1_u32
   end
 end

@@ -73,13 +73,17 @@ module Citrine
     property is_struct : Bool = false
     property abstract_methods : Set(String) = Set(String).new
     getter fields : Hash(String, Int32)
+    getter field_types : Hash(String, String)
     getter methods : Hash(String, Crystal::Def)
+    getter method_return_types : Hash(String, String)
     getter class_fields : Hash(String, Int32)
     getter class_methods : Hash(String, Crystal::Def)
 
     def initialize(@class_id : UInt32, @name : String)
       @fields = Hash(String, Int32).new
+      @field_types = Hash(String, String).new
       @methods = Hash(String, Crystal::Def).new
+      @method_return_types = Hash(String, String).new
       @class_fields = Hash(String, Int32).new
       @class_methods = Hash(String, Crystal::Def).new
     end
@@ -419,6 +423,11 @@ module Citrine
           end
 
         when Crystal::Def
+          if ret = child.return_type
+            ret_s = ret.to_s
+            ret_s = ret_s.split("::").last if ret_s.includes?("::")
+            cls_info.method_return_types[child.name] = ret_s
+          end
           if child.abstract?
             cls_info.abstract_methods << child.name
           elsif child.receiver
@@ -434,6 +443,11 @@ module Citrine
             child.args.each do |arg|
               clean_name = arg.name.gsub(/^@/, "")
               ivar_name = "@#{clean_name}"
+              if (res = arg.restriction)
+                res_s = res.to_s
+                res_s = res_s.split("::").last if res_s.includes?("::")
+                cls_info.field_types[clean_name] = res_s
+              end
               if arg.name.starts_with?("@") || (!has_at_args && child.name == "initialize" && cls_info.fields.has_key?(ivar_name))
                 cls_info.field_index(ivar_name)
                 init_assigns << Crystal::Assign.new(Crystal::InstanceVar.new(ivar_name), Crystal::Var.new(clean_name))
@@ -488,6 +502,12 @@ module Citrine
                         else
                           prop_arg.to_s
                         end
+            if prop_arg.is_a?(Crystal::TypeDeclaration)
+              type_s = prop_arg.declared_type.to_s
+              type_s = type_s.split("::").last if type_s.includes?("::")
+              cls_info.field_types[prop_name] = type_s
+              cls_info.method_return_types[prop_name] = type_s
+            end
             cls_info.field_index(prop_name)
             if child.name == "property" || child.name == "getter"
               getter_name = "#{cls_info.name}##{prop_name}"
@@ -925,6 +945,25 @@ module Citrine
             if recv_name && (@var_types[recv_name]? == "Citrine::Audio::Album" || @var_types[recv_name]? == "Album" || @var_types[recv_name]? == "Audio::Album")
               val_type = "Array(Track)"
             end
+          elsif (recv = call_node.obj)
+            recv_name = recv.is_a?(Crystal::Var) ? recv.name : (recv.is_a?(Crystal::Path) ? recv.names.last : nil)
+            if recv_name && (rtype = @var_types[recv_name]?)
+              cls_target = @classes[rtype]? || @classes[rtype.split("::").last]?
+              if cls_target
+                val_type = cls_target.method_return_types[call_node.name]? || cls_target.field_types[call_node.name]?
+              end
+            end
+            if val_type.nil? && (call_node.name.ends_with?("_s") || call_node.name.ends_with?("_str") || call_node.name.includes?("title") || call_node.name.includes?("header") || call_node.name.includes?("artist") || call_node.name.includes?("album"))
+              val_type = "String"
+            end
+          end
+        elsif node.value.is_a?(Crystal::InstanceVar)
+          clean = node.value.as(Crystal::InstanceVar).name.gsub(/^@/, "")
+          if cls = @current_class
+            val_type = cls.field_types[clean]?
+          end
+          if val_type.nil? && (clean.ends_with?("_str") || clean.ends_with?("duration_s") || clean == "dur_s" || clean.includes?("title") || clean.includes?("header") || clean.includes?("artist") || clean.includes?("album"))
+            val_type = "String"
           end
         elsif node.value.is_a?(Crystal::Var)
           val_type = @var_types[node.value.as(Crystal::Var).name]?
@@ -962,6 +1001,9 @@ module Citrine
              (case_node.else.is_a?(Crystal::StringLiteral) || case_node.else.is_a?(Crystal::StringInterpolation))
             val_type = "String"
           end
+        end
+        if val_type.nil? && (target_name.ends_with?("_str") || target_name.ends_with?("duration_s") || target_name == "dur_s" || target_name.includes?("title") || target_name.includes?("header"))
+          val_type = "String"
         end
         if val_type
           @var_types[target_name] = val_type
@@ -2056,6 +2098,18 @@ module Citrine
 
       obj_str = node.obj ? node.obj.to_s : ""
 
+      if node.name == "boot_screen" && (obj_str.empty? || obj_str == "Citrine")
+        val = node.args.first?.try(&.to_s)
+        if val == "false"
+          add_string("citrine:boot_screen:false")
+        else
+          add_string("citrine:boot_screen:true")
+        end
+        dest = allocator.alloc_temp
+        instructions << Instruction.encode_load_nil(dest)
+        return dest
+      end
+
       if @in_main_loop
         if node.name == "exit" && (obj_str.empty? || obj_str == "Citrine")
           if @loop_break_jumps.size > 0
@@ -2544,13 +2598,20 @@ module Citrine
         return dest
       end
 
-      # Array index read: arr[idx], arr[idx]? or custom #[] / #[]? method dispatch
+      # Array / Pointer index read: arr[idx], arr[idx]? or ptr[idx]
       if (node.name == "[]" || node.name == "[]?") && node.obj && node.args.size == 1
-        custom_bracket_method = nil
         bracket_recv_type = if node.obj.is_a?(Crystal::Var)
                               @var_types[node.obj.as(Crystal::Var).name]?
+                            elsif node.obj.is_a?(Crystal::InstanceVar)
+                              @var_types[node.obj.as(Crystal::InstanceVar).name]?
                             elsif node.obj.is_a?(Crystal::Path)
                               node.obj.as(Crystal::Path).names.last
+                            elsif node.obj.is_a?(Crystal::Call) && (c = node.obj.as(Crystal::Call))
+                              if (c.name == "new" || c.name == "malloc") && c.obj.to_s.includes?("Pointer")
+                                "Pointer"
+                              else
+                                nil
+                              end
                             else
                               nil
                             end
@@ -2558,6 +2619,22 @@ module Citrine
         if bracket_recv_type
           clean_vtype = bracket_recv_type.split("(").first.strip
           clean_vtype = clean_vtype[2..-1] if clean_vtype.starts_with?("::")
+          if clean_vtype.starts_with?("Pointer")
+            ptr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+            idx_reg = compile_node(node.args[0], allocator, instructions, fn)
+            seq_base = allocator.alloc_contiguous(2)
+            instructions << Instruction.encode_abc(Opcode::Move, seq_base, ptr_reg, 0_u8)
+            instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, idx_reg, 0_u8)
+            instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::PointerGet)
+            instructions << Instruction.new(instr_val)
+            allocator.free_temp(ptr_reg)
+            allocator.free_temp(idx_reg)
+            allocator.free_temp(seq_base)
+            allocator.free_temp((seq_base + 1).to_u8)
+            return dest
+          end
+
+          custom_bracket_method = nil
           if !clean_vtype.starts_with?("Array") && !clean_vtype.starts_with?("StaticArray")
             cands = [clean_vtype, clean_vtype.split("::").last]
             cands.each do |c|
@@ -2567,25 +2644,25 @@ module Citrine
               end
             end
           end
-        end
 
-        if custom_bracket_method && (f_idx = @functions.index { |f| f.name == custom_bracket_method })
-          obj_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-          call_base = allocator.alloc_call_frame(node.args.size + 2)
-          dest_call = call_base
-          instructions << Instruction.encode_abc(Opcode::Move, (dest_call + 1).to_u8, obj_reg, 0_u8)
-          allocator.free_temp(obj_reg)
-          node.args.each_with_index do |arg, i|
-            arg_reg = compile_node(arg, allocator, instructions, fn)
-            target_reg = (dest_call + 2_u8 + i.to_u8).to_u8
-            instructions << Instruction.encode_abc(Opcode::Move, target_reg, arg_reg, 0_u8)
-            allocator.free_temp(arg_reg)
+          if custom_bracket_method && (f_idx = @functions.index { |f| f.name == custom_bracket_method })
+            obj_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+            call_base = allocator.alloc_call_frame(node.args.size + 2)
+            dest_call = call_base
+            instructions << Instruction.encode_abc(Opcode::Move, (dest_call + 1).to_u8, obj_reg, 0_u8)
+            allocator.free_temp(obj_reg)
+            node.args.each_with_index do |arg, i|
+              arg_reg = compile_node(arg, allocator, instructions, fn)
+              target_reg = (dest_call + 2_u8 + i.to_u8).to_u8
+              instructions << Instruction.encode_abc(Opcode::Move, target_reg, arg_reg, 0_u8)
+              allocator.free_temp(arg_reg)
+            end
+            instructions << Instruction.encode_ab_imm(Opcode::Call, dest_call, f_idx.to_u16)
+            (node.args.size + 1).times { |i| allocator.free_temp((dest_call + 1_u8 + i.to_u8).to_u8) }
+            instructions << Instruction.encode_abc(Opcode::Move, dest, dest_call, 0_u8)
+            allocator.free_temp(dest_call)
+            return dest
           end
-          instructions << Instruction.encode_ab_imm(Opcode::Call, dest_call, f_idx.to_u16)
-          (node.args.size + 1).times { |i| allocator.free_temp((dest_call + 1_u8 + i.to_u8).to_u8) }
-          instructions << Instruction.encode_abc(Opcode::Move, dest, dest_call, 0_u8)
-          allocator.free_temp(dest_call)
-          return dest
         end
 
         arr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
@@ -2602,8 +2679,45 @@ module Citrine
         return dest
       end
 
-      # Array index write: arr[idx] = val
+      # Array / Pointer index write: arr[idx] = val or ptr[idx] = val
       if node.name == "[]=" && node.obj && node.args.size == 2
+        bracket_recv_type = if node.obj.is_a?(Crystal::Var)
+                              @var_types[node.obj.as(Crystal::Var).name]?
+                            elsif node.obj.is_a?(Crystal::InstanceVar)
+                              @var_types[node.obj.as(Crystal::InstanceVar).name]?
+                            elsif node.obj.is_a?(Crystal::Path)
+                              node.obj.as(Crystal::Path).names.last
+                            elsif node.obj.is_a?(Crystal::Call) && (c = node.obj.as(Crystal::Call))
+                              if (c.name == "new" || c.name == "malloc") && c.obj.to_s.includes?("Pointer")
+                                "Pointer"
+                              else
+                                nil
+                              end
+                            else
+                              nil
+                            end
+
+        if bracket_recv_type
+          clean_vtype = bracket_recv_type.split("(").first.strip
+          clean_vtype = clean_vtype[2..-1] if clean_vtype.starts_with?("::")
+          if clean_vtype.starts_with?("Pointer")
+            ptr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+            idx_reg = compile_node(node.args[0], allocator, instructions, fn)
+            val_reg = compile_node(node.args[1], allocator, instructions, fn)
+            seq_base = allocator.alloc_contiguous(3)
+            instructions << Instruction.encode_abc(Opcode::Move, seq_base, ptr_reg, 0_u8)
+            instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, idx_reg, 0_u8)
+            instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 2).to_u8, val_reg, 0_u8)
+            instr_val = Instruction.call_native_raw(dest, seq_base, NativeId::PointerSet)
+            instructions << Instruction.new(instr_val)
+            allocator.free_temp(ptr_reg)
+            allocator.free_temp(idx_reg)
+            allocator.free_temp(val_reg)
+            3.times { |i| allocator.free_temp((seq_base + i).to_u8) }
+            return dest
+          end
+        end
+
         arr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
         idx_reg = compile_node(node.args[0], allocator, instructions, fn)
         val_reg = compile_node(node.args[1], allocator, instructions, fn)
@@ -2647,11 +2761,37 @@ module Citrine
 
       # Array size: arr.size / arr.length
       if (node.name == "size" || node.name == "length") && node.obj && node.args.empty?
-        arr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        instr_val = Instruction.call_native_raw(dest, arr_reg, NativeId::ArraySize)
-        instructions << Instruction.new(instr_val)
-        allocator.free_temp(arr_reg)
-        return dest
+        has_custom_size = false
+        sz_recv_type = if node.obj.is_a?(Crystal::Var)
+                         @var_types[node.obj.as(Crystal::Var).name]?
+                       elsif node.obj.is_a?(Crystal::InstanceVar)
+                         @var_types[node.obj.as(Crystal::InstanceVar).name]?
+                       elsif node.obj.is_a?(Crystal::Path)
+                         node.obj.as(Crystal::Path).names.last
+                       else
+                         nil
+                       end
+        if sz_recv_type
+          clean_recv = sz_recv_type.split("(").first.strip
+          clean_recv = clean_recv[2..-1] if clean_recv.starts_with?("::")
+          if !clean_recv.starts_with?("Array") && !clean_recv.starts_with?("StaticArray")
+            cands = [clean_recv, clean_recv.split("::").last]
+            cands.each do |c|
+              if @functions.any? { |f| f.name == "#{c}##{node.name}" } || @classes[c]?.try(&.methods.has_key?(node.name))
+                has_custom_size = true
+                break
+              end
+            end
+          end
+        end
+
+        unless has_custom_size
+          arr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+          instr_val = Instruction.call_native_raw(dest, arr_reg, NativeId::ArraySize)
+          instructions << Instruction.new(instr_val)
+          allocator.free_temp(arr_reg)
+          return dest
+        end
       end
 
       # Array clear: arr.clear
@@ -3490,7 +3630,7 @@ module Citrine
       end
 
       # Instance method call: obj.method(args...)
-      if node.obj
+      if node.obj && !node.obj.is_a?(Crystal::Path)
         recv_type : String? = nil
         case recv_node = node.obj
         when Crystal::Var
@@ -3649,8 +3789,25 @@ module Citrine
                            node.name
                          end
 
-      func_idx = @functions.index { |f| f.name == target_func_name } ||
-                 @functions.index { |f| f.name == node.name }
+      func_idx = nil
+      if !obj_str.empty?
+        parts = obj_str.split("::")
+        parts.size.times do |i|
+          cand_prefix = parts[i..-1].join("::")
+          [".", "::"].each do |sep|
+            cand_name = "#{cand_prefix}#{sep}#{node.name}"
+            if idx = @functions.index { |f| f.name == cand_name }
+              func_idx = idx
+              break
+            end
+          end
+          break if func_idx
+        end
+      end
+
+      func_idx ||= @functions.index { |f| f.name == target_func_name } ||
+                   @functions.index { |f| f.name == "#{obj_str}::#{node.name}" } ||
+                   @functions.index { |f| f.name == node.name }
 
       if func_idx
         call_base = allocator.alloc_call_frame(node.args.size + 1)
@@ -3923,8 +4080,25 @@ module Citrine
         const_idx = add_constant(ConstValue.new(ConstType::String, int_val: str_idx, str_val: val_s))
         instructions << Instruction.encode_ab_imm(Opcode::LoadConst, dest, const_idx.to_u16)
         dest
+      when Crystal::InstanceVar
+        clean = piece.name.gsub(/^@/, "")
+        is_str = false
+        if cls = @current_class
+          is_str = (cls.field_types[clean]? == "String")
+        end
+        is_str ||= clean.ends_with?("_str") || clean.ends_with?("duration_s") || clean == "dur_s" || clean.includes?("title") || clean.includes?("header") || clean.includes?("artist") || clean.includes?("album")
+        if is_str
+          compile_node(piece, allocator, instructions, fn)
+        else
+          val_reg = compile_node(piece, allocator, instructions, fn)
+          hint = @current_class.try(&.field_types[clean]?) == "Bool" ? 2_u16 : 0_u16
+          emit_to_string(val_reg, hint, allocator, instructions)
+        end
       when Crystal::Var
-        if @var_types[piece.name]? == "String"
+        is_str = (@var_types[piece.name]? == "String") ||
+                 piece.name.ends_with?("_str") || piece.name.ends_with?("duration_s") || piece.name == "dur_s" ||
+                 piece.name.includes?("title") || piece.name.includes?("header")
+        if is_str
           if reg = allocator.get_local(piece.name)
             dest = allocator.alloc_temp
             instructions << Instruction.encode_abc(Opcode::Move, dest, reg, 0_u8)
@@ -3957,7 +4131,19 @@ module Citrine
           emit_to_string(val_reg, hint, allocator, instructions)
         end
       when Crystal::Call
-        if piece.name == "to_s" || ["strip", "downcase", "upcase"].includes?(piece.name)
+        is_str_call = piece.name == "to_s" || ["strip", "downcase", "upcase"].includes?(piece.name)
+        if !is_str_call && (recv = piece.obj)
+          recv_name = recv.is_a?(Crystal::Var) ? recv.name : (recv.is_a?(Crystal::Path) ? recv.names.last : nil)
+          if recv_name && (rtype = @var_types[recv_name]?)
+            cls_target = @classes[rtype]? || @classes[rtype.split("::").last]?
+            if cls_target
+              is_str_call = (cls_target.method_return_types[piece.name]? == "String" || cls_target.field_types[piece.name]? == "String")
+            end
+          end
+        end
+        is_str_call ||= piece.name == "to_s" || piece.name.ends_with?("_str") || piece.name.ends_with?("duration_s") || piece.name == "dur_s" || piece.name.includes?("title") || piece.name.includes?("header")
+
+        if is_str_call
           compile_node(piece, allocator, instructions, fn)
         elsif piece.name == "[]" && (r = piece.obj) &&
               (r_name = r.is_a?(Crystal::Var) ? r.name : (r.is_a?(Crystal::Path) ? r.names.last : nil)) &&
@@ -4116,6 +4302,8 @@ module Citrine
       when "cdda_status", "get_cdda_status", "stream_status", "music_status", "music_playing?" then NativeId::AudioGetCDDAStatus
       when "set_volume", "set_audio_volume", "set_cdda_volume", "set_stream_volume", "set_music_volume", "master_volume=" then NativeId::AudioSetVolume
       when "seek_stream", "stream_seek", "seek_music" then NativeId::AudioSeekStream
+      when "cpu_cycles", "cycles", "get_cycles", "cpu_cycle_count" then NativeId::CpuCycleCount
+      when "cdvd_seek_entropy", "seek_entropy" then NativeId::CdvdSeekEntropy
       else nil
       end
     end

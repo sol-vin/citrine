@@ -260,6 +260,16 @@ module Citrine
         emit((0x01_u32 << 26) | (rs.to_u32 << 21) | (0x00_u32 << 16))
       end
 
+      def bgtz(rs : Int32, target_label : String)
+        @fixups << {@words.size, target_label, :bgtz}
+        emit((0x07_u32 << 26) | (rs.to_u32 << 21))
+      end
+
+      def blez(rs : Int32, target_label : String)
+        @fixups << {@words.size, target_label, :blez}
+        emit((0x06_u32 << 26) | (rs.to_u32 << 21))
+      end
+
       def bal(target_label : String)
         @fixups << {@words.size, target_label, :bal}
         emit((0x01_u32 << 26) | (0x11_u32 << 16))
@@ -513,7 +523,7 @@ module Citrine
             @words[idx] = 0x08000000_u32 | ((target_vaddr >> 2) & 0x03FFFFFF_u32)
           when :jal
             @words[idx] = 0x0C000000_u32 | ((target_vaddr >> 2) & 0x03FFFFFF_u32)
-          when :bnez, :beqz, :bne, :beq, :bgez, :bltz, :bal
+          when :bnez, :beqz, :bne, :beq, :bgez, :bltz, :bgtz, :blez, :bal
             offset_bytes = target_vaddr.to_i32 - (inst_vaddr.to_i32 + 4)
             offset_insts = offset_bytes // 4
             @words[idx] = (@words[idx] & 0xFFFF0000_u32) | ((offset_insts & 0xFFFF).to_u32)

@@ -17,6 +17,7 @@ module Citrine
       property num_tracks : Int32
       property bank_dur_ms : UInt32
       property frames_per_bank : UInt32
+      property boot_screen : Bool
 
       def initialize(
         @phases = [] of Citrine::GS::Phase,
@@ -29,7 +30,8 @@ module Citrine
         @has_audio = false,
         @num_tracks = 1,
         @bank_dur_ms = 1195_u32,
-        @frames_per_bank = 72_u32
+        @frames_per_bank = 72_u32,
+        @boot_screen = true
       )
       end
     end
@@ -384,6 +386,7 @@ end
         inline_asm_words = [] of UInt32
         has_audio = false
         is_animated = false
+        boot_screen = true
         phases = [] of Phase
 
         magic = cbc_bytes ? (cbc_bytes.size >= 4 ? String.new(cbc_bytes[0..3]) : "") : ""
@@ -486,6 +489,7 @@ end
         down.ends_with?(".vag") || down.ends_with?(".wav") || down.ends_with?(".cas") ||
           down.includes?("cdda") || down.includes?("cd-da") || s.includes?("SPU2")
       end
+      boot_screen = false if strings.includes?("citrine:boot_screen:false")
 
       main_fn = fns.find { |f| strings[f.name_idx]? == "__main__" }
       if main_fn
@@ -507,6 +511,8 @@ end
         io_streams = Hash(Int64, IO::Memory).new
         next_io_id = 2000_i64
         memory = Hash(Int64, Int64).new
+        memory[0x700000E0_i64] = 0x517cc1b7_i64
+        memory[0x70000034_i64] = 0x517cc1b7_i64
         next_heap_addr = 0x00200000_i64
         object_classes = Hash(Int64, UInt32).new
         active_context_name = ""
@@ -543,7 +549,7 @@ end
         has_dynamic_frame_text = false
         animation_checked = false
         prev_frame_cmds = [] of DrawCommand
-        max_anim_frames = 60
+        max_anim_frames = has_button_checks ? 1 : 60
         anim_frame_count = 0
         frames_per_bank = 16
         max_banks = 3
@@ -1035,6 +1041,10 @@ end
                               0_i64
                             end
             when 11 # EndDrawing
+              # Advance simulated entropy pool at V-Blank
+              rand_state = (rand_state &* 6364136223846793005_u64) &+ 1442695040888963407_u64
+              memory[0x700000E0_i64] = (rand_state & 0xFFFFFFFF_u64).to_i64
+
               # Rewind Tier 1 Per-Frame Scratch Pool at V-Blank (O(1))
               scratch_pool_ptr = scratch_pool_base
               allocations.reject! do |addr, a|
@@ -1215,7 +1225,14 @@ end
                   if current_commands != prev_frame_cmds || has_dynamic_frame_text
                     is_animated = true
                   end
-                  first_frame_done = true
+                  if is_animated && phases.size < max_anim_frames
+                    phases << Phase.new(current_commands.dup, 0_u32, current_loop_message)
+                    current_loop_message = nil
+                    prev_frame_cmds = current_commands.dup
+                    current_commands = [] of DrawCommand
+                  else
+                    first_frame_done = true
+                  end
                 end
               end
             when 12 # ClearBackground
@@ -1379,7 +1396,7 @@ end
                              nil
                            end
               if found_file
-                self.class.emit_cbt_texture_spans(current_commands, found_file, dest_x, dest_y, dest_w: 128, dest_h: 128, grid_res: 64)
+                self.class.emit_cbt_texture_spans(current_commands, found_file, dest_x, dest_y, dest_w: 128, dest_h: 128, grid_res: 48)
               else
                 current_commands << DrawCommand.new(DrawCommand::Type::Rect, dest_x, dest_y, dest_x + 128, dest_y + 128, color: 0xFF2A1F18_u32)
               end
@@ -1401,7 +1418,7 @@ end
                              nil
                            end
               if found_file
-                self.class.emit_cbt_texture_spans(current_commands, found_file, dest_x, dest_y, dest_w: dest_w, dest_h: dest_h, grid_res: {dest_w, 64}.min)
+                self.class.emit_cbt_texture_spans(current_commands, found_file, dest_x, dest_y, dest_w: dest_w, dest_h: dest_h, grid_res: {dest_w, 48}.min)
               else
                 current_commands << DrawCommand.new(DrawCommand::Type::Rect, dest_x, dest_y, dest_x + dest_w, dest_y + dest_h, color: 0xFF2A1F18_u32)
               end
@@ -1448,7 +1465,7 @@ end
                              nil
                            end
               if found_file
-                self.class.emit_cbt_texture_spans(current_commands, found_file, dest_x, dest_y, dest_w: dest_w, dest_h: dest_h, grid_res: {dest_w, 64}.min)
+                self.class.emit_cbt_texture_spans(current_commands, found_file, dest_x, dest_y, dest_w: dest_w, dest_h: dest_h, grid_res: {dest_w, 48}.min)
               else
                 current_commands << DrawCommand.new(DrawCommand::Type::Rect, dest_x, dest_y, dest_x + dest_w, dest_y + dest_h, color: 0xFF2A1F18_u32)
               end
@@ -1879,6 +1896,11 @@ end
                 elsif target_addr == 0x10000800_i64
                   rand_state = (rand_state &* 6364136223846793005_u64) &+ 1442695040888963407_u64
                   regs[dst_r] = (((rand_state >> 32) ^ (steps * 13)) & 0xFFFF_u64).to_i64
+                elsif target_addr == 0x700000E0_i64 || target_addr == 0x70000034_i64
+                  rand_state = (rand_state &* 6364136223846793005_u64) &+ 1442695040888963407_u64
+                  val = (rand_state & 0xFFFFFFFF_u64).to_i64
+                  memory[target_addr] = val
+                  regs[dst_r] = val
                 elsif target_addr == 0x12001000_i64
                   rand_state = (rand_state &* 6364136223846793005_u64) &+ 1442695040888963407_u64
                   regs[dst_r] = (((rand_state >> 16) ^ (steps * 7)) & 0xFFFF_u64).to_i64
@@ -2308,6 +2330,12 @@ end
               time_sec = regs[base_r]
               boot_messages << "[CITRINE AUDIO] Stream seeking to #{time_sec}s"
               regs[dst_r] = 1_i64
+            when 245 # CpuCycleCount
+              cycle_counter &+= 147_456_u64
+              regs[dst_r] = (cycle_counter & 0xFFFFFFFF_u64).to_i64
+            when 246 # CdvdSeekEntropy
+              cycle_counter &+= 2_949_120_u64
+              regs[dst_r] = 2_949_120_i64
             end
           end
         end
@@ -2328,7 +2356,7 @@ end
 
         bank_dur = 1195_u32
         frames_bank = 72_u32
-        cas_candidate = Citrine::ISO::DiscManifest.current.assets.find { |a| a.target_name.ends_with?(".CAS") }
+        cas_candidate = Citrine::ISO::DiscManifest.current.assets.find { |a| a.target_name.downcase.ends_with?(".cas") }
         cas_path = cas_candidate.try(&.source_path) || Dir.glob("*.cas").first? || Dir.glob("**/*.cas").first?
         if cas_path && File.exists?(cas_path) && File.size(cas_path) >= 14
           hdr = Bytes.new(14)
@@ -2353,7 +2381,8 @@ end
           inline_asm_words: inline_asm_words,
           has_audio: has_audio,
           bank_dur_ms: bank_dur,
-          frames_per_bank: frames_bank
+          frames_per_bank: frames_bank,
+          boot_screen: boot_screen
         )
       end
     rescue ex
@@ -2379,7 +2408,8 @@ end
           has_button_checks: has_button_checks,
           is_inline_assembly: is_inline_assembly,
           inline_asm_words: inline_asm_words,
-          has_audio: has_audio
+          has_audio: has_audio,
+          boot_screen: boot_screen
         )
       end
     end

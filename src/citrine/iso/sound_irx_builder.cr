@@ -76,6 +76,17 @@ module Citrine
         total_chunk_size = track_chunk_sizes.sum
         return silence_elf.call if total_chunk_size == 0
 
+        track_pitches = valid_tracks.map do |tvag|
+          trate = if tvag.size >= 20
+                    IO::ByteFormat::BigEndian.decode(UInt32, tvag[16, 4])
+                  else
+                    22050_u32
+                  end
+          trate = 22050_u32 if trate == 0_u32
+          ((trate.to_u64 * 4096_u64 + 24000_u64) // 48000_u64).to_u16
+        end
+        base_pitch = track_pitches.first? || 0x075A_u16
+
         # Create audio payload: 64-byte header + total_chunk_size bytes ADPCM
         audio_mem = IO::Memory.new(64 + total_chunk_size)
         audio_mem.write(valid_tracks.first[0..47])
@@ -87,16 +98,33 @@ module Citrine
           adpcm_slice = track_vag[48...48 + t_chunk].dup
           t_blocks = (t_chunk // 16).to_i
           if t_blocks > 0
-            # SPU2 Hardware ADPCM Loop Flags:
-            # Block 0: Loop Start (0x06: Bit 2 | Bit 1)
-            adpcm_slice[1] = 0x06_u8
-            # Middle blocks: Loop Repeat (0x02: Bit 1)
-            (1...t_blocks - 1).each do |b|
-              adpcm_slice[b * 16 + 1] = 0x02_u8
-            end
-            # Last block: Loop End + Loop Repeat (0x03: Bit 0 | Bit 1)
             last_off = (t_blocks - 1) * 16
-            adpcm_slice[last_off + 1] = 0x03_u8
+            # Inspect the original ADPCM flag of the last block:
+            # Bit 1 (0x02) indicates loop repeat (looping track).
+            # If Bit 1 is clear, this is a one-shot track (e.g. startup chime) that must play once and stop.
+            is_looping = (adpcm_slice[last_off + 1] & 0x02_u8) != 0_u8
+            if is_looping
+              # SPU2 Hardware ADPCM Loop Flags:
+              # Block 0: Loop Start (0x06: Bit 2 | Bit 1)
+              adpcm_slice[1] = 0x06_u8
+              # Middle blocks: Loop Repeat (0x02: Bit 1)
+              (1...t_blocks - 1).each do |b|
+                adpcm_slice[b * 16 + 1] = 0x02_u8
+              end
+              # Last block: Loop End + Loop Repeat (0x03: Bit 0 | Bit 1)
+              adpcm_slice[last_off + 1] = 0x03_u8
+            else
+              # One-shot sound (play once and stop):
+              # Block 0: Normal block (0x00)
+              adpcm_slice[1] = 0x00_u8
+              # Middle blocks: Normal blocks (0x00)
+              (1...t_blocks - 1).each do |b|
+                adpcm_slice[b * 16 + 1] = 0x00_u8
+              end
+              # Last block: Loop End without Repeat (0x01: Bit 0 = End, Bit 1 = 0)
+              # Causes SPU2 hardware to automatically key off the voice when finished!
+              adpcm_slice[last_off + 1] = 0x01_u8
+            end
           end
           audio_mem.write(adpcm_slice)
         end
@@ -197,8 +225,13 @@ module Citrine
         out_bytes[text_off + 0x20c, 4].copy_from(Bytes[0x00, 0x20, 0x05, 0x24])
         out_bytes[text_off + 0x22c, 4].copy_from(Bytes[0x00, 0x20, 0x05, 0x24])
 
-        # Patch pitch at .text+0x434: li a1, 0x075A (exact 22,050 Hz on 48.0 kHz SPU2 core: 22050 * 4096 / 48000 = 1881.6 ~= 1882)
-        out_bytes[text_off + 0x434, 4].copy_from(Bytes[0x5A, 0x07, 0x05, 0x24])
+        # Patch pitch at .text+0x434: li a1, base_pitch (dynamic sample rate pitch on 48.0 kHz SPU2 core)
+        out_bytes[text_off + 0x434, 4].copy_from(Bytes[
+          (base_pitch & 0xFF).to_u8,
+          ((base_pitch >> 8) & 0xFF).to_u8,
+          0x05_u8,
+          0x24_u8
+        ])
 
         # Multi-mode position-independent sound dispatcher at .text+0x4dc:
         # Dispatches SoundMode (passed in v0 from SoundHandler):
@@ -273,8 +306,8 @@ module Citrine
         disp.bne(V0, T1, "chk_ff")
         disp.nop
         disp.addiu(T9, S0, 0x0F0C)
-        disp.ori(A0, ZERO, 0x0200) # SD_VP_PITCH Voice 0 = 0x075A
-        disp.ori(A1, ZERO, 0x075A)
+        disp.ori(A0, ZERO, 0x0200) # SD_VP_PITCH Voice 0
+        disp.ori(A1, ZERO, base_pitch.to_i32)
         disp.jalr(T9)
         disp.nop
         disp.lw(S1, 0x17D8, S0)
@@ -304,7 +337,7 @@ module Citrine
         disp.nop
         disp.addiu(T9, S0, 0x0F0C)
         disp.ori(A0, ZERO, 0x0200) # SD_VP_PITCH Voice 0
-        disp.ori(A1, ZERO, 0x075A) # 1.0x speed pitch
+        disp.ori(A1, ZERO, base_pitch.to_i32) # 1.0x speed pitch
         disp.jalr(T9)
         disp.nop
         disp.beq(ZERO, ZERO, "disp_exit")
@@ -347,18 +380,20 @@ module Citrine
         disp.move(T1, ZERO)
         disp.label("trk_in_range")
 
-        # Load SPU2 address from embedded table using position-independent bal:
+        # Load SPU2 address and pitch from embedded table using position-independent bal:
         disp.bal("load_spu_table_done")
         disp.nop
         disp.label("spu_track_table")
-        spu_start_addrs.each do |saddr|
+        spu_start_addrs.each_with_index do |saddr, i|
           disp.emit(saddr)
+          disp.emit(track_pitches[i].to_u32)
         end
         disp.label("load_spu_table_done")
         # RA points to spu_track_table
-        disp.sll(T3, T1, 2)
+        disp.sll(T3, T1, 3) # track_idx * 8
         disp.addu(T2, RA, T3)
         disp.lw(S2, 0, T2) # S2 = spu_start_addrs[track_idx]
+        disp.lw(T3, 4, T2) # T3 = track_pitches[track_idx]
 
         # 1. Key Off Voice 0
         disp.addiu(T9, S0, 0x0F14) # sceSdSetSwitch
@@ -388,10 +423,10 @@ module Citrine
         disp.jalr(T9)
         disp.nop
 
-        # 5. Set Voice 0 Pitch to 22,050 Hz (0x075A)
+        # 5. Set Voice 0 Pitch to track pitch
         disp.addiu(T9, S0, 0x0F0C) # sceSdSetParam
         disp.ori(A0, ZERO, 0x0200) # SD_VP_PITCH Voice 0
-        disp.ori(A1, ZERO, 0x075A) # 22,050 Hz
+        disp.move(A1, T3)          # dynamic track pitch
         disp.jalr(T9)
         disp.nop
 
@@ -476,21 +511,60 @@ module Citrine
       # Builds a true disc-streaming S.IRX ELF module.
       # Streams CD audio tracks directly from optical disc into SPU2 sound RAM
       # using double-buffered ping-pong banks (0x15000 and 0x19000).
-      def self.build_streaming(track_table : Array(TrackInfo)) : Bytes
+      def self.build_streaming(track_table : Array(TrackInfo), startup_vag : Bytes? = nil) : Bytes
         orig_elf = SoundIrxBase.bytes
         text_off = 0x90_u32
         orig_data_end = 0x1870_u32
 
-        # Expand loaded ELF memory size up to virtual 0x6000 (file offset 0x6090)
-        # to accommodate 16KB staging buffer at 0x1A00..0x5A00 and state variables
-        target_mem_end = 0x6000_u32
-        target_file_data_end = target_mem_end + text_off # 0x6090
-        shift = target_file_data_end - orig_data_end     # 0x4820 (18464 bytes)
+        audio_data = nil
+        total_chunk_size = 0_u32
+        base_pitch = 0x075A_u16
+        if startup_vag && startup_vag.size > 48
+          adpcm_slice = startup_vag[48..-1].dup
+          t_chunk = adpcm_slice.size
+          t_blocks = (t_chunk // 16).to_i
+          if t_blocks > 0
+            last_off = (t_blocks - 1) * 16
+            adpcm_slice[1] = 0x00_u8
+            (1...t_blocks - 1).each do |b|
+              adpcm_slice[b * 16 + 1] = 0x00_u8
+            end
+            adpcm_slice[last_off + 1] = 0x01_u8
+          end
+
+          audio_mem = IO::Memory.new(64 + t_chunk)
+          audio_mem.write(startup_vag[0..47])
+          16.times { audio_mem.write_byte(0_u8) }
+          audio_mem.write(adpcm_slice)
+          audio_data = audio_mem.to_slice.dup
+
+          total_chunk_size = t_chunk.to_u32
+          target_mem_end = 0x6000_u32 + audio_data.size.to_u32
+
+          srate = if startup_vag.size >= 20
+                    IO::ByteFormat::BigEndian.decode(UInt32, startup_vag[16, 4])
+                  else
+                    22050_u32
+                  end
+          srate = 22050_u32 if srate == 0_u32
+          base_pitch = ((srate.to_u64 * 4096_u64 + 24000_u64) // 48000_u64).clamp(0_u64, 0x3FFF_u64).to_u16
+        else
+          # Expand loaded ELF memory size up to virtual 0x6000 (file offset 0x6090)
+          # to accommodate 16KB staging buffer at 0x1A00..0x5A00 and state variables
+          target_mem_end = 0x6000_u32
+        end
+
+        target_file_data_end = target_mem_end + text_off
+        shift = target_file_data_end - orig_data_end
         new_elf_mem = IO::Memory.new(orig_elf.size + shift)
         new_elf_mem.write(orig_elf[0...orig_data_end])
         shift.times { new_elf_mem.write_byte(0_u8) }
         new_elf_mem.write(orig_elf[orig_data_end..-1])
         base_elf = new_elf_mem.to_slice.dup
+
+        if audio_data
+          base_elf[text_off + 0x6000, audio_data.size].copy_from(audio_data)
+        end
 
         # Update Program Header 1 (p_filesz and p_memsz)
         ph1_off = 0x54_u32
@@ -541,6 +615,7 @@ module Citrine
             if (r_offset >= 0x4dc && r_offset < 0x0c54) ||
                (r_offset >= 0x0c64 && r_offset < 0x0c78) ||
                (r_offset >= 0x0c90 && r_offset < 0x0cc0) ||
+               (r_offset >= 0x0cd4 && r_offset < 0x0d34) ||
                (r_offset >= 0x0d90 && r_offset <= 0x0da0)
               IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[r_off + 4, 4])
             end
@@ -557,6 +632,53 @@ module Citrine
 
         # Note: libsd stub 4 at 0x0F24 is already sceSdGetAddr (ordinal 10) in original SoundIrxBase
 
+        # Emit SIF Command Handler (SoundHandler) with FIFO ring buffer at 0x0cd4:
+        sh = MipsEmitter.new(0x00000cd4_u32)
+        sh.move(T9, RA)               # Save RA in scratch T9
+        sh.bal("sh_get_base")
+        sh.nop
+        sh.label("sh_get_base")
+        sh.addiu(T0, RA, -0x0ce0)     # T0 = module_base (bal at 0x0cd8 + 8 = 0x0ce0)
+        sh.move(RA, T9)               # Restore RA
+
+        sh.lw(T1, 12, A0)             # T1 = incoming cmd from packet->opt (offset 12)
+        sh.sw(T1, 0x17d4, T0)         # Also update legacy SoundMode variable
+
+        # FIFO at module_base + 0x5a00:
+        # 0x5a00: head (0..15)
+        # 0x5a04: tail (0..15)
+        # 0x5a10: ring_buffer (16 words)
+        sh.lw(T2, 0x5a00, T0)         # T2 = head
+        sh.lw(T3, 0x5a04, T0)         # T3 = tail
+
+        # next_head = (head + 1) & 15
+        sh.addiu(T4, T2, 1)
+        sh.andi(T4, T4, 15)
+
+        # If next_head == tail (FIFO full), drop command
+        sh.beq(T4, T3, "sh_done")
+        sh.nop
+
+        # Write command: buffer[head] = cmd
+        sh.sll(T5, T2, 2)             # head * 4
+        sh.addiu(T5, T5, 0x5a10)
+        sh.addu(T5, T0, T5)           # &buffer[head]
+        sh.sw(T1, 0, T5)
+
+        # Advance head: head = next_head
+        sh.sw(T4, 0x5a00, T0)
+
+        sh.label("sh_done")
+        sh.move(V0, ZERO)             # Return 0 (success)
+        sh.jr(RA)
+        sh.nop
+        sh.resolve!
+        sh_bytes = sh.to_slice
+        base_elf[text_off + 0x0cd4, sh_bytes.size].copy_from(sh_bytes)
+        pad_size = 0x0d34 - (0x0cd4 + sh_bytes.size)
+        if pad_size > 0
+          base_elf[text_off + 0x0cd4 + sh_bytes.size, pad_size].fill(0_u8)
+        end
 
         # Add cdvdman import table at 0x0bd0 (giving 0x4dc..0x0bd0 = 1,780 bytes for engine code)
         pos = text_off + 0x0bd0
@@ -574,12 +696,16 @@ module Citrine
         IO::ByteFormat::LittleEndian.encode(0x03e00008_u32, base_elf[pos + 28, 4]) # jr $ra
         IO::ByteFormat::LittleEndian.encode(0x2400000b_u32, base_elf[pos + 32, 4]) # addiu $zero, $zero, 11
 
-        # Terminator:
-        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[pos + 36, 4])
-        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[pos + 40, 4])
+        # Stub 2 (0x0bf4): sceCdSeek (ordinal 7)
+        IO::ByteFormat::LittleEndian.encode(0x03e00008_u32, base_elf[pos + 36, 4]) # jr $ra
+        IO::ByteFormat::LittleEndian.encode(0x24000007_u32, base_elf[pos + 40, 4]) # addiu $zero, $zero, 7
 
-        # Store 4-byte sceCdRMode struct at 0x0bfc: { trycount=5, spindlctrl=0, datapattern=0, pad=0 }
-        IO::ByteFormat::LittleEndian.encode(0x00000005_u32, base_elf[pos + 44, 4])
+        # Terminator:
+        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[pos + 44, 4])
+        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[pos + 48, 4])
+
+        # Store 4-byte sceCdRMode struct at 0x0c04: { trycount=5, spindlctrl=0, datapattern=0, pad=0 }
+        IO::ByteFormat::LittleEndian.encode(0x00000005_u32, base_elf[pos + 52, 4])
 
         # Patch vblank import table at 0x10a0 to import thbase DelayThread (ordinal 33 = 0x21)
         vblank_tbl = text_off + 0x10a0
@@ -594,10 +720,17 @@ module Citrine
         # Initialize SoundMode at 0x17d4 to 0xFFFFFFFF (idle / no pending command)
         IO::ByteFormat::LittleEndian.encode(0xFFFFFFFF_u32, base_elf[text_off + 0x17d4, 4])
 
+        # Initialize Command FIFO at 0x5a00:
+        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x5a00, 4]) # head = 0
+        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x5a04, 4]) # tail = 0
+        16.times do |fi|
+          IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x5a10 + fi * 4, 4])
+        end
+
         IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x1900, 4]) # cur_track
         IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x1904, 4]) # cur_bank_idx
         IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x1908, 4]) # next_refill_bank (0=Bank A, 1=Bank B)
-        IO::ByteFormat::LittleEndian.encode(1_u32, base_elf[text_off + 0x190C, 4]) # play_state
+        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x190C, 4]) # play_state
         IO::ByteFormat::LittleEndian.encode(0x2000_u32, base_elf[text_off + 0x1910, 4]) # cur_vol
         IO::ByteFormat::LittleEndian.encode(track_table.size.to_u32, base_elf[text_off + 0x1914, 4]) # total_tracks
         IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x1918, 4]) # timer_accum_ms
@@ -628,9 +761,39 @@ module Citrine
         seek_msg.to_slice.copy_to(base_elf[text_off + 0x19C8, seek_msg.bytesize])
 
 
-        # Silence original PlaySound (0x170): jr $ra, nop
-        base_elf[text_off + 0x170, 4].copy_from(Bytes[0x08, 0x00, 0xE0, 0x03])
-        base_elf[text_off + 0x174, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
+        if audio_data
+          # Patch PlaySound: point wavBuffer to 0x6000
+          base_elf[text_off + 0x194, 4].copy_from(Bytes[0x00, 0x60, 0x42, 0x24]) # addiu v0, v0, 0x6000
+
+          # Patch 32-bit transfer size:
+          hi_size = (total_chunk_size >> 16).to_u16
+          lo_size = (total_chunk_size & 0xFFFF).to_u16
+
+          lui_at = (0x0F_u32 << 26) | (1_u32 << 16) | hi_size.to_u32
+          ori_at = (0x0D_u32 << 26) | (1_u32 << 21) | (1_u32 << 16) | lo_size.to_u32
+          sw_at = (0x2B_u32 << 26) | (29_u32 << 21) | (1_u32 << 16) | 0x10_u32
+
+          IO::ByteFormat::LittleEndian.encode(lui_at, base_elf[text_off + 0x268, 4])
+          base_elf[text_off + 0x26c, 4].copy_from(Bytes[0x40, 0x00, 0x62, 0x24]) # addiu v0, v1, 0x40
+          IO::ByteFormat::LittleEndian.encode(ori_at, base_elf[text_off + 0x270, 4])
+          IO::ByteFormat::LittleEndian.encode(sw_at, base_elf[text_off + 0x274, 4])
+
+          # Patch voice volumes in PlaySound at 0x20c and 0x22c to 0x2000 (comfortable level)
+          base_elf[text_off + 0x20c, 4].copy_from(Bytes[0x00, 0x20, 0x05, 0x24])
+          base_elf[text_off + 0x22c, 4].copy_from(Bytes[0x00, 0x20, 0x05, 0x24])
+
+          # Patch pitch at .text+0x434: li a1, base_pitch (dynamic sample rate pitch on 48.0 kHz SPU2 core)
+          base_elf[text_off + 0x434, 4].copy_from(Bytes[
+            (base_pitch & 0xFF).to_u8,
+            ((base_pitch >> 8) & 0xFF).to_u8,
+            0x05_u8,
+            0x24_u8
+          ])
+        else
+          # Silence original PlaySound (0x170): jr $ra, nop
+          base_elf[text_off + 0x170, 4].copy_from(Bytes[0x08, 0x00, 0xE0, 0x03])
+          base_elf[text_off + 0x174, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
+        end
 
         # Emit Streaming Engine MIPS code at 0x4dc:
         mips = MipsEmitter.new(0x000004dc_u32)
@@ -655,10 +818,12 @@ module Citrine
         mips.label("get_base")
         mips.addiu(S0, RA, -mips.labels["get_base"].to_i32)
 
-        # Direct SPU2 Hardware Initialization
-        mips.addiu(T9, S0, 0x0f04) # sceSdInit
-        mips.move(A0, ZERO)
-        mips.jalr(T9); mips.nop
+        # Direct SPU2 Hardware Initialization (only if no startup audio was initialized)
+        unless audio_data
+          mips.addiu(T9, S0, 0x0f04) # sceSdInit
+          mips.move(A0, ZERO)
+          mips.jalr(T9); mips.nop
+        end
 
         # SPU2 Interrupt Setup: CpuEnableIntr (0x0f8c), EnableIntr (0x0f84)
         mips.addiu(T9, S0, 0x0f8c) # CpuEnableIntr
@@ -667,15 +832,17 @@ module Citrine
         mips.addiu(T9, S0, 0x0f84) # EnableIntr
         mips.ori(A0, ZERO, 0x24)   # DMA channel 4 (SPU2 Core 0)
         mips.jalr(T9); mips.nop
+        mips.addiu(T9, S0, 0x0f84)
         mips.ori(A0, ZERO, 0x28)   # DMA channel 7 (SPU2 Core 1)
         mips.jalr(T9); mips.nop
+        mips.addiu(T9, S0, 0x0f84)
         mips.ori(A0, ZERO, 9)      # SPU2 Interrupt
         mips.jalr(T9); mips.nop
 
-        # Start default Track 0
-        mips.move(A0, ZERO)
-        mips.bal("start_track")
-        mips.nop
+        # Initialize callee-saved function pointers
+        mips.addiu(S2, S0, 0x0f0c) # sceSdSetParam
+        mips.addiu(S3, S0, 0x0f14) # sceSdSetSwitch
+        mips.addiu(S4, S0, 0x0f1c) # sceSdSetAddr
 
         # ================= MAIN STREAMING LOOP =================
         mips.label("stream_loop")
@@ -685,63 +852,71 @@ module Citrine
         mips.jalr(T9)
         mips.nop
 
-        # Check SoundMode (S0 + 0x17d4)
+        # ================= PROCESS COMMAND FIFO =================
+        mips.label("process_cmd_loop")
+        # Check FIFO: head at 0x5a00, tail at 0x5a04
+        mips.lw(T2, 0x5a00, S0)
+        mips.lw(T3, 0x5a04, S0)
+        mips.beq(T2, T3, "chk_cmd_legacy")
+        mips.nop
+
+        # Pop: T0 = buffer[tail]
+        mips.sll(T4, T3, 2)
+        mips.addiu(T4, T4, 0x5a10)
+        mips.addu(T4, S0, T4)
+        mips.lw(T0, 0, T4)
+
+        # Advance tail: tail = (tail + 1) & 15
+        mips.addiu(T3, T3, 1)
+        mips.andi(T3, T3, 15)
+        mips.sw(T3, 0x5a04, S0)
+        mips.beq(ZERO, ZERO, "dispatch_cmd")
+        mips.nop
+
+        # Legacy fallback: check 0x17d4 if FIFO was empty
+        mips.label("chk_cmd_legacy")
         mips.lw(T0, 0x17d4, S0)
         mips.li(T1, 0xFFFFFFFF_u32)
         mips.beq(T0, T1, "chk_streaming")
         mips.nop
-
-        # Acknowledge command:
         mips.sw(T1, 0x17d4, S0)
+
+        # Dispatch command in T0:
+        mips.label("dispatch_cmd")
 
         # Case 0: Stop
         mips.bnez(T0, "chk_cmd_pause")
         mips.nop
-        mips.addiu(T9, S0, 0x0f14) # sceSdSetSwitch
         mips.ori(A0, ZERO, 0x1600)  # SD_S_KOFF (Core 0)
         mips.ori(A1, ZERO, 1)
-        mips.jalr(T9); mips.nop
-        mips.ori(A0, ZERO, 0x1601)  # SD_S_KOFF (Core 1)
-        mips.ori(A1, ZERO, 1)
-        mips.jalr(T9); mips.nop
+        mips.jalr(S3); mips.nop
         mips.ori(A0, ZERO, 0x1600)
         mips.move(A1, ZERO)
-        mips.jalr(T9); mips.nop
-        mips.ori(A0, ZERO, 0x1601)
-        mips.move(A1, ZERO)
-        mips.jalr(T9); mips.nop
+        mips.jalr(S3); mips.nop
         mips.sw(ZERO, 0x190c, S0)   # play_state = 0 (stopped)
-        mips.beq(ZERO, ZERO, "chk_streaming"); mips.nop
+        mips.beq(ZERO, ZERO, "process_cmd_loop"); mips.nop
 
         mips.label("chk_cmd_pause")
         mips.ori(T2, ZERO, 2)       # Pause
         mips.bne(T0, T2, "chk_cmd_resume")
         mips.nop
-        mips.addiu(T9, S0, 0x0f0c) # sceSdSetParam
         mips.ori(A0, ZERO, 0x0200)  # Core 0 pitch = 0
         mips.move(A1, ZERO)
-        mips.jalr(T9); mips.nop
-        mips.ori(A0, ZERO, 0x0201)  # Core 1 pitch = 0
-        mips.move(A1, ZERO)
-        mips.jalr(T9); mips.nop
+        mips.jalr(S2); mips.nop
         mips.ori(T2, ZERO, 2)
         mips.sw(T2, 0x190c, S0)     # play_state = 2 (paused)
-        mips.beq(ZERO, ZERO, "chk_streaming"); mips.nop
+        mips.beq(ZERO, ZERO, "process_cmd_loop"); mips.nop
 
         mips.label("chk_cmd_resume")
         mips.ori(T2, ZERO, 3)       # Resume
         mips.bne(T0, T2, "chk_cmd_play")
         mips.nop
-        mips.addiu(T9, S0, 0x0f0c) # sceSdSetParam
         mips.ori(A0, ZERO, 0x0200)  # Core 0 pitch
         mips.lw(A1, 0x18EC, S0)     # restore cur_pitch
-        mips.jalr(T9); mips.nop
-        mips.ori(A0, ZERO, 0x0201)  # Core 1 pitch
-        mips.lw(A1, 0x18EC, S0)
-        mips.jalr(T9); mips.nop
+        mips.jalr(S2); mips.nop
         mips.ori(T2, ZERO, 1)
         mips.sw(T2, 0x190c, S0)     # play_state = 1
-        mips.beq(ZERO, ZERO, "chk_streaming"); mips.nop
+        mips.beq(ZERO, ZERO, "process_cmd_loop"); mips.nop
 
         mips.label("chk_cmd_play")
         mips.ori(T2, ZERO, 1)       # Play
@@ -754,18 +929,33 @@ module Citrine
         mips.move(A0, ZERO)
         mips.bal("start_track")
         mips.nop
-        mips.beq(ZERO, ZERO, "chk_streaming"); mips.nop
+        mips.beq(ZERO, ZERO, "process_cmd_loop"); mips.nop
 
         mips.label("chk_cmd_seek")
         # Check if (cmd >> 16) == 2 (Seek to Bank N)
         mips.srl(T2, T0, 16)
         mips.ori(T3, ZERO, 2)
-        mips.bne(T2, T3, "chk_cmd_track")
+        mips.bne(T2, T3, "chk_cmd_cdvd_seek")
         mips.nop
         mips.andi(A1, T0, 0xFFFF)   # A1 = target_bank
         mips.bal("seek_stream_bank")
         mips.nop
-        mips.beq(ZERO, ZERO, "chk_streaming"); mips.nop
+        mips.beq(ZERO, ZERO, "process_cmd_loop"); mips.nop
+
+        mips.label("chk_cmd_cdvd_seek")
+        # Check if (cmd >> 24) == 0x53 ('S' = CDVD seek probe for hardware entropy)
+        mips.srl(T2, T0, 24)
+        mips.ori(T3, ZERO, 0x53)
+        mips.bne(T2, T3, "chk_cmd_track")
+        mips.nop
+        mips.li(T4, 0x00FFFFFF_u32)
+        mips.and_(A0, T0, T4)       # A0 = target LBA
+        mips.addiu(T9, S0, 0x0bf4)  # sceCdSeek (stub at 0x0bf4)
+        mips.jalr(T9); mips.nop
+        mips.move(A0, ZERO)
+        mips.addiu(T9, S0, 0x0bec)  # sceCdSync(0)
+        mips.jalr(T9); mips.nop
+        mips.beq(ZERO, ZERO, "process_cmd_loop"); mips.nop
 
         mips.label("chk_cmd_track")
         # Check if (cmd >> 8) == 1 (Play Track N)
@@ -776,20 +966,19 @@ module Citrine
         mips.andi(A0, T0, 0xFF)     # track index
         mips.bal("start_track")
         mips.nop
-        mips.beq(ZERO, ZERO, "chk_streaming"); mips.nop
+        mips.beq(ZERO, ZERO, "process_cmd_loop"); mips.nop
 
         mips.label("chk_cmd_vol")
         # Check if (cmd >> 8) == 0x10 (Volume)
         mips.ori(T3, ZERO, 0x10)
-        mips.bne(T2, T3, "chk_streaming")
+        mips.bne(T2, T3, "process_cmd_loop")
         mips.nop
         mips.andi(T4, T0, 0xFF)
         mips.sll(S7, T4, 6)         # vol << 6
         mips.sw(S7, 0x1910, S0)
         mips.bal("set_all_volumes")
         mips.nop
-        mips.beq(ZERO, ZERO, "chk_streaming")
-        mips.nop
+        mips.beq(ZERO, ZERO, "process_cmd_loop"); mips.nop
 
         # Check streaming condition
         mips.label("chk_streaming")
@@ -885,7 +1074,7 @@ module Citrine
         mips.addu(A0, S4, T5)   # A0 = sector to read from disc!
         mips.ori(A1, ZERO, 8)   # A1 = 8 sectors (16 KB)
         mips.addiu(A2, S0, 0x1A00) # A2 = staging_buf (16 KB at S0 + 0x1A00)
-        mips.addiu(A3, S0, 0x0bfc) # A3 = &mode (sceCdRMode struct)
+        mips.addiu(A3, S0, 0x0c04) # A3 = &mode (sceCdRMode struct at 0x0c04)
         mips.addiu(T9, S0, 0x0be4) # sceCdRead (stub at 0x0be4)
         mips.jalr(T9); mips.nop
 
@@ -906,29 +1095,21 @@ module Citrine
         mips.jalr(T9); mips.nop
         mips.label("skip_refill_print")
 
-
         # Patch ADPCM loop flags:
         mips.addiu(T6, S0, 0x1A00) # staging_buf
+        mips.ori(T7, ZERO, 0x02)   # default: Repeat
         mips.beqz(S2, "no_flag_start")
         mips.nop
-        mips.ori(T7, ZERO, 0x06) # Loop Start + Repeat
-        mips.sb(T7, 1, T6)
-        mips.beq(ZERO, ZERO, "chk_flag_end")
-        mips.nop
+        mips.ori(T7, ZERO, 0x06)   # Loop Start + Repeat
         mips.label("no_flag_start")
-        mips.ori(T7, ZERO, 0x02) # Repeat
         mips.sb(T7, 1, T6)
 
-        mips.label("chk_flag_end")
-        mips.addiu(T8, T6, 16368) # last block in 16KB bank
+        mips.addiu(T8, T6, 16368)  # last block in 16KB bank
+        mips.ori(T7, ZERO, 0x02)   # default: Repeat
         mips.beqz(S3, "no_flag_end")
         mips.nop
-        mips.ori(T7, ZERO, 0x03) # Loop End + Repeat
-        mips.sb(T7, 1, T8)
-        mips.beq(ZERO, ZERO, "do_voice_trans")
-        mips.nop
+        mips.ori(T7, ZERO, 0x03)   # Loop End + Repeat
         mips.label("no_flag_end")
-        mips.ori(T7, ZERO, 0x02) # Repeat
         mips.sb(T7, 1, T8)
 
         mips.label("do_voice_trans")
@@ -941,10 +1122,15 @@ module Citrine
         mips.move(A1, ZERO)
         mips.addiu(A2, S0, 0x1A00)
         mips.move(A3, S1)
-        mips.lui(T0, 0x0000)
-        mips.ori(T0, T0, 0x4000) # 16384 bytes
+        mips.ori(T0, ZERO, 0x4000) # 16384 bytes
         mips.sw(T0, 16, SP)
         mips.addiu(T9, S0, 0x0f34) # sceSdVoiceTrans
+        mips.jalr(T9); mips.nop
+
+        # Wait for DMA completion: sceSdVoiceTransStatus(0, 1)
+        mips.move(A0, ZERO)        # Channel 0
+        mips.ori(A1, ZERO, 1)      # 1 = SD_TRANS_STATUS_WAIT
+        mips.addiu(T9, S0, 0x0f3c) # sceSdVoiceTransStatus
         mips.jalr(T9); mips.nop
 
         # Advance cur_bank_idx:
@@ -1000,15 +1186,6 @@ module Citrine
         mips.label("pitch_val_ok")
         mips.sw(A1, 0x18EC, S0) # cur_pitch
 
-        # Set Voice 0 Pitch = cur_pitch on Core 0 and Core 1
-        mips.addiu(T9, S0, 0x0f0c) # sceSdSetParam
-        mips.ori(A0, ZERO, 0x0200)  # Core 0 SD_VP_PITCH
-        mips.lw(A1, 0x18EC, S0)
-        mips.jalr(T9); mips.nop
-        mips.ori(A0, ZERO, 0x0201)  # Core 1 SD_VP_PITCH
-        mips.lw(A1, 0x18EC, S0)
-        mips.jalr(T9); mips.nop
-
         # Compute bank_dur_ms = 2446677 / cur_pitch:
         mips.li(T0, 2446677_u32)
         mips.lw(T1, 0x18EC, S0)
@@ -1057,21 +1234,18 @@ module Citrine
 
         # ================= HELPER: prime_and_play_spu2_banks =================
         mips.label("prime_and_play_spu2_banks")
-        # Key off Voice 0 on Core 0 and Core 1:
-        mips.addiu(T9, S0, 0x0f14)
+        # Key off Voice 0 on Core 0:
         mips.ori(A0, ZERO, 0x1600)
         mips.ori(A1, ZERO, 1)
-        mips.jalr(T9); mips.nop
-        mips.ori(A0, ZERO, 0x1601)
-        mips.ori(A1, ZERO, 1)
-        mips.jalr(T9); mips.nop
+        mips.jalr(S3); mips.nop
+        mips.ori(A0, ZERO, 0x1600)
+        mips.move(A1, ZERO)
+        mips.jalr(S3); mips.nop
 
-        mips.ori(A0, ZERO, 0x1600)
-        mips.move(A1, ZERO)
-        mips.jalr(T9); mips.nop
+        # Permanently key off and silence Core 1 Voice 0:
         mips.ori(A0, ZERO, 0x1601)
-        mips.move(A1, ZERO)
-        mips.jalr(T9); mips.nop
+        mips.ori(A1, ZERO, 1)
+        mips.jalr(S3); mips.nop
 
         # Pre-fill Bank A (0x15000): loop_start=1, loop_end=0
         mips.lui(A0, 0x0001)
@@ -1087,19 +1261,22 @@ module Citrine
         mips.ori(A2, ZERO, 1)
         mips.bal("read_and_dma_bank"); mips.nop
 
-        # Set Voice 0 SSA and LSA to 0x15000 on Core 0 and Core 1
-        mips.move(S6, ZERO)
-        mips.addiu(T9, S0, 0x0f1c) # sceSdSetAddr
-        mips.label("addr_core_loop")
+        # Set Voice 0 SSA and LSA to 0x15000 on Core 0 ONLY
         mips.lui(A1, 0x0001); mips.ori(A1, A1, 0x5000)
-        mips.ori(A0, S6, 0x2040)  # SD_VA_SSA
-        mips.jalr(T9); mips.nop
-        mips.ori(A0, S6, 0x2060)  # SD_VA_LSA
-        mips.jalr(T9); mips.nop
-        mips.addiu(S6, S6, 1)
-        mips.ori(T8, ZERO, 2)
-        mips.bne(S6, T8, "addr_core_loop"); mips.nop
+        mips.ori(A0, ZERO, 0x2040)  # Core 0 SD_VA_SSA
+        mips.jalr(S4); mips.nop
+        mips.ori(A0, ZERO, 0x2060)  # Core 0 SD_VA_LSA
+        mips.jalr(S4); mips.nop
 
+        # Set Voice 0 Pitch = cur_pitch on Core 0 ONLY
+        mips.ori(A0, ZERO, 0x0200) # Core 0 SD_VP_PITCH
+        mips.lw(A1, 0x18EC, S0)
+        mips.jalr(S2); mips.nop
+
+        # Set Core 1 Voice 0 Pitch = 0 (silent)
+        mips.ori(A0, ZERO, 0x0201)
+        mips.move(A1, ZERO)
+        mips.jalr(S2); mips.nop
 
         # Initial state flags: Voice 0 starts in Bank A (playing cur_bank_idx).
         mips.sw(ZERO, 0x1908, S0) # next_refill_bank = 0 (Bank A is first)
@@ -1107,14 +1284,10 @@ module Citrine
         mips.ori(T0, ZERO, 1)
         mips.sw(T0, 0x190C, S0)   # play_state = 1
 
-        # Key on Voice 0 on Core 0 and Core 1:
-        mips.addiu(T9, S0, 0x0f14)
+        # Key on Voice 0 on Core 0 ONLY:
         mips.ori(A0, ZERO, 0x1500) # SD_S_KON (Core 0)
         mips.ori(A1, ZERO, 1)
-        mips.jalr(T9); mips.nop
-        mips.ori(A0, ZERO, 0x1501) # SD_S_KON (Core 1)
-        mips.ori(A1, ZERO, 1)
-        mips.jalr(T9); mips.nop
+        mips.jalr(S3); mips.nop
 
         mips.lw(S6, 24, SP)
         mips.lw(RA, 60, SP)
@@ -1125,22 +1298,24 @@ module Citrine
         mips.label("set_all_volumes")
         mips.addiu(SP, SP, -16)
         mips.sw(RA, 0, SP)
-        mips.sw(S1, 4, SP)
-        mips.move(S1, ZERO) # S1 = core (0..1)
-        mips.addiu(T9, S0, 0x0f0c) # sceSdSetParam
-        mips.label("vol_core_loop")
-        mips.ori(A0, S1, 0x0000); mips.move(A1, S7); mips.jalr(T9); mips.nop # Voice 0 VOLL
-        mips.ori(A0, S1, 0x0100); mips.move(A1, S7); mips.jalr(T9); mips.nop # Voice 0 VOLR
-        mips.ori(A0, S1, 0x0980); mips.move(A1, S7); mips.jalr(T9); mips.nop # MVOLL
-        mips.ori(A0, S1, 0x0a80); mips.move(A1, S7); mips.jalr(T9); mips.nop # MVOLR
-        mips.addiu(S1, S1, 1)
-        mips.ori(T8, ZERO, 2)
-        mips.bne(S1, T8, "vol_core_loop")
-        mips.nop
-        # Also set Broadcast volumes on Core 1:
-        mips.ori(A0, ZERO, 0x0f81); mips.move(A1, S7); mips.jalr(T9); mips.nop # BVOLL
-        mips.ori(A0, ZERO, 0x1081); mips.move(A1, S7); mips.jalr(T9); mips.nop # BVOLR
-        mips.lw(S1, 4, SP)
+
+        # Route Core 0 Voice 0 to both Left and Right stereo channels at volume S7:
+        mips.ori(A0, ZERO, 0x0000); mips.move(A1, S7); mips.jalr(S2); mips.nop # Core 0 Voice 0 VOLL
+        mips.ori(A0, ZERO, 0x0100); mips.move(A1, S7); mips.jalr(S2); mips.nop # Core 0 Voice 0 VOLR
+
+        # Open Core 0 Master Volume to maximum (0x3FFF):
+        mips.ori(A1, ZERO, 0x3FFF)
+        mips.ori(A0, ZERO, 0x0980); mips.jalr(S2); mips.nop # Core 0 MVOLL
+        mips.ori(A0, ZERO, 0x0a80); mips.jalr(S2); mips.nop # Core 0 MVOLR
+
+        # Open Core 1 Broadcast In to maximum (0x3FFF) to route Core 0 stereo bus into Core 1:
+        mips.ori(A0, ZERO, 0x0f81); mips.jalr(S2); mips.nop # Core 1 BVOLL
+        mips.ori(A0, ZERO, 0x1081); mips.jalr(S2); mips.nop # Core 1 BVOLR
+
+        # Open Core 1 Master Volume to maximum (0x3FFF) to drive physical DAC output:
+        mips.ori(A0, ZERO, 0x0981); mips.jalr(S2); mips.nop # Core 1 MVOLL
+        mips.ori(A0, ZERO, 0x0a81); mips.jalr(S2); mips.nop # Core 1 MVOLR
+
         mips.lw(RA, 0, SP)
         mips.addiu(SP, SP, 16)
         mips.jr(RA); mips.nop
@@ -1158,12 +1333,25 @@ module Citrine
         base_elf[text_off + 0x0c98, 4].copy_from(Bytes[0xF7, 0xFF, 0x00, 0x10]) # b 0x0c78
         base_elf[text_off + 0x0c9c, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
 
-        # Auto-play on IRX boot at 0x0c64:
-        base_elf[text_off + 0x0c64, 4].copy_from(Bytes[0x01, 0x00, 0x02, 0x34])
-        base_elf[text_off + 0x0c68, 4].copy_from(Bytes[0x1C, 0xFE, 0x11, 0x04])
-        base_elf[text_off + 0x0c6c, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
-        base_elf[text_off + 0x0c70, 4].copy_from(Bytes[0x01, 0x00, 0x00, 0x10])
-        base_elf[text_off + 0x0c74, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00])
+        if audio_data
+          # Auto-play startup sound on IRX boot at 0x0c64, then branch immediately to streaming engine at 0x04dc:
+          # 0x0c64: bal 0x0170 (play startup chime)
+          # 0x0c68: nop
+          # 0x0c6c: bal 0x04dc (enter streaming engine)
+          # 0x0c70: nop
+          base_elf[text_off + 0x0c64, 4].copy_from(Bytes[0x42, 0xFD, 0x11, 0x04]) # bal 0x0170
+          base_elf[text_off + 0x0c68, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00]) # nop
+          base_elf[text_off + 0x0c6c, 4].copy_from(Bytes[0x1B, 0xFE, 0x11, 0x04]) # bal 0x04dc
+          base_elf[text_off + 0x0c70, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00]) # nop
+          base_elf[text_off + 0x0c74, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00]) # nop
+        else
+          # Directly enter streaming engine at 0x04dc on boot:
+          base_elf[text_off + 0x0c64, 4].copy_from(Bytes[0x1D, 0xFE, 0x11, 0x04]) # bal 0x04dc
+          base_elf[text_off + 0x0c68, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00]) # nop
+          base_elf[text_off + 0x0c6c, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00]) # nop
+          base_elf[text_off + 0x0c70, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00]) # nop
+          base_elf[text_off + 0x0c74, 4].copy_from(Bytes[0x00, 0x00, 0x00, 0x00]) # nop
+        end
 
         base_elf
       end

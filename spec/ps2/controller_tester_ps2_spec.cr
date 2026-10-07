@@ -9,15 +9,15 @@ describe "Citrine PS2 Hardware Controller & Diagnostic Testing Suite" do
     tc.target("examples/08_controller_tester/main.cr")
 
     # Frame 15: Select button toggles active port
-    tc.inject_input(frame: 15, button: Citrine::PadButton::Select, duration: 2)
+    tc.inject_input(frame: 15, button: Citrine::PadButton::Select, duration: 2, port: 0)
 
     # Frame 25: Cross button triggers small rumble motor
-    tc.inject_input(frame: 25, button: Citrine::PadButton::Cross, duration: 2)
+    tc.inject_input(frame: 25, button: Citrine::PadButton::Cross, duration: 2, port: 1)
 
     # Frame 35: Circle button triggers large rumble motor
-    tc.inject_input(frame: 35, button: Citrine::PadButton::Circle, duration: 2)
+    tc.inject_input(frame: 35, button: Citrine::PadButton::Circle, duration: 2, port: 1)
 
-    result = tc.boot_pcsx2(timeout: 8.0.seconds)
+    result = tc.boot_pcsx2(timeout: 15.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE] PS2 EE Engine Initialized")

@@ -161,9 +161,9 @@ module Citrine
         @screenshot_output = output_path || "tmp_snap_#{@name.gsub(/[^a-zA-Z0-9_]/, "_")}.png"
       end
 
-      def inject_input(frame : Int32, button : Citrine::PadButton | Int32, duration : Int32 = 2)
+      def inject_input(frame : Int32, button : Citrine::PadButton | Int32, duration : Int32 = 2, port : Int32 = 0)
         mask = Citrine::VirtualInput.button_mask(button.to_i)
-        @input_schedule << Citrine::VirtualInput.new(frame.to_u32, mask, duration.to_u16)
+        @input_schedule << Citrine::VirtualInput.new(frame.to_u32, mask, duration.to_u16, port.to_u8)
       end
 
       def compile : Tuple(Bytes, SourceMap)
@@ -232,7 +232,7 @@ module Citrine
           target_frame = @screenshot_frame.not_nil!
           spawn do
             start_t = Time.instant
-            while (Time.instant - start_t) < 9.seconds
+            while (Time.instant - start_t) < 30.seconds
               break if bridge.log_history.any? { |l| l.includes?("PS2 EE Engine Initialized") }
               sleep 0.1.seconds
             end

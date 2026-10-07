@@ -196,6 +196,8 @@ module Citrine
     DrawTexturePro       = 237
     LoadPalette          = 241
     SetPalette           = 242
+    CpuCycleCount        = 245
+    CdvdSeekEntropy      = 246
   end
 
 

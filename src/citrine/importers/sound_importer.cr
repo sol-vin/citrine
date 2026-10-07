@@ -52,16 +52,32 @@ module Citrine
             extra = chunk_size - 16
             io.skip(extra) if extra > 0
           when "data"
-            num_samples = chunk_size // (bit_depth // 8)
-            num_samples.times do
-              if bit_depth == 16
-                s = io.read_bytes(Int16, IO::ByteFormat::LittleEndian)
-                samples << s
-              else
-                # 8-bit unsigned to 16-bit signed
-                b = io.read_byte || 128_u8
-                s = ((b.to_i - 128) << 8).to_i16
-                samples << s
+            num_raw_samples = chunk_size // (bit_depth // 8)
+            if channels > 1
+              num_frames = num_raw_samples // channels
+              num_frames.times do
+                sum = 0_i64
+                channels.times do
+                  if bit_depth == 16
+                    sum += io.read_bytes(Int16, IO::ByteFormat::LittleEndian).to_i64
+                  else
+                    b = io.read_byte || 128_u8
+                    sum += ((b.to_i - 128) << 8).to_i64
+                  end
+                end
+                samples << (sum // channels).clamp(-32768_i64, 32767_i64).to_i16
+              end
+              channels = 1
+            else
+              num_raw_samples.times do
+                if bit_depth == 16
+                  s = io.read_bytes(Int16, IO::ByteFormat::LittleEndian)
+                  samples << s
+                else
+                  b = io.read_byte || 128_u8
+                  s = ((b.to_i - 128) << 8).to_i16
+                  samples << s
+                end
               end
             end
           else

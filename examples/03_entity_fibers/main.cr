@@ -1,4 +1,5 @@
 require "citrine"
+require "citrine/rng"
 
 # 03 Entity Fibers - Citrine PS2
 # Demonstrates: Cooperative multitasking with Citrine Fibers (Citrine.spawn),
@@ -29,14 +30,34 @@ class Entity
   property laps : Int32
   property color_idx : Int32
 
-  def initialize(@box_x : Int32, @box_y : Int32, @box_size : Int32, @speed : Int32)
+  def initialize(@box_x : Int32, @box_y : Int32, @box_size : Int32, @speed : Int32, @corner : Int32 = 0, @color_idx : Int32 = 0)
     @dot_radius = @box_size // 8
     pad = @dot_radius + 3
-    @dot_x = @box_x + pad
-    @dot_y = @box_y + pad
-    @corner = 0
+    min_x = @box_x + pad
+    max_x = @box_x + @box_size - pad
+    min_y = @box_y + pad
+    max_y = @box_y + @box_size - pad
+
+    case @corner
+    when 0 # Move right along top edge (starts top-left)
+      @dot_x = min_x
+      @dot_y = min_y
+    when 1 # Move down along right edge (starts top-right)
+      @dot_x = max_x
+      @dot_y = min_y
+    when 2 # Move left along bottom edge (starts bottom-right)
+      @dot_x = max_x
+      @dot_y = max_y
+    when 3 # Move up along left edge (starts bottom-left)
+      @dot_x = min_x
+      @dot_y = max_y
+    else
+      @dot_x = min_x
+      @dot_y = min_y
+      @corner = 0
+    end
+
     @laps = 0
-    @color_idx = 0
   end
 
   def update
@@ -112,15 +133,17 @@ total_grid_h = (rows * box_size) + ((rows - 1) * spacing)
 origin_x = (screen_w - total_grid_w) // 2
 origin_y = margin_top + (avail_h - total_grid_h) // 2
 
-# Instantiate entities with distinct positive speeds
+# Instantiate entities with distinct randomized speeds, starting corners, and colors
 entities = [] of Entity
 MAX_ENTITIES.times do |i|
   c = i % cols
   r = i // cols
   bx = origin_x + c * (box_size + spacing)
   by = origin_y + r * (box_size + spacing)
-  spd = 1 + ((i * 3 + 1) % 4) # Positive speeds: 1, 2, 3, 4 px/frame
-  entities << Entity.new(bx, by, box_size, spd)
+  spd = Citrine.rand(1, 4)        # Randomized speeds: 1, 2, 3, or 4 px/frame
+  corner = Citrine.rand(0, 3)     # Randomized starting corner (0=top-left, 1=top-right, 2=bottom-right, 3=bottom-left)
+  color_idx = Citrine.rand(0, 5)  # Randomized initial color
+  entities << Entity.new(bx, by, box_size, spd, corner, color_idx)
 end
 
 entities.each do |e|

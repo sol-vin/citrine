@@ -404,6 +404,21 @@ module Citrine
   def self.exit_loop
   end
 
+  # Controls whether the mandatory Citrine boot splash screen is displayed.
+  # Set to false to disable the 2-second splash screen and boot immediately.
+  def self.boot_screen(enabled : Bool = true)
+  end
+
+  # Returns the raw 32-bit COP0 Count CPU cycle register (increments at 147.456 MHz / 294.912 MHz).
+  def self.cpu_cycles : UInt32
+    0_u32
+  end
+
+  # Performs an optical CDVD seek and times completion latency for entropy generation.
+  def self.cdvd_seek_entropy(lba : UInt32 = 0_u32) : UInt32
+    0_u32
+  end
+
   # =========================================================================
   # 2D Rendering & Graphics DSL
   # =========================================================================
@@ -1247,6 +1262,7 @@ require "./citrine/hardware/vu0"
 require "./citrine/hardware/virtual_pad"
 require "./citrine/hardware/gif"
 require "./citrine/audio"
+require "./citrine/rng"
 
 module Citrine
   alias WorkerPool = Citrine::Concurrency::WorkerPool
@@ -1288,5 +1304,10 @@ end
 def exit(status : Int = 0)
   Citrine.exit_loop
   Process.exit(status)
+end
+
+# Top-level DSL keyword controlling whether the Citrine boot splash screen is displayed.
+def boot_screen(enabled : Bool = true)
+  Citrine.boot_screen(enabled)
 end
 

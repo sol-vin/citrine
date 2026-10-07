@@ -16,6 +16,7 @@ module Citrine
     property loaded_requires : Set(String)
     property vm_contexts : Hash(String, VmContextDef)
     property active_context_name : String?
+    property boot_screen : Bool = true
 
     def initialize(@filename : String? = nil)
       @defs = {} of String => Crystal::Def
@@ -28,6 +29,7 @@ module Citrine
       @loaded_requires = Set(String).new
       @vm_contexts = {} of String => VmContextDef
       @active_context_name = nil
+      @boot_screen = true
     end
   end
 
@@ -237,7 +239,15 @@ module Citrine
         end
         program.top_level_nodes << node if namespace.empty?
       when Crystal::Call
-        if node.name == "main_loop" && (node.obj.nil? || node.obj.to_s == "Citrine")
+        if node.name == "boot_screen" && (node.obj.nil? || node.obj.to_s == "Citrine")
+          if arg = node.args.first?
+            if arg.is_a?(Crystal::BoolLiteral)
+              program.boot_screen = arg.value
+            end
+          end
+          program.top_level_nodes << node if namespace.empty?
+          return
+        elsif node.name == "main_loop" && (node.obj.nil? || node.obj.to_s == "Citrine")
           if block = node.block
             program.main_loop_body = block.body
             validate_main_loop_body(block.body)

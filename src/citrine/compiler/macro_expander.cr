@@ -1009,7 +1009,7 @@ module Citrine
                 else
                   0.0
                 end
-          elements << Crystal::NumberLiteral.new(sprintf("%.1f", dur), :f32)
+          elements << Crystal::NumberLiteral.new(dur.to_i)
         end
       end
       Crystal::ArrayLiteral.new(elements)
@@ -1105,7 +1105,7 @@ module Citrine
               Crystal::StringLiteral.new(title),
               Crystal::StringLiteral.new(artist),
               Crystal::StringLiteral.new(album),
-              Crystal::NumberLiteral.new(sprintf("%.1f", dur), :f32),
+              Crystal::NumberLiteral.new(dur_i),
               Crystal::StringLiteral.new(dur_s),
               Crystal::StringLiteral.new(stream_basename),
               Crystal::StringLiteral.new(optical_str)

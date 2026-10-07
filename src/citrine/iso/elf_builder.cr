@@ -5,6 +5,7 @@ require "./phase_extractor"
 require "./rodata_segment_builder"
 require "./text_segment_builder"
 require "./runtime_subroutines"
+require "./splash_screen_builder"
 
 module Citrine
   alias VirtualInput = Citrine::ISO::VirtualInput
@@ -54,10 +55,12 @@ module Citrine
       vag_tracks : Array(Bytes) = [] of Bytes
     ) : Bytes
       profile = PhaseExtractor.extract(cbc_bytes)
+      profile.boot_screen = false unless input_schedule.empty?
 
-      @has_audio = profile.has_audio || !vag_tracks.empty? || (vag_bytes.try(&.empty?) == false)
+      has_startup_audio = profile.boot_screen && (File.exists?("startup.wav") || File.exists?(File.join(Dir.current, "startup.wav")))
+      @has_audio = profile.has_audio || !vag_tracks.empty? || (vag_bytes.try(&.empty?) == false) || has_startup_audio
       profile.has_audio = @has_audio
-      profile.num_tracks = !vag_tracks.empty? ? vag_tracks.size : profile.phases.size
+      profile.num_tracks = !vag_tracks.empty? ? vag_tracks.size : (has_startup_audio ? 1 : profile.phases.size)
       @has_button_checks = profile.has_button_checks
       @is_inline_assembly = profile.is_inline_assembly
       @inline_asm_words = profile.inline_asm_words
@@ -125,7 +128,21 @@ module Citrine
         symbols << SymbolEntry.new("Citrine_InlineAsm_Block", emitter.labels["Citrine_InlineAsm_Block"], (@inline_asm_words.size.to_u32 * 4) + 8, STT_FUNC, STB_GLOBAL, 1_u16)
       end
 
-      ElfWriter.write(text_data, rodata.data, data_data, symbols, 0x00100000_u32, rodata_vaddr: RODATA_VADDR)
+      splash_payload = if profile.boot_screen
+                         SplashScreenBuilder.build_packet
+                       else
+                         nil
+                       end
+
+      ElfWriter.write(
+        text_data,
+        rodata.data,
+        data_data,
+        symbols,
+        0x00100000_u32,
+        rodata_vaddr: RODATA_VADDR,
+        splash_payload: splash_payload
+      )
     end
 
     def build_headless_elf(boot_messages : Array(String) = [] of String) : Bytes
