@@ -240,10 +240,7 @@ module Citrine
         if node.name == "main_loop" && (node.obj.nil? || node.obj.to_s == "Citrine")
           if block = node.block
             program.main_loop_body = block.body
-            old_loop = @in_main_loop_parse
-            @in_main_loop_parse = true
-            process_top_level(block.body, program, namespace)
-            @in_main_loop_parse = old_loop
+            validate_main_loop_body(block.body)
           end
           program.top_level_nodes << node if namespace.empty?
           return
@@ -281,6 +278,26 @@ module Citrine
         # Skip empty
       else
         program.top_level_nodes << node if namespace.empty?
+      end
+    end
+
+    private def validate_main_loop_body(node : Crystal::ASTNode)
+      case node
+      when Crystal::Expressions
+        node.expressions.each { |expr| validate_main_loop_body(expr) }
+      when Crystal::Call
+        if (node.name == "context" || node.name == "vm_context" || node.name == "make_vm_context") && (node.obj.nil? || node.obj.to_s == "Citrine")
+          loc = node.location
+          raise ParseError.new(
+            "Context declarations cannot be placed inside main_loop. Declare contexts at the top-level.",
+            filename: @filename,
+            line_number: loc.try(&.line_number),
+            column_number: loc.try(&.column_number)
+          )
+        end
+        if b = node.block
+          validate_main_loop_body(b.body)
+        end
       end
     end
 

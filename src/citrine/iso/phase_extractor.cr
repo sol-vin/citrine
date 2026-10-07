@@ -15,10 +15,8 @@ module Citrine
       property inline_asm_words : Array(UInt32)
       property has_audio : Bool
       property num_tracks : Int32
-      property is_dvd_screensaver : Bool
       property bank_dur_ms : UInt32
       property frames_per_bank : UInt32
-      property is_controller_tester : Bool
 
       def initialize(
         @phases = [] of Citrine::GS::Phase,
@@ -30,19 +28,9 @@ module Citrine
         @inline_asm_words = [] of UInt32,
         @has_audio = false,
         @num_tracks = 1,
-        @is_dvd_screensaver = false,
         @bank_dur_ms = 1195_u32,
-        @frames_per_bank = 72_u32,
-        @is_controller_tester = false
+        @frames_per_bank = 72_u32
       )
-      end
-
-      def is_controller_tester : Bool
-        @is_controller_tester
-      end
-
-      def is_audio_player : Bool
-        @has_audio
       end
     end
 
@@ -107,24 +95,6 @@ module Citrine
       end
 
 
-      CT_BUTTONS = [
-        14_u32, # 1: Cross
-        13_u32, # 2: Circle
-        12_u32, # 3: Triangle
-        15_u32, # 4: Square
-        4_u32,  # 5: Up
-        6_u32,  # 6: Down
-        7_u32,  # 7: Left
-        5_u32,  # 8: Right
-        10_u32, # 9: L1
-        11_u32, # 10: R1
-        8_u32,  # 11: L2
-        9_u32,  # 12: R2
-        0_u32,  # 13: Select
-        3_u32,  # 14: Start
-        1_u32,  # 15: L3
-        2_u32,  # 16: R3
-      ]
 
       def self.decode_coord(val : Int64?) : Float32
         return 0.0_f32 unless val
@@ -393,11 +363,9 @@ struct AllocationRecord
 end
 
 getter has_button_checks : Bool = false
-getter is_controller_tester : Bool = false
 getter inline_asm_words = [] of UInt32
 getter is_inline_assembly : Bool = false
 property has_audio : Bool = false
-getter is_audio_player : Bool = false
 
 def self.build_default_runner_elf(cbc_bytes : Bytes? = nil, input_schedule : Array(VirtualInput) = [] of VirtualInput, vag_bytes : Bytes? = nil) : Bytes
   builder = new
@@ -416,8 +384,6 @@ end
         inline_asm_words = [] of UInt32
         has_audio = false
         is_animated = false
-        is_dvd_screensaver = false
-        is_controller_tester = false
         phases = [] of Phase
 
         magic = cbc_bytes ? (cbc_bytes.size >= 4 ? String.new(cbc_bytes[0..3]) : "") : ""
@@ -520,8 +486,6 @@ end
         down.ends_with?(".vag") || down.ends_with?(".wav") || down.ends_with?(".cas") ||
           down.includes?("cdda") || down.includes?("cd-da") || s.includes?("SPU2")
       end
-      is_dvd_screensaver = strings.any? { |s| s.includes?("BouncingLogo") || s.includes?("DVD Bouncing Screensaver") || s.includes?("DVD Bounce") }
-      is_controller_tester = strings.any? { |s| s.includes?("Controller Diagnostic") || s.includes?("DualShock 2") || s.includes?("DUALSHOCK 2") || s.includes?("Controller Tester") }
 
       main_fn = fns.find { |f| strings[f.name_idx]? == "__main__" }
       if main_fn
@@ -535,8 +499,10 @@ end
         reg_base = 0
         call_stack = [] of CallFrame
         objects = Hash(Int64, Array(Int64)).new
+        object_types = Hash(Int64, Array(UInt8)).new
         next_obj_id = 1_i64
         arrays = Hash(Int64, Array(Int64)).new
+        array_types = Hash(Int64, Array(UInt8)).new
         next_arr_id = 1000_i64
         io_streams = Hash(Int64, IO::Memory).new
         next_io_id = 2000_i64
@@ -557,6 +523,7 @@ end
         next_chan_id = 7000_i64
         active_fibers = [] of FiberContext
         is_float_reg = Array(Bool).new(1024, false)
+        reg_types = Array(UInt8).new(1024, 2_u8)
         active_camera : Tuple(Tuple(Float32, Float32, Float32), Tuple(Float32, Float32, Float32), Tuple(Float32, Float32, Float32))? = nil
         rand_state = 0x517cc1b727220a95_u64
         current_commands = [] of DrawCommand
@@ -634,15 +601,19 @@ end
           when 0 # Nop
           when 1 # Move
             regs[dst_r] = regs[a_r]
+            reg_types[dst_r] = reg_types[a_r]
             is_float_reg[dst_r] = is_float_reg[a_r]
           when 2 # LoadNil
             regs[dst_r] = 0_i64
+            reg_types[dst_r] = 0_u8
             is_float_reg[dst_r] = false
           when 3 # LoadBool
             regs[dst_r] = imm16
+            reg_types[dst_r] = 1_u8
             is_float_reg[dst_r] = false
           when 4 # LoadInt
             regs[dst_r] = imm16
+            reg_types[dst_r] = 2_u8
             is_float_reg[dst_r] = false
           when 5 # LoadConst
             if imm16 < constants.size
@@ -650,22 +621,32 @@ end
               case c.type
               when 2 # Int32
                 regs[dst_r] = c.u32_val.to_i32!.to_i64
+                reg_types[dst_r] = 2_u8
                 is_float_reg[dst_r] = false
               when 3 # Float32
                 regs[dst_r] = self.class.encode_f32(c.f32_val)
+                reg_types[dst_r] = 3_u8
                 is_float_reg[dst_r] = true
               when 5 # Color
                 regs[dst_r] = c.u32_val.to_i64
+                reg_types[dst_r] = 5_u8
                 is_float_reg[dst_r] = false
               when 1 # Bool
                 regs[dst_r] = c.u32_val.to_i64
+                reg_types[dst_r] = 1_u8
+                is_float_reg[dst_r] = false
+              when 6 # String
+                regs[dst_r] = imm16.to_i64
+                reg_types[dst_r] = 7_u8
                 is_float_reg[dst_r] = false
               else
                 regs[dst_r] = imm16.to_i64
+                reg_types[dst_r] = 2_u8
                 is_float_reg[dst_r] = false
               end
             else
               regs[dst_r] = imm16.to_i64
+              reg_types[dst_r] = 2_u8
               is_float_reg[dst_r] = false
             end
           when 10 # Add
@@ -722,13 +703,21 @@ end
             end
           when 16 # BitAnd
             regs[dst_r] = regs[a_r] & regs[b_r]
+            reg_types[dst_r] = (reg_types[a_r] == 1_u8 && reg_types[b_r] == 1_u8) ? 1_u8 : 2_u8
+            is_float_reg[dst_r] = false
           when 17 # BitOr
             regs[dst_r] = regs[a_r] | regs[b_r]
+            reg_types[dst_r] = (reg_types[a_r] == 1_u8 && reg_types[b_r] == 1_u8) ? 1_u8 : 2_u8
+            is_float_reg[dst_r] = false
           when 18 # BitXor
             regs[dst_r] = regs[a_r] ^ regs[b_r]
+            reg_types[dst_r] = (reg_types[a_r] == 1_u8 && reg_types[b_r] == 1_u8) ? 1_u8 : 2_u8
+            is_float_reg[dst_r] = false
           when 19 # ShiftLeft
             shift = (regs[b_r] & 0x3F).to_i
             regs[dst_r] = ((regs[a_r].to_u64! << shift) & 0xFFFFFFFFFFFFFFFF_u64).to_i64!
+            reg_types[dst_r] = 2_u8
+            is_float_reg[dst_r] = false
           when 20 # Vec2New
             id = next_vec2_id
             next_vec2_id += 1
@@ -791,6 +780,7 @@ end
                       end
                     end
             regs[dst_r] = is_eq ? 1_i64 : 0_i64
+            reg_types[dst_r] = 1_u8
           when 31 # Ne
             val_a = regs[a_r]
             val_b = regs[b_r]
@@ -818,12 +808,14 @@ end
                       end
                     end
             regs[dst_r] = !is_eq ? 1_i64 : 0_i64
+            reg_types[dst_r] = 1_u8
           when 32 # Lt
             regs[dst_r] = (if is_float_reg[a_r] || is_float_reg[b_r]
                              self.class.decode_coord(regs[a_r]) < self.class.decode_coord(regs[b_r])
                            else
                              regs[a_r] < regs[b_r]
                            end) ? 1_i64 : 0_i64
+            reg_types[dst_r] = 1_u8
             is_float_reg[dst_r] = false
           when 33 # Le
             regs[dst_r] = (if is_float_reg[a_r] || is_float_reg[b_r]
@@ -831,6 +823,7 @@ end
                            else
                              regs[a_r] <= regs[b_r]
                            end) ? 1_i64 : 0_i64
+            reg_types[dst_r] = 1_u8
             is_float_reg[dst_r] = false
           when 34 # Gt
             regs[dst_r] = (if is_float_reg[a_r] || is_float_reg[b_r]
@@ -838,6 +831,7 @@ end
                            else
                              regs[a_r] > regs[b_r]
                            end) ? 1_i64 : 0_i64
+            reg_types[dst_r] = 1_u8
             is_float_reg[dst_r] = false
           when 35 # Ge
             regs[dst_r] = (if is_float_reg[a_r] || is_float_reg[b_r]
@@ -845,6 +839,7 @@ end
                            else
                              regs[a_r] >= regs[b_r]
                            end) ? 1_i64 : 0_i64
+            reg_types[dst_r] = 1_u8
             is_float_reg[dst_r] = false
           when 40 # Jump
             target_pc = pc + imm16_signed
@@ -867,9 +862,13 @@ end
             end
             pc += imm16_signed
           when 41 # JumpIfTrue
-            pc += imm16_signed if regs[dst_r] != 0
+            cond_t = reg_types[dst_r]
+            is_truthy = !(cond_t == 0_u8 || (cond_t == 1_u8 && regs[dst_r] == 0_i64))
+            pc += imm16_signed if is_truthy
           when 42 # JumpIfFalse
-            pc += imm16_signed if regs[dst_r] == 0
+            cond_t = reg_types[dst_r]
+            is_falsy = cond_t == 0_u8 || (cond_t == 1_u8 && regs[dst_r] == 0_i64)
+            pc += imm16_signed if is_falsy
           when 50 # Call
             target_fn_idx = imm16.to_i
             if target_fn = fns[target_fn_idx]?
@@ -891,8 +890,10 @@ end
           when 51 # Return
             if frame = call_stack.pop?
               ret_val = regs[dst_r]
+              ret_type = reg_types[dst_r]
               reg_base = frame.caller_reg_base
               regs[frame.caller_dest] = ret_val
+              reg_types[frame.caller_dest] = ret_type
               instructions = frame.caller_instructions
               pc = frame.return_pc
             else
@@ -997,7 +998,7 @@ end
             fb = self.class.decode_coord(regs[b_r])
             if subop == 7 # FcvtSW
               is_float_reg[dst_r] = false
-              regs[dst_r] = fa.to_i32.to_i64
+              regs[dst_r] = (fa.nan? || fa.infinite? || fa < -9.22e18_f32 || fa > 9.22e18_f32) ? 0_i64 : fa.to_i64
             else
               is_float_reg[dst_r] = true
               fres = case subop
@@ -1022,14 +1023,7 @@ end
               in_main_loop = true
               regs[dst_r] = 1_i64
             when 40, 41, 42 # ButtonDown, ButtonPressed, ButtonReleased
-              port_idx = regs[base_r].to_i
-              btn = (regs[base_r + 1] & 0xFF).to_u32
-              if is_controller_tester
-                regs[dst_r] = (btn == simulated_btn_id && simulated_button_press) ? 1_i64 : 0_i64
-              else
-                target_sim_btn = has_audio ? 5_u32 : 14_u32
-                regs[dst_r] = (btn == target_sim_btn && simulated_button_press) ? 1_i64 : 0_i64
-              end
+              regs[dst_r] = 0_i64
 
             when 45, 46, 47 # ActionPressed, ActionDown, ActionReleased
               act_id = regs[base_r].to_i
@@ -1212,81 +1206,16 @@ end
               end
 
               if current_commands.size > 0
-                if !animation_checked
-                  if phases.empty?
-                    # Record Frame 0 without simulated button press
-                    prev_frame_cmds = current_commands.dup
-                    phases << Phase.new(current_commands.dup, 0_u32, current_loop_message)
-                    current_loop_message = nil
-                    current_commands = [] of DrawCommand
-                    simulated_button_press = false
-                  else
-                    # Frame 1: check if scene is moving autonomously (animation!)
-                    animation_checked = true
-                    if current_commands != prev_frame_cmds || has_dynamic_frame_text
-                      # Active autonomous animation loop!
-                      is_animated = true
-                      phases << Phase.new(current_commands.dup, 1_u32, current_loop_message)
-                      current_loop_message = nil
-                      current_commands = [] of DrawCommand
-                      anim_frame_count = 2
-                    elsif is_controller_tester
-                      # Dedicated DualShock 2 controller diagnostic suite:
-                      phases[0].delay_frames = 0_u32
-                      button_phase_count = 1
-                      simulated_button_press = true
-                      simulated_btn_id = CT_BUTTONS[0]
-                      current_commands = [] of DrawCommand
-                    elsif has_button_checks
-                      # Interactive scene with button checks
-                      phases[0].delay_frames = 0_u32
-                      button_phase_count += 1
-                      simulated_button_press = true
-                      current_commands = [] of DrawCommand
-                    else
-                      phases[0].delay_frames = 0_u32
-                      first_frame_done = true
-                    end
-                  end
-                elsif is_animated
-                  phases << Phase.new(current_commands.dup, 1_u32, current_loop_message)
-                  current_loop_message = nil
-                  current_commands = [] of DrawCommand
-
-                  if phases.size >= max_anim_frames
-                    first_frame_done = true
-                  end
-                elsif is_controller_tester
-                  # Record phase for current simulated button
+                if phases.empty?
                   phases << Phase.new(current_commands.dup, 0_u32, current_loop_message)
                   current_loop_message = nil
+                  prev_frame_cmds = current_commands.dup
                   current_commands = [] of DrawCommand
-                  if button_phase_count < CT_BUTTONS.size
-                    simulated_btn_id = CT_BUTTONS[button_phase_count]
-                    button_phase_count += 1
-                    simulated_button_press = true
-                  else
-                    first_frame_done = true
-                  end
                 else
-                  # Static / interactive button handling
-                  duplicate_idx = phases.index { |p| p.commands == current_commands }
-                  if duplicate_idx
-                    if duplicate_idx == 0 && current_loop_message
-                      phases[0].message ||= current_loop_message
-                    end
-                    first_frame_done = true
-                  else
-                    phases << Phase.new(current_commands.dup, 0_u32, current_loop_message)
-                    current_loop_message = nil
-                    button_phase_count += 1
-                    if button_phase_count >= 16
-                      first_frame_done = true
-                    else
-                      simulated_button_press = true
-                      current_commands = [] of DrawCommand
-                    end
+                  if current_commands != prev_frame_cmds || has_dynamic_frame_text
+                    is_animated = true
                   end
+                  first_frame_done = true
                 end
               end
             when 12 # ClearBackground
@@ -1639,53 +1568,84 @@ end
               arr_id = next_arr_id
               next_arr_id += 1
               arrays[arr_id] = [] of Int64
+              array_types[arr_id] = [] of UInt8
               regs[dst_r] = arr_id
+              reg_types[dst_r] = 5_u8 # TYPE_ARRAY
             when 121 # ArrayGet
               arr_id = regs[base_r]
               idx = regs[base_r + 1].to_i
               if arr = arrays[arr_id]?
                 regs[dst_r] = arr[idx]? || 0_i64
+                reg_types[dst_r] = array_types[arr_id]?.try(&.[idx]?) || 2_u8
               elsif arr_id >= 0x00100000_i64
                 target_addr = arr_id + (idx.to_i64 * 4)
                 if target_addr == 0x70000010_i64 || target_addr == 0x70000018_i64
                   regs[dst_r] = simulated_button_press ? 0x4000_i64 : 0_i64
+                  reg_types[dst_r] = 2_u8
                 else
                   regs[dst_r] = memory[target_addr]? || 0_i64
+                  reg_types[dst_r] = 2_u8
                 end
               else
                 regs[dst_r] = 0_i64
+                reg_types[dst_r] = 0_u8
               end
             when 122 # ArraySet
               arr_id = regs[base_r]
               idx = regs[base_r + 1].to_i
               val = regs[base_r + 2]
+              val_t = reg_types[base_r + 2]
               if arr = arrays[arr_id]?
                 while arr.size <= idx
                   arr << 0_i64
                 end
                 arr[idx] = val
+                if arr_t = array_types[arr_id]?
+                  while arr_t.size <= idx
+                    arr_t << 2_u8
+                  end
+                  arr_t[idx] = val_t
+                end
               elsif arr_id >= 0x00100000_i64
                 target_addr = arr_id + (idx.to_i64 * 4)
                 memory[target_addr] = val
               end
               regs[dst_r] = val
+              reg_types[dst_r] = val_t
             when 123 # ArrayPush
               arr_id = regs[base_r]
               val = regs[base_r + 1]
+              val_t = reg_types[base_r + 1]
               if arr = arrays[arr_id]?
                 arr << val
               end
+              if arr_t = array_types[arr_id]?
+                arr_t << val_t
+              end
               regs[dst_r] = arr_id
+              reg_types[dst_r] = 5_u8 # TYPE_ARRAY
             when 124 # ArrayPop
               arr_id = regs[base_r]
               regs[dst_r] = arrays[arr_id]?.try(&.pop?) || 0_i64
-            when 125 # ArraySize
-              arr_id = regs[base_r]
-              regs[dst_r] = (arrays[arr_id]?.try(&.size) || 0).to_i64
+              reg_types[dst_r] = array_types[arr_id]?.try(&.pop?) || 2_u8
+            when 125 # ArraySize / StringSize
+              id = regs[base_r]
+              if arr = arrays[id]?
+                regs[dst_r] = arr.size.to_i64
+              elsif id >= 0 && id < constants.size && constants[id.to_i]?.try(&.type) == 6_u8
+                regs[dst_r] = constants[id.to_i].str_val.size.to_i64
+              elsif id >= 0 && id < strings.size && (s = strings[id.to_i]?)
+                regs[dst_r] = s.size.to_i64
+              else
+                regs[dst_r] = 0_i64
+              end
+              reg_types[dst_r] = 2_u8 # TYPE_INT32
             when 126 # ArrayClear
               arr_id = regs[base_r]
               arrays[arr_id]?.try(&.clear)
+              array_types[arr_id]?.try(&.clear)
               regs[dst_r] = 0_i64
+              reg_types[dst_r] = 0_u8 # TYPE_NIL
             when 130 # StaticArrayNew
               sz = regs[base_r].to_i
               def_val = regs[base_r + 1]
@@ -1785,7 +1745,9 @@ end
               )
               object_classes[obj_addr] = cid
               objects[obj_addr] = Array(Int64).new(field_count, 0_i64)
+              object_types[obj_addr] = Array(UInt8).new(field_count, 2_u8)
               regs[dst_r] = obj_addr
+              reg_types[dst_r] = 6_u8 # TYPE_OBJECT
             when 151 # ObjectGetField
               obj_id = regs[base_r]
               f_idx = regs[base_r + 1].to_i
@@ -1793,26 +1755,33 @@ end
                 if alloc.freed
                   boot_messages << "[CITRINE MEMORY ERROR] Use-after-free: read from freed object at 0x#{obj_id.to_s(16)}"
                   regs[dst_r] = 0_i64
+                  reg_types[dst_r] = 0_u8
                 elsif f_idx < 0 || f_idx >= alloc.field_count
                   boot_messages << "[CITRINE PANIC] Object field index out of bounds: slot #{f_idx} for field_count #{alloc.field_count}"
                   regs[dst_r] = 0_i64
+                  reg_types[dst_r] = 0_u8
                 else
                   regs[dst_r] = memory[obj_id + 8 + (f_idx * 4)]? || 0_i64
+                  reg_types[dst_r] = object_types[obj_id]?.try(&.[f_idx]?) || 2_u8
                 end
               elsif obj = objects[obj_id]?
                 if f_idx < 0 || f_idx >= obj.size
                   boot_messages << "[CITRINE PANIC] Object field index out of bounds: slot #{f_idx} for size #{obj.size}"
                   regs[dst_r] = 0_i64
+                  reg_types[dst_r] = 0_u8
                 else
                   regs[dst_r] = obj[f_idx]? || 0_i64
+                  reg_types[dst_r] = object_types[obj_id]?.try(&.[f_idx]?) || 2_u8
                 end
               else
                 regs[dst_r] = memory[obj_id + 8 + (f_idx * 4)]? || 0_i64
+                reg_types[dst_r] = object_types[obj_id]?.try(&.[f_idx]?) || 2_u8
               end
             when 152 # ObjectSetField
               obj_id = regs[base_r]
               f_idx = regs[base_r + 1].to_i
               val = regs[base_r + 2]
+              val_t = reg_types[base_r + 2]
               if alloc = allocations[obj_id]?
                 if alloc.freed
                   boot_messages << "[CITRINE MEMORY ERROR] Use-after-free: write to freed object at 0x#{obj_id.to_s(16)}"
@@ -1824,6 +1793,10 @@ end
                     while obj.size <= f_idx; obj << 0_i64; end
                     obj[f_idx] = val
                   end
+                  if obj_t = object_types[obj_id]?
+                    while obj_t.size <= f_idx; obj_t << 2_u8; end
+                    obj_t[f_idx] = val_t
+                  end
                 end
               elsif obj = objects[obj_id]?
                 if f_idx < 0
@@ -1831,12 +1804,17 @@ end
                 else
                   while obj.size <= f_idx; obj << 0_i64; end
                   obj[f_idx] = val
+                  if obj_t = object_types[obj_id]?
+                    while obj_t.size <= f_idx; obj_t << 2_u8; end
+                    obj_t[f_idx] = val_t
+                  end
                   memory[obj_id + 8 + (f_idx * 4)] = val
                 end
               else
                 memory[obj_id + 8 + (f_idx * 4)] = val
               end
               regs[dst_r] = val
+              reg_types[dst_r] = val_t
             when 153 # StructCopy
               src_addr = regs[base_r]
               if alloc = allocations[src_addr]?
@@ -1856,9 +1834,14 @@ end
                 if obj = objects[src_addr]?
                   objects[copy_addr] = obj.dup
                 end
+                if obj_t = object_types[src_addr]?
+                  object_types[copy_addr] = obj_t.dup
+                end
                 regs[dst_r] = copy_addr
+                reg_types[dst_r] = 6_u8
               else
                 regs[dst_r] = src_addr
+                reg_types[dst_r] = reg_types[base_r]
               end
             when 160 # PointerMalloc
               cnt = regs[base_r].to_i
@@ -2003,9 +1986,11 @@ end
                 is_match = obj_cid == target_id
               end
               regs[dst_r] = is_match ? 1_i64 : 0_i64
+              reg_types[dst_r] = 1_u8 # TYPE_BOOL
             when 171 # TypeAsCast
               val = regs[base_r]
               regs[dst_r] = val
+              reg_types[dst_r] = reg_types[base_r]
             when 180 # ContextSet
               s_idx = regs[base_r].to_i
               ctx_str = constants[s_idx]?.try(&.str_val) || ""
@@ -2107,6 +2092,7 @@ end
               c_idx = constants.index { |c| c.type == 6_u8 && c.str_val == stripped } ||
                       (constants << CVal.new(6_u8, 0_u32, stripped); constants.size - 1)
               regs[dst_r] = c_idx.to_i64
+              reg_types[dst_r] = 7_u8 # TYPE_STRING
             when 187 # StringDowncase
               s_val = regs[base_r]
               raw = if s_val < constants.size && constants[s_val.to_i]?.try(&.type) == 6_u8
@@ -2119,6 +2105,7 @@ end
               c_idx = constants.index { |c| c.type == 6_u8 && c.str_val == down } ||
                       (constants << CVal.new(6_u8, 0_u32, down); constants.size - 1)
               regs[dst_r] = c_idx.to_i64
+              reg_types[dst_r] = 7_u8 # TYPE_STRING
             when 188 # StringUpcase
               s_val = regs[base_r]
               raw = if s_val < constants.size && constants[s_val.to_i]?.try(&.type) == 6_u8
@@ -2131,6 +2118,7 @@ end
               c_idx = constants.index { |c| c.type == 6_u8 && c.str_val == up } ||
                       (constants << CVal.new(6_u8, 0_u32, up); constants.size - 1)
               regs[dst_r] = c_idx.to_i64
+              reg_types[dst_r] = 7_u8 # TYPE_STRING
             when 189 # StringIncludes
               s_val = regs[base_r]
               sub_val = regs[base_r + 1]
@@ -2145,6 +2133,7 @@ end
                       strings[sub_val.to_i]? || ""
                     end
               regs[dst_r] = raw.includes?(sub) ? 1_i64 : 0_i64
+              reg_types[dst_r] = 1_u8 # TYPE_BOOL
             when 190 # RegexNew
               s_val = regs[base_r]
               pat = if s_val < constants.size && constants[s_val.to_i]?.try(&.type) == 6_u8
@@ -2206,6 +2195,7 @@ end
                       strings[sub_val.to_i]? || ""
                     end
               regs[dst_r] = raw.starts_with?(sub) ? 1_i64 : 0_i64
+              reg_types[dst_r] = 1_u8 # TYPE_BOOL
             when 193 # StringEndsWith
               s_val = regs[base_r]
               sub_val = regs[base_r + 1]
@@ -2220,6 +2210,7 @@ end
                       strings[sub_val.to_i]? || ""
                     end
               regs[dst_r] = raw.ends_with?(sub) ? 1_i64 : 0_i64
+              reg_types[dst_r] = 1_u8 # TYPE_BOOL
             when 194 # StringSplit
               s_val = regs[base_r]
               delim_val = regs[base_r + 1]
@@ -2267,6 +2258,7 @@ end
               c_idx = constants.index { |c| c.type == 6_u8 && c.str_val == joined } ||
                       (constants << CVal.new(6_u8, 0_u32, joined); constants.size - 1)
               regs[dst_r] = c_idx.to_i64
+              reg_types[dst_r] = 7_u8 # TYPE_STRING
             when 196 # ToString
               val = regs[base_r]
               hint = (base_r + 1 < regs.size) ? regs[base_r + 1] : 0_i64
@@ -2288,6 +2280,7 @@ end
               c_idx = constants.index { |c| c.type == 6_u8 && c.str_val == val_str } ||
                       (constants << CVal.new(6_u8, 0_u32, val_str); constants.size - 1)
               regs[dst_r] = c_idx.to_i64
+              reg_types[dst_r] = 7_u8 # TYPE_STRING
             when 210 # VU0BatchTransform
               points_ptr = regs[base_r]
               regs[dst_r] = points_ptr
@@ -2359,13 +2352,12 @@ end
           is_inline_assembly: is_inline_assembly,
           inline_asm_words: inline_asm_words,
           has_audio: has_audio,
-          is_dvd_screensaver: is_dvd_screensaver,
           bank_dur_ms: bank_dur,
-          frames_per_bank: frames_bank,
-          is_controller_tester: is_controller_tester
+          frames_per_bank: frames_bank
         )
       end
     rescue ex
+      STDERR.puts "EXTRACT EXCEPTION: #{ex.message}\n#{ex.backtrace.join("\n")}"
     end
   end
 
@@ -2387,9 +2379,7 @@ end
           has_button_checks: has_button_checks,
           is_inline_assembly: is_inline_assembly,
           inline_asm_words: inline_asm_words,
-          has_audio: has_audio,
-          is_dvd_screensaver: is_dvd_screensaver,
-          is_controller_tester: is_controller_tester
+          has_audio: has_audio
         )
       end
     end

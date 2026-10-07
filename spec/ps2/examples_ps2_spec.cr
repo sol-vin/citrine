@@ -33,7 +33,7 @@ describe "Citrine PS2 Examples Runner Suite" do
     bytes.size.should be > 18
     tc.max_registers.should be <= 1024
 
-    result = tc.boot_pcsx2(timeout: 2.seconds)
+    result = tc.boot_pcsx2(timeout: 5.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
   end

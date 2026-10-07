@@ -56,8 +56,8 @@ describe "Citrine PS2 Example 05: Hello World DVD Bouncing Screensaver" do
     builder = Citrine::ElfBuilder.new
     phases, messages, loop_start, is_animated = builder.parse_cbc(bytes)
 
-    # Must enable dynamic DVD screensaver mode
-    builder.is_dvd_screensaver.should be_true
+    # Must enable dynamic animation mode
+    is_animated.should be_true
 
     # Frame 0 must be captured for screenshot bridge
     phases.size.should be >= 1

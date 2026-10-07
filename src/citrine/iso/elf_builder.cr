@@ -32,9 +32,6 @@ module Citrine
 
     RODATA_VADDR = 0x00500000_u32
 
-    getter is_controller_tester : Bool = false
-    getter is_audio_player : Bool = false
-    getter is_dvd_screensaver : Bool = false
     getter has_audio : Bool = false
     getter has_button_checks : Bool = false
     getter is_inline_assembly : Bool = false
@@ -64,13 +61,12 @@ module Citrine
       @has_button_checks = profile.has_button_checks
       @is_inline_assembly = profile.is_inline_assembly
       @inline_asm_words = profile.inline_asm_words
-      @is_controller_tester = profile.is_controller_tester
 
       # 1. Build .rodata Segment
       rodata = RodataSegmentBuilder.build(profile, input_schedule)
 
       # 2. Build .text Segment
-      text_data, emitter = TextSegmentBuilder.build(profile, rodata)
+      text_data, emitter, compiler = TextSegmentBuilder.build(profile, rodata, cbc_bytes)
 
       # 3. Build .data Segment
       data_bytes = IO::Memory.new
@@ -103,6 +99,15 @@ module Citrine
         next_addr = (i + 1 < stub_names.size) ? emitter.labels[stub_names[i + 1]] : (0x00100000_u32 + (emitter.words.size.to_u32 * 4))
         stub_len = next_addr - emitter.labels[sname]
         symbols << SymbolEntry.new(sname, emitter.labels[sname], stub_len, STT_FUNC, STB_GLOBAL, 1_u16)
+      end
+
+      if comp = compiler
+        comp.fns.each_with_index do |f, i|
+          lbl = "fn_#{i}"
+          if addr = emitter.labels[lbl]?
+            symbols << SymbolEntry.new(f.name, addr, f.count * 4, STT_FUNC, STB_GLOBAL, 1_u16)
+          end
+        end
       end
 
       symbols << SymbolEntry.new("citrine_pad_init", PadRuntimePayload::INIT_ENTRY, 8_u32, STT_FUNC, STB_GLOBAL, 3_u16)
@@ -148,9 +153,6 @@ module Citrine
       @has_button_checks = profile.has_button_checks
       @is_inline_assembly = profile.is_inline_assembly
       @inline_asm_words = profile.inline_asm_words
-      @is_controller_tester = profile.is_controller_tester
-      @is_dvd_screensaver = profile.is_dvd_screensaver
-      @is_audio_player = profile.is_audio_player
       {profile.phases, profile.boot_messages, profile.loop_start_phase, profile.is_animated}
     end
   end

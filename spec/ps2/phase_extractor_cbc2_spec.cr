@@ -20,7 +20,7 @@ describe "Citrine::ISO::PhaseExtractor" do
     profile = Citrine::ISO::PhaseExtractor.extract(cbc)
     profile.phases.size.should be > 0
     profile.phases[0].commands.size.should be >= 5
-    profile.is_dvd_screensaver.should be_true
+    profile.is_animated.should be_true
     profile.has_button_checks.should be_true
   end
 

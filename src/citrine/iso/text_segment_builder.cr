@@ -3,6 +3,7 @@ require "./phase_extractor"
 require "./rodata_segment_builder"
 require "./runtime_subroutines"
 require "./pad_runtime_payload"
+require "./mips_compiler"
 
 module Citrine
   module ISO
@@ -17,13 +18,26 @@ module Citrine
 
       getter profile : ProgramProfile
       getter rodata : RodataResult
+      getter mips_compiler : MipsCompiler? = nil
 
       def self.build(profile : ProgramProfile, rodata : RodataResult) : Tuple(Bytes, MipsEmitter)
         builder = new(profile, rodata)
-        builder.build
+        bytes, emitter = builder.build
+        {bytes, emitter}
       end
 
-      def initialize(@profile : ProgramProfile, @rodata : RodataResult)
+      def self.build(profile : ProgramProfile, rodata : RodataResult, cbc_bytes : Bytes?) : Tuple(Bytes, MipsEmitter, MipsCompiler?)
+        builder = new(profile, rodata, cbc_bytes)
+        bytes, emitter = builder.build
+        {bytes, emitter, builder.mips_compiler}
+      end
+
+      def initialize(@profile : ProgramProfile, @rodata : RodataResult, @cbc_bytes : Bytes? = nil)
+        if bytes = @cbc_bytes
+          compiler = MipsCompiler.new
+          compiler.load_cbc(bytes)
+          @mips_compiler = compiler
+        end
       end
 
       def build : Tuple(Bytes, MipsEmitter)
@@ -36,7 +50,7 @@ module Citrine
         emitter.lui(SP, 0x01FF)
         emitter.ori(SP, SP, 0xFFF0) # Stack top: 0x01FFFFF0
 
-        emitter.lui(T0, 0x7000)      # SPRAM base: 0x70000000
+        emitter.lui(T0, 0x7000) # SPRAM base: 0x70000000
 
         # Fast 128-bit Quadword SPRAM Zeroing (16 KB = 256 iterations x 64 bytes)
         emitter.ori(T1, ZERO, 256)
@@ -57,9 +71,9 @@ module Citrine
         emitter.ori(T1, T1, 0xBEEF)
         emitter.sw(T1, 0, T0)
 
-        # Pin $k0 (Register Base) to 0x70000100 in zero-wait-state SPRAM
-        emitter.lui(K0, 0x7000)
-        emitter.ori(K0, K0, 0x0100)
+        # Pin $fp (Register Base) to 0x70000100 in zero-wait-state SPRAM
+        emitter.lui(FP, 0x7000)
+        emitter.ori(FP, FP, 0x0100)
 
         # Reset Per-Frame Zero-GC Scratch Bump Arena at 0x70003100
         emitter.sw(ZERO, 0x3100, T0)
@@ -85,15 +99,15 @@ module Citrine
         if @profile.has_audio
           emitter.lui(T0, 0x7000)
           emitter.ori(T1, ZERO, 1)
-          emitter.sw(T1, 60, T0)      # 0x7000003C: audio playing flag = 1
+          emitter.sw(T1, 60, T0) # 0x7000003C: audio playing flag = 1
           emitter.ori(T1, ZERO, 240)
-          emitter.sw(T1, 0x70, T0)    # 0x70000070: master_vol = 240
+          emitter.sw(T1, 0x70, T0) # 0x70000070: master_vol = 240
           emitter.ori(T1, ZERO, 1)
-          emitter.sw(T1, 0x74, T0)    # 0x70000074: is_looping = 1 (ON)
+          emitter.sw(T1, 0x74, T0) # 0x70000074: is_looping = 1 (ON)
           total_trk = Math.max(@profile.phases.size, @profile.num_tracks)
           emitter.li(T1, total_trk)
-          emitter.sw(T1, 0x7C, T0)    # 0x7000007C: total_tracks = total_trk
-          emitter.sw(ZERO, 0x80, T0)  # 0x70000080: elapsed_sec = 0
+          emitter.sw(T1, 0x7C, T0)   # 0x7000007C: total_tracks = total_trk
+          emitter.sw(ZERO, 0x80, T0) # 0x70000080: elapsed_sec = 0
 
           # Start audio playback via SPU2 (cmd 1 = Play)
           emitter.li(A0, 1)
@@ -173,6 +187,42 @@ module Citrine
           emitter.call("debug_puts")
         end
 
+        # Launch User Program if __main__ is present in compiled bytecode
+        if compiler = @mips_compiler
+          if main_fn_idx = compiler.main_fn_idx
+            # Pin $fp (Register Base) to 0x70000400 for __main__
+            emitter.lui(FP, 0x7000)
+            emitter.ori(FP, FP, 0x0400)
+
+            # Initialize heap pointer at 0x7000008C (heap starts at 0x00220000, safe above pad buffers at 0x00210000..0x002101FF)
+            emitter.lui(T0, 0x7000)
+            emitter.lui(T1, 0x0022)
+            emitter.sw(T1, 0x8C, T0)
+
+            # Initialize fiber state in SPRAM
+            emitter.lui(T0, 0x7000)
+            emitter.sw(ZERO, 0x88, T0) # fiber_count = 0
+            emitter.li(T1, -1)
+            emitter.sw(T1, 0x84, T0)   # current_fiber_idx = -1
+
+            # Call __main__!
+            emitter.jump("after_dbg_main")
+            emitter.nop
+            emitter.label("dbg_str_main")
+            emitter.emit_string("[CITRINE] Entering __main__\n")
+            emitter.label("after_dbg_main")
+            emitter.la(A0, "dbg_str_main")
+            emitter.call("debug_puts")
+
+            emitter.jal("fn_#{main_fn_idx}")
+            emitter.nop
+
+            # Once __main__ returns, loop in frame_loop
+            emitter.jump("frame_loop")
+            emitter.nop
+          end
+        end
+
         # -------------------------------------------------------------
         # 3. Main Frame Loop
         # -------------------------------------------------------------
@@ -205,8 +255,8 @@ module Citrine
             emitter.sll(T3, T2, 7) # T2 * 128
             emitter.li(S7, @rodata.phase_table_addr)
             emitter.addu(S7, S7, T3) # S7 = PhaseDescriptor*
-            emitter.lw(T7, 0, S7) # MADR
-            emitter.lw(T6, 4, S7) # QWC
+            emitter.lw(T7, 0, S7)    # MADR
+            emitter.lw(T6, 4, S7)    # QWC
           elsif @rodata.phase_addrs.size == 1
             emitter.li(T7, @rodata.phase_addrs[0])
             emitter.ori(T6, ZERO, @rodata.phase_qwcs[0].to_i32)
@@ -237,7 +287,7 @@ module Citrine
             emitter.nop
 
             # Check if fast-forwarding (R2 held) or rewinding (L2 held)
-            emitter.lw(T4, 16, T0) # port 0 current buttons
+            emitter.lw(T4, 16, T0)       # port 0 current buttons
             emitter.andi(T1, T4, 0x0200) # R2
             emitter.bnez(T1, "elapsed_fast_fwd")
             emitter.nop
@@ -330,243 +380,6 @@ module Citrine
 
             # Check flags in S7 + 92
             emitter.lw(T9, 92, S7) # flags
-
-            # -----------------------------------------------------------
-            # 1. Timeline Scrubber Fill Bar (Flag bit 0)
-            # -----------------------------------------------------------
-            emitter.andi(T1, T9, 1)
-            emitter.beqz(T1, "skip_scrub_and_knob")
-            emitter.nop
-
-            emitter.lw(T3, 8, S7) # scrub_quad_offset
-            emitter.addu(T4, S6, T3)
-            emitter.addiu(T4, T4, 48) # quad + 48 is XYZ2
-            # Verify quad Y2 matches scrub_y2
-            emitter.lw(T1, 0, T4)
-            emitter.srl(T2, T1, 20)
-            emitter.lw(T3, 60, S7) # scrub_y2
-            emitter.bne(T2, T3, "skip_scrub_and_knob")
-            emitter.nop
-
-            # scrub_x = min_x + (elapsed_frames * total_w / dur_frames)
-            emitter.lw(T5, 0x80, T0) # elapsed_frames
-            emitter.lw(T8, 52, S7)   # scrub_min_x
-            emitter.lw(T3, 56, S7)   # scrub_max_x
-            emitter.subu(T2, T3, T8) # total_w
-            emitter.lw(T6, 88, S7)   # dur_frames
-            emitter.beqz(T6, "scrub_fallback")
-            emitter.nop
-            emitter.multu(T5, T2)
-            emitter.mflo(T1)
-            emitter.divu(T1, T6)
-            emitter.mflo(T2)         # scrub_w
-            emitter.addu(S1, T8, T2) # S1 = scrub_x
-            emitter.jump("scrub_clamp")
-            emitter.nop
-
-            emitter.label("scrub_fallback")
-            emitter.srl(S1, T5, 4)
-            emitter.addu(S1, S1, T8)
-
-            emitter.label("scrub_clamp")
-            emitter.sltu(T1, T3, S1)
-            emitter.beqz(T1, "scrub_clamp_ok")
-            emitter.nop
-            emitter.move(S1, T3)
-            emitter.label("scrub_clamp_ok")
-
-            # Store updated XYZ2: (scrub_y2 << 20) | (scrub_x << 4)
-            emitter.sll(T2, S1, 4)
-            emitter.lw(T3, 60, S7) # scrub_y2
-            emitter.sll(T3, T3, 20)
-            emitter.or_(T3, T3, T2)
-            emitter.sw(T3, 0, T4)
-
-            # -----------------------------------------------------------
-            # 2. Playhead Knob (Flag bit 1)
-            # -----------------------------------------------------------
-            emitter.andi(T1, T9, 2)
-            emitter.beqz(T1, "skip_knob_update")
-            emitter.nop
-
-            emitter.lw(T3, 12, S7) # scrub_knob_offset
-            emitter.addu(T4, S6, T3)
-            # Verify knob quad Y2 matches knob_y2
-            emitter.lw(T1, 48, T4)
-            emitter.srl(T1, T1, 20)
-            emitter.lw(T3, 72, S7) # knob_y2
-            emitter.bne(T1, T3, "skip_knob_update")
-            emitter.nop
-
-            # Ensure knob quad is solid white (RGBAQ = 0x80FFFFFF)
-            emitter.lui(T3, 0x80FF)
-            emitter.ori(T3, T3, 0xFFFF)
-            emitter.sw(T3, 16, T4)
-
-            # knob_x1 = scrub_x - half_w, knob_x2 = scrub_x + half_w
-            emitter.lw(T8, 64, S7) # knob_half_w
-            emitter.subu(T1, S1, T8) # knob_x1
-            emitter.addu(T2, S1, T8) # knob_x2
-
-            emitter.sll(T1, T1, 4) # knob_x1 << 4
-            emitter.lw(T3, 68, S7) # knob_y1
-            emitter.sll(T3, T3, 20)
-            emitter.or_(T3, T3, T1) # XYZ3 = (knob_y1 << 20) | (knob_x1 << 4)
-            emitter.sw(T3, 32, T4) # quad + 32 is XYZ3
-
-            emitter.sll(T2, T2, 4) # knob_x2 << 4
-            emitter.lw(T3, 72, S7) # knob_y2
-            emitter.sll(T3, T3, 20)
-            emitter.or_(T3, T3, T2) # XYZ2 = (knob_y2 << 20) | (knob_x2 << 4)
-            emitter.sw(T3, 48, T4) # quad + 48 is XYZ2
-
-            emitter.label("skip_knob_update")
-            emitter.label("skip_scrub_and_knob")
-
-            # -----------------------------------------------------------
-            # 3. Volume Bar Meter (Flag bit 2)
-            # -----------------------------------------------------------
-            emitter.andi(T1, T9, 4)
-            emitter.beqz(T1, "skip_vol_update")
-            emitter.nop
-
-            emitter.lw(T3, 16, S7) # vol_meter_offset
-            emitter.addu(T4, S6, T3)
-            emitter.addiu(T4, T4, 48) # quad + 48 is XYZ2
-            # Verify Y2 matches vol_y2
-            emitter.lw(T1, 0, T4)
-            emitter.srl(T1, T1, 20)
-            emitter.lw(T3, 84, S7) # vol_y2
-            emitter.bne(T1, T3, "skip_vol_update")
-            emitter.nop
-
-            # vol_w = (master_vol * (vol_max_x - vol_min_x)) / 255
-            emitter.lw(T5, 0x70, T0) # master_vol from 0x70000070
-            emitter.lw(T8, 76, S7)   # vol_min_x
-            emitter.lw(T3, 80, S7)   # vol_max_x
-            emitter.subu(T2, T3, T8) # vol_max_x - vol_min_x
-            emitter.multu(T5, T2)
-            emitter.mflo(T1)
-            emitter.ori(T3, ZERO, 255)
-            emitter.divu(T1, T3)
-            emitter.mflo(T2)         # vol_w
-            emitter.addu(T2, T8, T2) # vol_x2 = vol_min_x + vol_w
-            emitter.lw(T3, 80, S7)   # vol_max_x
-            emitter.sltu(T1, T3, T2)
-            emitter.beqz(T1, "vol_clamp_ok")
-            emitter.nop
-            emitter.move(T2, T3)
-            emitter.label("vol_clamp_ok")
-
-            # Store updated XYZ2: (vol_y2 << 20) | (vol_x2 << 4)
-            emitter.sll(T2, T2, 4)
-            emitter.lw(T3, 84, S7) # vol_y2
-            emitter.sll(T3, T3, 20)
-            emitter.or_(T3, T3, T2)
-            emitter.sw(T3, 0, T4)
-
-            emitter.label("skip_vol_update")
-
-            # -----------------------------------------------------------
-            # 3.5. Optical Indicator / Crosshairs Spinner (Flag bit 5)
-            # -----------------------------------------------------------
-            emitter.andi(T1, T9, 32)
-            emitter.beqz(T1, "skip_spinner_update")
-            emitter.nop
-
-            # Check audio playing status (0x7000003C: 0=stopped, 1=playing, 2=paused)
-            emitter.lw(T1, 60, T0)
-            emitter.ori(T2, ZERO, 1)
-            emitter.beq(T1, T2, "spinner_do_spin")
-            emitter.nop
-            # If not stopped (i.e. paused), leave current rotation angle
-            emitter.bnez(T1, "skip_spinner_update")
-            emitter.nop
-            # If stopped (0), reset to step 0 (orthogonal cross)
-            emitter.move(T1, ZERO)
-            emitter.jump("spinner_calc_dxdy")
-            emitter.nop
-
-            emitter.label("spinner_do_spin")
-            # step = (frame_count >> 1) & 7 (smooth 30 FPS rotation)
-            emitter.lw(T1, 4, T0)
-            emitter.srl(T1, T1, 1)
-            emitter.andi(T1, T1, 7)
-
-            emitter.label("spinner_calc_dxdy")
-            # S6 points to uncached GIF packet: S6 + spinner_offset (+96)
-            emitter.lw(T3, 96, S7)   # spinner_offset
-            emitter.addu(T9, S6, T3) # T9 = line 1 GIF start
-            emitter.lw(T4, 100, S7)  # spinner_cx
-            emitter.lw(T5, 104, S7)  # spinner_cy
-            emitter.lw(T6, 108, S7)  # spinner_radius
-
-            # Lookup dx_factor, dy_factor from spinner_table_addr:
-            # table_addr + (step * 8)
-            emitter.sll(T2, T1, 3) # step * 8
-            emitter.li(T3, @rodata.spinner_table_addr)
-            emitter.addu(T3, T3, T2)
-            emitter.lw(T7, 0, T3)  # dx_factor (Int32)
-            emitter.lw(T8, 4, T3)  # dy_factor (Int32)
-
-            emitter.mult(T6, T7)   # r * dx_factor
-            emitter.mflo(A0)
-            emitter.sra(A0, A0, 8) # A0 = dx
-
-            emitter.mult(T6, T8)   # r * dy_factor
-            emitter.mflo(A1)
-            emitter.sra(A1, A1, 8) # A1 = dy
-
-            # Line 1: (cx - dx, cy - dy) to (cx + dx, cy + dy)
-            # XYZ3 (vertex 1) at T9 + 32
-            emitter.subu(T1, T4, A0) # x1 = cx - dx
-            emitter.subu(T2, T5, A1) # y1 = cy - dy
-            emitter.sll(T1, T1, 4)
-            emitter.sll(T2, T2, 20)
-            emitter.or_(T3, T2, T1)
-            emitter.sw(T3, 32, T9)   # Line 1 subline 1 XYZ3
-            emitter.addiu(T2, T2, 1 << 20) # y1 + 1 for subline 2
-            emitter.or_(T3, T2, T1)
-            emitter.sw(T3, 96, T9)   # Line 1 subline 2 XYZ3
-
-            # XYZ2 (vertex 2) at T9 + 48
-            emitter.addu(T1, T4, A0) # x2 = cx + dx
-            emitter.addu(T2, T5, A1) # y2 = cy + dy
-            emitter.sll(T1, T1, 4)
-            emitter.sll(T2, T2, 20)
-            emitter.or_(T3, T2, T1)
-            emitter.sw(T3, 48, T9)   # Line 1 subline 1 XYZ2
-            emitter.addiu(T2, T2, 1 << 20) # y2 + 1 for subline 2
-            emitter.or_(T3, T2, T1)
-            emitter.sw(T3, 112, T9)  # Line 1 subline 2 XYZ2
-
-            # Line 2: (cx + dy, cy - dx) to (cx - dy, cy + dx)
-            # XYZ3 (vertex 1) at T9 + 160
-            emitter.addu(T1, T4, A1) # x3 = cx + dy
-            emitter.subu(T2, T5, A0) # y3 = cy - dx
-            emitter.sll(T1, T1, 4)
-            emitter.sll(T2, T2, 20)
-            emitter.or_(T3, T2, T1)
-            emitter.sw(T3, 160, T9)  # Line 2 subline 1 XYZ3
-            emitter.addiu(T1, T1, 1 << 4) # x3 + 1 for subline 2
-            emitter.or_(T3, T2, T1)
-            emitter.sw(T3, 224, T9)  # Line 2 subline 2 XYZ3
-
-            # XYZ2 (vertex 2) at T9 + 176
-            emitter.subu(T1, T4, A1) # x4 = cx - dy
-            emitter.addu(T2, T5, A0) # y4 = cy + dx
-            emitter.sll(T1, T1, 4)
-            emitter.sll(T2, T2, 20)
-            emitter.or_(T3, T2, T1)
-            emitter.sw(T3, 176, T9)  # Line 2 subline 1 XYZ2
-            emitter.addiu(T1, T1, 1 << 4) # x4 + 1 for subline 2
-            emitter.or_(T3, T2, T1)
-            emitter.sw(T3, 240, T9)  # Line 2 subline 2 XYZ2
-
-            # Reload T9 with flags for remaining checks (such as time text)
-            emitter.lw(T9, 92, S7)
-
-            emitter.label("skip_spinner_update")
 
             # -----------------------------------------------------------
             # 4. Live Dynamic Time Digits (MM:SS) (Flag bit 3)
@@ -960,26 +773,26 @@ module Citrine
         emitter.label("sio_rx_done")
 
         # Compute Edge Transitions for Port 0:
-        emitter.lw(T5, 16, T0)       # current buttons (0x70000010)
-        emitter.lw(T6, 20, T0)       # previous buttons (0x70000014)
-        emitter.sw(T5, 20, T0)       # update previous = current
-        emitter.nor(T7, T6, ZERO)    # ~prev
-        emitter.and_(T8, T5, T7)     # newly pressed edges (curr & ~prev)
-        emitter.sw(T8, 24, T0)       # store at 0x70000018
-        emitter.nor(T7, T5, ZERO)    # ~curr
-        emitter.and_(T7, T6, T7)     # newly released edges (prev & ~curr)
-        emitter.sw(T7, 28, T0)       # store at 0x7000001C
+        emitter.lw(T5, 16, T0)    # current buttons (0x70000010)
+        emitter.lw(T6, 20, T0)    # previous buttons (0x70000014)
+        emitter.sw(T5, 20, T0)    # update previous = current
+        emitter.nor(T7, T6, ZERO) # ~prev
+        emitter.and_(T8, T5, T7)  # newly pressed edges (curr & ~prev)
+        emitter.sw(T8, 24, T0)    # store at 0x70000018
+        emitter.nor(T7, T5, ZERO) # ~curr
+        emitter.and_(T7, T6, T7)  # newly released edges (prev & ~curr)
+        emitter.sw(T7, 28, T0)    # store at 0x7000001C
 
         # Compute Edge Transitions for Port 1:
-        emitter.lw(T5, 36, T0)       # current buttons (0x70000024)
-        emitter.lw(T6, 40, T0)       # previous buttons (0x70000028)
-        emitter.sw(T5, 40, T0)       # update previous = current
+        emitter.lw(T5, 36, T0) # current buttons (0x70000024)
+        emitter.lw(T6, 40, T0) # previous buttons (0x70000028)
+        emitter.sw(T5, 40, T0) # update previous = current
         emitter.nor(T7, T6, ZERO)
         emitter.and_(T9, T5, T7)
-        emitter.sw(T9, 44, T0)       # store at 0x7000002C
+        emitter.sw(T9, 44, T0) # store at 0x7000002C
         emitter.nor(T7, T5, ZERO)
         emitter.and_(T7, T6, T7)
-        emitter.sw(T7, 48, T0)       # store at 0x70000030
+        emitter.sw(T7, 48, T0) # store at 0x70000030
 
         # Combine Pressed Edges across both ports for Logging and Actions
         emitter.lw(T8, 24, T0)
@@ -1286,9 +1099,9 @@ module Citrine
         emitter.nop
         if @profile.has_audio
           # Next Track
-          emitter.lw(T5, 0x78, T0)    # track_idx
+          emitter.lw(T5, 0x78, T0) # track_idx
           emitter.addiu(T5, T5, 1)
-          emitter.lw(T6, 0x7C, T0)    # total_tracks
+          emitter.lw(T6, 0x7C, T0) # total_tracks
           emitter.sltu(T7, T5, T6)
           emitter.bnez(T7, "next_trk_ok")
           emitter.nop
@@ -1301,10 +1114,10 @@ module Citrine
             emitter.mfhi(T7)
             emitter.sw(T7, 8, T0)
           end
-          emitter.sw(ZERO, 0x80, T0)  # reset elapsed_sec
+          emitter.sw(ZERO, 0x80, T0) # reset elapsed_sec
           emitter.ori(T6, ZERO, 1)
-          emitter.sw(T6, 60, T0)      # audio_status = 1 (playing)
-          emitter.lw(A0, 0x78, T0)    # track_idx
+          emitter.sw(T6, 60, T0)   # audio_status = 1 (playing)
+          emitter.lw(A0, 0x78, T0) # track_idx
           emitter.andi(A0, A0, 0xFF)
           emitter.ori(A0, A0, 0x0100) # cmd = 0x0100 | track_idx
           emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
@@ -1354,8 +1167,8 @@ module Citrine
         emitter.nop
         if @profile.has_audio
           # Previous Track
-          emitter.lw(T5, 0x78, T0)    # track_idx
-          emitter.lw(T6, 0x7C, T0)    # total_tracks
+          emitter.lw(T5, 0x78, T0) # track_idx
+          emitter.lw(T6, 0x7C, T0) # total_tracks
           emitter.bnez(T5, "prev_trk_dec")
           emitter.nop
           emitter.move(T5, T6)
@@ -1368,10 +1181,10 @@ module Citrine
             emitter.mfhi(T7)
             emitter.sw(T7, 8, T0)
           end
-          emitter.sw(ZERO, 0x80, T0)  # reset elapsed_sec
+          emitter.sw(ZERO, 0x80, T0) # reset elapsed_sec
           emitter.ori(T6, ZERO, 1)
-          emitter.sw(T6, 60, T0)      # audio_status = 1 (playing)
-          emitter.lw(A0, 0x78, T0)    # track_idx
+          emitter.sw(T6, 60, T0)   # audio_status = 1 (playing)
+          emitter.lw(A0, 0x78, T0) # track_idx
           emitter.andi(A0, A0, 0xFF)
           emitter.ori(A0, A0, 0x0100) # cmd = 0x0100 | track_idx
           emitter.li(T9, PadRuntimePayload::SOUND_PLAY_ENTRY)
@@ -1422,7 +1235,7 @@ module Citrine
             emitter.beqz(T5, "skip_phase_advance")
             emitter.nop
           end
-          emitter.lw(T2, 8, T0)    # phase_index
+          emitter.lw(T2, 8, T0) # phase_index
           emitter.addiu(T2, T2, 1)
           emitter.ori(T3, ZERO, phases.size)
           emitter.sltu(T4, T2, T3)
@@ -1435,151 +1248,6 @@ module Citrine
             emitter.label("skip_phase_advance")
           end
         elsif phases.size > 1 && !@profile.has_audio
-          if @profile.is_controller_tester && phases.size >= 17
-            # DualShock 2 Controller Diagnostic Suite button-to-phase mapping:
-            # Phase 0: Idle (no buttons)
-            # Phases 1..16: Cross, Circle, Triangle, Square, Up, Down, Left, Right,
-            #               L1, R1, L2, R2, Select, Start, L3, R3
-            emitter.lw(T5, 16, T0)       # current buttons Port 0 (0x70000010)
-            emitter.lw(T6, 36, T0)       # current buttons Port 1 (0x70000024)
-            emitter.or_(T8, T5, T6)
-            emitter.lw(T5, 24, T0)       # pressed buttons Port 0 (0x70000018)
-            emitter.lw(T6, 44, T0)       # pressed buttons Port 1 (0x7000002C)
-            emitter.or_(T8, T8, T5)
-            emitter.or_(T8, T8, T6)
-
-            emitter.move(T2, ZERO)
-
-            # Check Cross (0x4000) -> Phase 1
-            emitter.andi(T7, T8, 0x4000)
-            emitter.beqz(T7, "ct_chk_circle")
-            emitter.nop
-            emitter.ori(T2, ZERO, 1)
-            emitter.jump("ct_done")
-
-            emitter.label("ct_chk_circle")
-            # Check Circle (0x2000) -> Phase 2
-            emitter.andi(T7, T8, 0x2000)
-            emitter.beqz(T7, "ct_chk_triangle")
-            emitter.nop
-            emitter.ori(T2, ZERO, 2)
-            emitter.jump("ct_done")
-
-            emitter.label("ct_chk_triangle")
-            # Check Triangle (0x1000) -> Phase 3
-            emitter.andi(T7, T8, 0x1000)
-            emitter.beqz(T7, "ct_chk_square")
-            emitter.nop
-            emitter.ori(T2, ZERO, 3)
-            emitter.jump("ct_done")
-
-            emitter.label("ct_chk_square")
-            # Check Square (0x8000) -> Phase 4
-            emitter.andi(T7, T8, 0x8000)
-            emitter.beqz(T7, "ct_chk_up")
-            emitter.nop
-            emitter.ori(T2, ZERO, 4)
-            emitter.jump("ct_done")
-
-            emitter.label("ct_chk_up")
-            # Check Up (0x0010) -> Phase 5
-            emitter.andi(T7, T8, 0x0010)
-            emitter.beqz(T7, "ct_chk_down")
-            emitter.nop
-            emitter.ori(T2, ZERO, 5)
-            emitter.jump("ct_done")
-
-            emitter.label("ct_chk_down")
-            # Check Down (0x0040) -> Phase 6
-            emitter.andi(T7, T8, 0x0040)
-            emitter.beqz(T7, "ct_chk_left")
-            emitter.nop
-            emitter.ori(T2, ZERO, 6)
-            emitter.jump("ct_done")
-
-            emitter.label("ct_chk_left")
-            # Check Left (0x0080) -> Phase 7
-            emitter.andi(T7, T8, 0x0080)
-            emitter.beqz(T7, "ct_chk_right")
-            emitter.nop
-            emitter.ori(T2, ZERO, 7)
-            emitter.jump("ct_done")
-
-            emitter.label("ct_chk_right")
-            # Check Right (0x0020) -> Phase 8
-            emitter.andi(T7, T8, 0x0020)
-            emitter.beqz(T7, "ct_chk_l1")
-            emitter.nop
-            emitter.ori(T2, ZERO, 8)
-            emitter.jump("ct_done")
-
-            emitter.label("ct_chk_l1")
-            # Check L1 (0x0400) -> Phase 9
-            emitter.andi(T7, T8, 0x0400)
-            emitter.beqz(T7, "ct_chk_r1")
-            emitter.nop
-            emitter.ori(T2, ZERO, 9)
-            emitter.jump("ct_done")
-
-            emitter.label("ct_chk_r1")
-            # Check R1 (0x0800) -> Phase 10
-            emitter.andi(T7, T8, 0x0800)
-            emitter.beqz(T7, "ct_chk_l2")
-            emitter.nop
-            emitter.ori(T2, ZERO, 10)
-            emitter.jump("ct_done")
-
-            emitter.label("ct_chk_l2")
-            # Check L2 (0x0100) -> Phase 11
-            emitter.andi(T7, T8, 0x0100)
-            emitter.beqz(T7, "ct_chk_r2")
-            emitter.nop
-            emitter.ori(T2, ZERO, 11)
-            emitter.jump("ct_done")
-
-            emitter.label("ct_chk_r2")
-            # Check R2 (0x0200) -> Phase 12
-            emitter.andi(T7, T8, 0x0200)
-            emitter.beqz(T7, "ct_chk_select")
-            emitter.nop
-            emitter.ori(T2, ZERO, 12)
-            emitter.jump("ct_done")
-
-            emitter.label("ct_chk_select")
-            # Check Select (0x0001) -> Phase 13
-            emitter.andi(T7, T8, 0x0001)
-            emitter.beqz(T7, "ct_chk_start")
-            emitter.nop
-            emitter.ori(T2, ZERO, 13)
-            emitter.jump("ct_done")
-
-            emitter.label("ct_chk_start")
-            # Check Start (0x0008) -> Phase 14
-            emitter.andi(T7, T8, 0x0008)
-            emitter.beqz(T7, "ct_chk_l3")
-            emitter.nop
-            emitter.ori(T2, ZERO, 14)
-            emitter.jump("ct_done")
-
-            emitter.label("ct_chk_l3")
-            # Check L3 (0x0002) -> Phase 15
-            emitter.andi(T7, T8, 0x0002)
-            emitter.beqz(T7, "ct_chk_r3")
-            emitter.nop
-            emitter.ori(T2, ZERO, 15)
-            emitter.jump("ct_done")
-
-            emitter.label("ct_chk_r3")
-            # Check R3 (0x0004) -> Phase 16
-            emitter.andi(T7, T8, 0x0004)
-            emitter.beqz(T7, "ct_done")
-            emitter.nop
-            emitter.ori(T2, ZERO, 16)
-
-            emitter.label("ct_done")
-            emitter.sw(T2, 8, T0)
-            emitter.jump("apply_phase_update")
-          else
           # Check Triangle (0x1000): reset to phase 0
           emitter.lw(T5, 24, T0)
           emitter.lw(T6, 44, T0)
@@ -1644,7 +1312,6 @@ module Citrine
 
           emitter.label("phase_in_range")
           emitter.sw(T2, 8, T0)
-        end
 
           emitter.label("apply_phase_update")
           phases.each_with_index do |phase, i|
@@ -1678,15 +1345,31 @@ module Citrine
         RuntimeSubroutines.emit_dma02_wait(emitter)
         RuntimeSubroutines.emit_dma_reset(emitter)
         RuntimeSubroutines.emit_debug_puts(emitter)
-        RuntimeSubroutines.emit_native_stubs(emitter, @profile)
+        RuntimeSubroutines.emit_native_stubs(emitter, @profile, @rodata.digit_table_addr)
         RuntimeSubroutines.emit_inline_asm(emitter, @profile.inline_asm_words)
         RuntimeSubroutines.emit_digit_quad_updater(emitter, @rodata.digit_table_addr)
 
-        # Optimize branch delay slots across the entire EE .text segment
-        emitter.optimize_delay_slots!
+        # -------------------------------------------------------------
+        # 6. Compiled Bytecode Functions (if CBC provided)
+        # -------------------------------------------------------------
+        if compiler = @mips_compiler
+          compiler.compile_all(emitter, @rodata)
+        end
 
-        # Pad .text to 16,384 bytes
-        emitter.pad_to(TEXT_SIZE.to_i32)
+        # Ensure citrine_func_table label exists
+        unless emitter.labels.has_key?("citrine_func_table")
+          emitter.label("citrine_func_table")
+          emitter.jr(RA)
+          emitter.nop
+        end
+
+        # Optimize branch delay slots across the entire EE .text segment (DISABLED: corrupts embedded strings and table alignment)
+        # emitter.optimize_delay_slots!
+
+        # Pad .text to 16-byte boundary (at least TEXT_SIZE)
+        curr_bytes = emitter.words.size * 4
+        target_size = {TEXT_SIZE.to_i32, ((curr_bytes + 15) & ~15)}.max
+        emitter.pad_to(target_size)
         emitter.resolve!
         {emitter.to_slice, emitter}
       end

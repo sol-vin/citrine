@@ -1233,7 +1233,7 @@ void citrine_vm_run(CitrineVM* vm) {
         bool taken = false;
         switch (subop) {
             case SUBOP_BRZ_TRUTHY:
-                if (regs[cond_reg].type == VAL_BOOL && regs[cond_reg].as.i != 0) taken = true;
+                if (!(regs[cond_reg].type == VAL_NIL || (regs[cond_reg].type == VAL_BOOL && regs[cond_reg].as.i == 0))) taken = true;
                 break;
             case SUBOP_BRZ_FALSY:
                 if (regs[cond_reg].type == VAL_NIL || (regs[cond_reg].type == VAL_BOOL && regs[cond_reg].as.i == 0)) taken = true;
@@ -2220,10 +2220,15 @@ static void native_dispatch(CitrineVM* vm, uint16_t native_id, Value* args, uint
             *out_ret = citrine_array_pop(arr);
             break;
         }
-        case 125: { // ArraySize(arr)
-            CitrineArray* arr = (CitrineArray*)args[0].as.ptr;
-            out_ret->type = VAL_INT32;
-            out_ret->as.i = arr ? (int32_t)arr->size : 0;
+        case 125: { // ArraySize(arr) or String length
+            if (args[0].type == VAL_STRING && args[0].as.str) {
+                out_ret->type = VAL_INT32;
+                out_ret->as.i = (int32_t)strlen(args[0].as.str);
+            } else {
+                CitrineArray* arr = (CitrineArray*)args[0].as.ptr;
+                out_ret->type = VAL_INT32;
+                out_ret->as.i = arr ? (int32_t)arr->size : 0;
+            }
             break;
         }
         case 126: { // ArrayClear(arr)

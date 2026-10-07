@@ -18,6 +18,7 @@ Citrine.main_loop do
   pad = Citrine.player(active_port)
 
   if pad.button_pressed?(Button::Select)
+    puts "[CITRINE] Button Select pressed!"
     active_port = (active_port == 0) ? 1 : 0
     pad = Citrine.player(active_port)
     puts "[CITRINE] Active Port toggled to Port #{active_port}"
@@ -66,10 +67,14 @@ Citrine.main_loop do
   end
 
   if pad.button_pressed?(Button::Cross) && pad.button_pressed?(Button::Circle)
+    puts "[CITRINE] Button Cross (X) pressed!"
+    puts "[CITRINE] Button Circle pressed!"
     puts "[CITRINE] Dual Rumble Motors Triggered (Small=255, Large=255)"
   elsif pad.button_pressed?(Button::Cross)
+    puts "[CITRINE] Button Cross (X) pressed!"
     puts "[CITRINE] Small Rumble Motor Triggered (200)"
   elsif pad.button_pressed?(Button::Circle)
+    puts "[CITRINE] Button Circle pressed!"
     puts "[CITRINE] Large Rumble Motor Triggered (255)"
   end
 

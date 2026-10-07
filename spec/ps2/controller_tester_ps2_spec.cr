@@ -88,7 +88,7 @@ describe "Citrine PS2 Hardware Controller & Diagnostic Testing Suite" do
     cbc = compiler.compile(prog)
     elf = builder.generate(cbc)
 
-    builder.is_controller_tester.should be_true
+    builder.has_button_checks.should be_true
     elf.size.should be > 100_000
   end
 

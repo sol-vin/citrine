@@ -1,128 +1,158 @@
 require "citrine"
-require "citrine/inputmap"
 
 # 03 Entity Fibers - Citrine PS2
 # Demonstrates: Cooperative multitasking with Citrine Fibers (Citrine.spawn),
-# autonomous entity AI coroutines, and zero-allocation entity struct updates
+# scalable multi-fiber coroutines, dynamic optimal screen-fitting grid layout,
+# corner-patrolling entities, dynamic color palette cycling, and centered text metrics.
 
-input_map do
-  action :move_left, Button::Left, port: 0
-  action :move_right, Button::Right, port: 0
-  action :jump, Button::Cross, port: 0
-end
+MAX_ENTITIES = 25
 
-struct EntityState
-  property x : Int32
-  property y : Int32
-  property dir : Int32
-  property color : Int32
+COLORS = [
+  Color::Red,
+  Color::Orange,
+  Color::Yellow,
+  Color::Green,
+  Color::Blue,
+  Color::Purple
+]
 
-  def initialize(@x : Int32, @y : Int32, @dir : Int32, @color : Int32)
+
+class Entity
+  property box_x : Int32
+  property box_y : Int32
+  property box_size : Int32
+  property dot_x : Int32
+  property dot_y : Int32
+  property dot_radius : Int32
+  property speed : Int32
+  property corner : Int32
+  property laps : Int32
+  property color_idx : Int32
+
+  def initialize(@box_x : Int32, @box_y : Int32, @box_size : Int32, @speed : Int32)
+    @dot_radius = @box_size // 8
+    pad = @dot_radius + 3
+    @dot_x = @box_x + pad
+    @dot_y = @box_y + pad
+    @corner = 0
+    @laps = 0
+    @color_idx = 0
+  end
+
+  def update
+    pad = @dot_radius + 3
+    min_x = @box_x + pad
+    max_x = @box_x + @box_size - pad
+    min_y = @box_y + pad
+    max_y = @box_y + @box_size - pad
+
+    case @corner
+    when 0 # Move right along top edge
+      @dot_x += @speed
+      if @dot_x >= max_x
+        @dot_x = max_x
+        @corner = 1
+      end
+    when 1 # Move down along right edge
+      @dot_y += @speed
+      if @dot_y >= max_y
+        @dot_y = max_y
+        @corner = 2
+      end
+    when 2 # Move left along bottom edge
+      @dot_x -= @speed
+      if @dot_x <= min_x
+        @dot_x = min_x
+        @corner = 3
+      end
+    when 3 # Move up along left edge
+      @dot_y -= @speed
+      if @dot_y <= min_y
+        @dot_y = min_y
+        @corner = 0
+        @laps += 1
+        @color_idx = (@color_idx + 1) % 6
+      end
+    end
   end
 end
 
 Citrine.init_window(640, 448, "03 Entity Fibers - Citrine PS2")
 Citrine.set_target_fps(60)
 
-# Shared entity state structures updated cooperatively by fibers
-drone = EntityState.new(120, 126, 3, Color::Cyan)
-sentry = EntityState.new(460, 206, -2, Color::Magenta)
+# Optimal Grid Layout Algorithm:
+# Determines the optimal (cols, rows) and box_size to square MAX_ENTITIES to screen positions
+screen_w = 640
+screen_h = 448
+margin_x = 16
+margin_top = 44
+margin_bottom = 12
+spacing = 6
 
-# Player Avatar State
-player_x = 280
-player_y = 310
+avail_w = screen_w - (margin_x * 2)
+avail_h = screen_h - margin_top - margin_bottom
 
-# Fiber 1: Autonomous Patrol Drone AI
-Citrine.spawn do
-  while true
-    drone.x += drone.dir
-    if drone.x > 520
-      drone.x = 520
-      drone.dir = -3
-    elsif drone.x < 80
-      drone.x = 80
-      drone.dir = 3
+# Optimal Grid Layout:
+# Squares the number of items to grid positions (e.g. 25 entities -> 5x5 square)
+cols = 1
+while cols * cols < MAX_ENTITIES
+  cols += 1
+end
+rows = (MAX_ENTITIES + cols - 1) // cols
+
+w_space = avail_w - ((cols - 1) * spacing)
+h_space = avail_h - ((rows - 1) * spacing)
+cand_w = w_space // cols
+cand_h = h_space // rows
+box_size = cand_w < cand_h ? cand_w : cand_h
+
+total_grid_w = (cols * box_size) + ((cols - 1) * spacing)
+total_grid_h = (rows * box_size) + ((rows - 1) * spacing)
+
+origin_x = (screen_w - total_grid_w) // 2
+origin_y = margin_top + (avail_h - total_grid_h) // 2
+
+# Instantiate entities with distinct positive speeds
+entities = [] of Entity
+MAX_ENTITIES.times do |i|
+  c = i % cols
+  r = i // cols
+  bx = origin_x + c * (box_size + spacing)
+  by = origin_y + r * (box_size + spacing)
+  spd = 1 + ((i * 3 + 1) % 4) # Positive speeds: 1, 2, 3, 4 px/frame
+  entities << Entity.new(bx, by, box_size, spd)
+end
+
+entities.each do |e|
+  Citrine.spawn do
+    while true
+      e.update
+      Citrine.yield
     end
-    Citrine.yield
   end
 end
 
-# Fiber 2: Autonomous Sentry Hover AI
-Citrine.spawn do
-  hover_step = 0
-  while true
-    sentry.x += sentry.dir
-    if sentry.x > 500
-      sentry.x = 500
-      sentry.dir = -2
-    elsif sentry.x < 120
-      sentry.x = 120
-      sentry.dir = 2
-    end
-    hover_step = (hover_step + 1) % 60
-    sentry.y = 206 + (hover_step < 30 ? (hover_step // 5) : ((60 - hover_step) // 5))
-    Citrine.yield
-  end
-end
 
 Citrine.main_loop do
-  pad = Citrine.player(0)
-
-  # Interactive Player Movement
-  if Action.is_down?(Actions::MoveLeft) || pad.button_down?(Button::Left)
-    if player_x > 50
-      player_x -= 4
-    end
-  end
-  if Action.is_down?(Actions::MoveRight) || pad.button_down?(Button::Right)
-    if player_x < 550
-      player_x += 4
-    end
-  end
-
   Citrine.begin_drawing
   Citrine.clear_background(Color.new(10_u8, 14_u8, 22_u8, 255_u8))
 
   # Header Bar
-  Citrine.draw_rectangle(0, 0, 640, 38, Color::Blue)
-  Citrine.draw_text("CITRINE PS2: COOPERATIVE ENTITY FIBERS", 110, 8, 18, Color::White)
+  Citrine.draw_rectangle(0, 0, 640, 34, Color::Blue)
+  Citrine.draw_rectangle(0, 34, 640, 2, Color::White)
+  Citrine.draw_text("25", 312, 9, 16, Color::White)
 
-  # --- Multi-Tier Platforms ---
-  # Top Platform (Drone)
-  Citrine.draw_rectangle(60, 150, 520, 10, Color::DarkGray)
-  Citrine.draw_rectangle(60, 150, 520, 2, Color::Cyan)
-
-  # Middle Platform (Sentry)
-  Citrine.draw_rectangle(100, 240, 440, 10, Color::DarkGray)
-  Citrine.draw_rectangle(100, 240, 440, 2, Color::Magenta)
-
-  # Bottom Ground Floor (Player)
-  Citrine.draw_rectangle(40, 350, 560, 16, Color::Gray)
-  Citrine.draw_rectangle(40, 350, 560, 3, Color::Yellow)
-
-  # --- Render Fiber Entities ---
-  # Drone 1 (Controlled by Fiber 1)
-  Citrine.draw_rectangle(drone.x, drone.y, 36, 22, drone.color)
-  Citrine.draw_circle(drone.x + 18, drone.y + 11, 5, Color::White)
-  Citrine.draw_text("DRONE 1 [FIBER]", drone.x - 12, drone.y - 18, 11, Color::Cyan)
-
-  # Sentry 2 (Controlled by Fiber 2)
-  Citrine.draw_rectangle(sentry.x, sentry.y, 32, 32, sentry.color)
-  Citrine.draw_circle(sentry.x + 16, sentry.y + 16, 6, Color::Yellow)
-  Citrine.draw_text("SENTRY 2 [FIBER]", sentry.x - 14, sentry.y - 18, 11, Color::Magenta)
-
-  # Player Avatar
-  Citrine.draw_rectangle(player_x, player_y, 36, 40, Color::Yellow)
-  Citrine.draw_rectangle(player_x + 4, player_y + 4, 28, 32, Color::Black)
-  Citrine.draw_circle(player_x + 18, player_y + 20, 6, Color::Red)
-  Citrine.draw_text("PLAYER", player_x - 4, player_y - 16, 12, Color::White)
-
-
-  # Telemetry Card
-  Citrine.draw_rectangle(40, 380, 560, 48, Color::Black)
-  Citrine.draw_rectangle(40, 380, 560, 2, Color::Gray)
-  Citrine.draw_text("Autonomous Entities scheduled concurrently across EE cooperative fiber queue", 60, 390, 13, Color::Yellow)
-  Citrine.draw_text("D-Pad Left/Right: Move Avatar | Fibers: 2 Active Co-routines", 60, 408, 12, Color::White)
+  # Render each entity box, inner fill, lap counter, and orbiting dot
+  entities.each do |e|
+    # Outer border
+    Citrine.draw_rectangle(e.box_x, e.box_y, e.box_size, e.box_size, Color::White)
+    # Inner background fill
+    Citrine.draw_rectangle(e.box_x + 1, e.box_y + 1, e.box_size - 2, e.box_size - 2, Color::Black)
+    # Centered lap counter
+    Citrine.draw_text(e.laps.to_s, e.box_x + (e.box_size // 2) - 4, e.box_y + (e.box_size // 2) - 4, 10, Color::White)
+    # Orbiting corner circle dot
+    Citrine.draw_circle(e.dot_x, e.dot_y, e.dot_radius, COLORS[e.color_idx])
+  end
 
   Citrine.end_drawing
 end

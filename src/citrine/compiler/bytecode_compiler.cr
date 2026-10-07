@@ -56,6 +56,7 @@ module Citrine
     getter module_id : UInt32
     getter name : String
     getter methods : Hash(String, Crystal::Def)
+    getter included_module_ids : Array(UInt32) = [] of UInt32
 
     def initialize(@module_id : UInt32, @name : String)
       @methods = Hash(String, Crystal::Def).new
@@ -250,6 +251,35 @@ module Citrine
         @modules[mod_name] = mod_info
       end
 
+      # 1b. Transitive module resolution pass
+      program.modules.each do |(mod_name, mod_node)|
+        if mod_info = @modules[mod_name]?
+          body = mod_node.body
+          nodes = body.is_a?(Crystal::Expressions) ? body.expressions : [body]
+          nodes.each do |raw_child|
+            child = raw_child
+            while child.is_a?(Crystal::VisibilityModifier)
+              child = child.exp
+            end
+            inc_name = if child.is_a?(Crystal::Include) || child.is_a?(Crystal::Extend)
+                         child.name.to_s
+                       elsif child.is_a?(Crystal::Call) && (child.name == "include" || child.name == "extend") && child.args.size > 0
+                         child.args[0].to_s
+                       else
+                         nil
+                       end
+            if inc_name && (inc_mod = @modules[inc_name]?)
+              mod_info.included_module_ids << inc_mod.module_id
+              mod_info.included_module_ids.concat(inc_mod.included_module_ids)
+              mod_info.included_module_ids.uniq!
+              inc_mod.methods.each do |m_name, m_def|
+                mod_info.methods[m_name] ||= m_def
+              end
+            end
+          end
+        end
+      end
+
       # 2. Process classes and structs in topological order
       program.structs.each_key do |cls_name|
         ensure_class_extracted(cls_name, program)
@@ -272,8 +302,13 @@ module Citrine
 
       # 4. Pre-register all function signatures in @functions so recursive and forward calls resolve
       @program_defs.each do |name, def_node|
-        arg_names = def_node.args.map(&.name)
-        @functions << CompiledFunction.new(name, arg_names.size.to_u8)
+        raw_args = def_node.args.map(&.name)
+        argc = if name.includes?("#") && (raw_args.empty? || raw_args.first != "self")
+                 (raw_args.size + 1).to_u8
+               else
+                 raw_args.size.to_u8
+               end
+        @functions << CompiledFunction.new(name, argc)
       end
 
       # 5. Compile helper functions / methods
@@ -360,6 +395,8 @@ module Citrine
           mod_name = child.name.to_s
           if mod_info = @modules[mod_name]?
             cls_info.included_module_ids << mod_info.module_id
+            cls_info.included_module_ids.concat(mod_info.included_module_ids)
+            cls_info.included_module_ids.uniq!
             mod_info.methods.each do |m_name, m_def|
               cls_info.methods[m_name] = m_def
               fn_name = "#{cls_info.name}##{m_name}"
@@ -425,6 +462,8 @@ module Citrine
             if mod_info = @modules[mod_name]?
               if child.name == "include"
                 cls_info.included_module_ids << mod_info.module_id
+                cls_info.included_module_ids.concat(mod_info.included_module_ids)
+                cls_info.included_module_ids.uniq!
                 mod_info.methods.each do |m_name, m_def|
                   cls_info.methods[m_name] = m_def
                   fn_name = "#{cls_info.name}##{m_name}"
@@ -487,8 +526,33 @@ module Citrine
     private def extract_module_members(mod_node : Crystal::ModuleDef, mod_name : String, mod_info : ModuleInfo? = nil)
       body = mod_node.body
       nodes = body.is_a?(Crystal::Expressions) ? body.expressions : [body]
-      nodes.each do |child|
-        if child.is_a?(Crystal::Def)
+      nodes.each do |raw_child|
+        child = raw_child
+        while child.is_a?(Crystal::VisibilityModifier)
+          child = child.exp
+        end
+        if child.is_a?(Crystal::Include)
+          inc_name = child.name.to_s
+          if inc_mod = @modules[inc_name]?
+            if mod_info
+              mod_info.included_module_ids << inc_mod.module_id
+              mod_info.included_module_ids.concat(inc_mod.included_module_ids)
+              mod_info.included_module_ids.uniq!
+              inc_mod.methods.each do |m_name, m_def|
+                mod_info.methods[m_name] ||= m_def
+              end
+            end
+          end
+        elsif child.is_a?(Crystal::Extend)
+          inc_name = child.name.to_s
+          if inc_mod = @modules[inc_name]?
+            if mod_info
+              inc_mod.methods.each do |m_name, m_def|
+                mod_info.methods[m_name] ||= m_def
+              end
+            end
+          end
+        elsif child.is_a?(Crystal::Def)
           fn_name = "#{mod_name}.#{child.name}"
           @program_defs[fn_name] = child
           @program_defs["#{mod_name}::#{child.name}"] = child
@@ -497,18 +561,39 @@ module Citrine
           c_name = child.target.to_s
           @program_constants["#{mod_name}::#{c_name}"] = child.value
           @program_constants[c_name] = child.value
+        elsif child.is_a?(Crystal::Call) && (child.name == "include" || child.name == "extend") && child.args.size > 0
+          inc_name = child.args[0].to_s
+          if inc_mod = @modules[inc_name]?
+            if mod_info
+              if child.name == "include"
+                mod_info.included_module_ids << inc_mod.module_id
+                mod_info.included_module_ids.concat(inc_mod.included_module_ids)
+                mod_info.included_module_ids.uniq!
+              end
+              inc_mod.methods.each do |m_name, m_def|
+                mod_info.methods[m_name] ||= m_def
+              end
+            end
+          end
         end
       end
     end
 
     private def compile_function(node : Crystal::Def, registered_name : String = node.name)
+      is_instance_method = registered_name.includes?("#")
+      raw_args = node.args.map(&.name)
+      arg_names = if is_instance_method && (raw_args.empty? || raw_args.first != "self")
+                    ["self"] + raw_args
+                  else
+                    raw_args
+                  end
+
       fn = @functions.find { |f| f.name == registered_name }
       unless fn
-        fn = CompiledFunction.new(registered_name, node.args.size.to_u8)
+        fn = CompiledFunction.new(registered_name, arg_names.size.to_u8)
         @functions << fn
       end
 
-      arg_names = node.args.map(&.name)
       allocator = RegisterAllocator.new(arg_names)
       instructions = [] of Instruction
 
@@ -2157,7 +2242,7 @@ module Citrine
       end
 
       # Concurrency: ch.size / ch.count
-      is_chan = obj_str.downcase.includes?("chan") || node.name == "count"
+      is_chan = obj_str.downcase.includes?("chan") || (node.obj.is_a?(Crystal::Var) && @var_types[node.obj.as(Crystal::Var).name]?.try(&.downcase.includes?("chan")) == true)
       if is_chan && node.obj && (node.name == "size" || node.name == "count") && node.args.empty?
         ch_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
         instr_val = Instruction.call_native_raw(dest, ch_reg, NativeId::ChannelCount)
@@ -2167,7 +2252,7 @@ module Citrine
       end
 
       # Concurrency: ch.capacity
-      if node.name == "capacity" && node.obj && node.args.empty?
+      if is_chan && node.name == "capacity" && node.obj && node.args.empty?
         ch_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
         instr_val = Instruction.call_native_raw(dest, ch_reg, NativeId::ChannelCapacity)
         instructions << Instruction.new(instr_val)
@@ -2808,6 +2893,84 @@ module Citrine
         return dest
       end
 
+      # Array select / find_all: arr.select do |x| ... end
+      if (node.name == "select" || node.name == "find_all") && node.obj && (block = node.block)
+        arr_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
+        size_reg = allocator.alloc_temp
+        sz_instr = Instruction.call_native_raw(size_reg, arr_reg, NativeId::ArraySize)
+        instructions << Instruction.new(sz_instr)
+
+        # Allocate result array
+        res_arr = allocator.alloc_temp
+        cap_reg = allocator.alloc_temp
+        instructions << Instruction.encode_abc(Opcode::Move, cap_reg, size_reg, 0_u8)
+        new_instr = Instruction.call_native_raw(res_arr, cap_reg, NativeId::ArrayNew)
+        instructions << Instruction.new(new_instr)
+        allocator.free_temp(cap_reg)
+
+        iter_reg = allocator.alloc_temp
+        instructions << Instruction.encode_load_int(iter_reg, 0_u16)
+
+        block_item_reg = if block_arg = block.args.first?
+                           allocator.allocate_local(block_arg.name)
+                         else
+                           allocator.alloc_temp
+                         end
+
+        loop_start = instructions.size
+        cond_reg = allocator.alloc_temp
+        instructions << Instruction.encode_cmp(CompareSubOp::Lt, cond_reg, iter_reg, size_reg)
+        exit_jump_idx = instructions.size
+        instructions << Instruction.encode_jump_if_false(cond_reg, 0_i16)
+
+        # Item = arr[iter]
+        seq_base = allocator.alloc_contiguous(2)
+        instructions << Instruction.encode_abc(Opcode::Move, seq_base, arr_reg, 0_u8)
+        instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, iter_reg, 0_u8)
+        get_val = Instruction.call_native_raw(block_item_reg, seq_base, NativeId::ArrayGet)
+        instructions << Instruction.new(get_val)
+        allocator.free_temp(seq_base)
+        allocator.free_temp((seq_base + 1).to_u8)
+
+        # Evaluate predicate value
+        pred_val_reg = compile_node(block.body, allocator, instructions, fn)
+
+        skip_push_idx = instructions.size
+        instructions << Instruction.encode_jump_if_false(pred_val_reg, 0_i16)
+
+        # Push to res_arr
+        push_base = allocator.alloc_contiguous(2)
+        instructions << Instruction.encode_abc(Opcode::Move, push_base, res_arr, 0_u8)
+        instructions << Instruction.encode_abc(Opcode::Move, (push_base + 1).to_u8, block_item_reg, 0_u8)
+        dummy_dest = allocator.alloc_temp
+        push_instr = Instruction.call_native_raw(dummy_dest, push_base, NativeId::ArrayPush)
+        instructions << Instruction.new(push_instr)
+        allocator.free_temp(push_base)
+        allocator.free_temp((push_base + 1).to_u8)
+        allocator.free_temp(dummy_dest)
+
+        instructions[skip_push_idx] = Instruction.encode_jump_if_false(pred_val_reg, (instructions.size - skip_push_idx - 1).to_i16)
+        allocator.free_temp(pred_val_reg)
+
+        one_reg = allocator.alloc_temp
+        instructions << Instruction.encode_load_int(one_reg, 1_u16)
+        instructions << Instruction.encode_abc(Opcode::Add, iter_reg, iter_reg, one_reg)
+        allocator.free_temp(one_reg)
+
+        back_offset = (loop_start - instructions.size - 1).to_i16
+        instructions << Instruction.encode_branch(Opcode::Jump, 0_u8, back_offset)
+        instructions[exit_jump_idx] = Instruction.encode_jump_if_false(cond_reg, (instructions.size - exit_jump_idx - 1).to_i16)
+
+        allocator.free_temp(arr_reg)
+        allocator.free_temp(size_reg)
+        allocator.free_temp(iter_reg)
+        allocator.free_temp(cond_reg)
+
+        instructions << Instruction.encode_abc(Opcode::Move, dest, res_arr, 0_u8)
+        allocator.free_temp(res_arr)
+        return dest
+      end
+
       # StaticArray.new / StaticArray(...)
       if obj_str.starts_with?("StaticArray") && node.name == "new"
         sz = 4
@@ -2853,9 +3016,10 @@ module Citrine
       # IO::Memory methods
       is_io = (io_obj = node.obj) && (
         (io_obj.is_a?(Crystal::Var) && @var_types[io_obj.name]?.try { |t| t.includes?("Memory") || t.includes?("IO") }) ||
-        (io_obj.is_a?(Crystal::Call) && io_obj.name == "new" && io_obj.obj.to_s.includes?("Memory"))
+        (io_obj.is_a?(Crystal::Call) && io_obj.name == "new" && io_obj.obj.to_s.includes?("Memory")) ||
+        (io_obj.is_a?(Crystal::Var) && (io_obj.name.downcase.includes?("mem") || io_obj.name.downcase.includes?("io")))
       )
-      if node.obj && ((is_io && node.name == "to_s") || ["write_byte", "write", "print", "puts", "rewind", "pos", "clear"].includes?(node.name))
+      if node.obj && is_io && ["to_s", "write_byte", "write", "print", "puts", "rewind", "pos", "clear"].includes?(node.name)
         native_op = case node.name
                     when "write_byte" then NativeId::MemoryIOWriteByte
                     when "write", "print" then NativeId::MemoryIOWrite

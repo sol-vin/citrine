@@ -77,6 +77,10 @@ module Citrine
         emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x06_u32)
       end
 
+      def srav(rd : Int32, rt : Int32, rs : Int32)
+        emit((rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x07_u32)
+      end
+
       def srl(rd : Int32, rt : Int32, sa : Int32)
         emit((rt.to_u32 << 16) | (rd.to_u32 << 11) | ((sa & 0x1F).to_u32 << 6) | 0x02_u32)
       end
@@ -119,6 +123,10 @@ module Citrine
         emit((0x1F_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
       end
 
+
+      def lb(rt : Int32, offset : Int32, base : Int32)
+        emit((0x20_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
+      end
 
       def lbu(rt : Int32, offset : Int32, base : Int32)
         emit((0x24_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
@@ -194,6 +202,10 @@ module Citrine
 
       def syscall_inst
         emit(0x0000000C_u32)
+      end
+
+      def break_inst
+        emit(0x0000000D_u32)
       end
 
       def mfc0(rt : Int32, rd : Int32)
@@ -283,6 +295,7 @@ module Citrine
                !label_addrs.includes?(cand_vaddr) &&
                !label_addrs.includes?(branch_vaddr) &&
                !label_addrs.includes?(delay_vaddr) &&
+               !@fixups.any? { |fidx, _, _| fidx == cand_idx } &&
                can_fill_delay_slot?(cand_word, branch_word)
 
               # Relocate cand_word into delay slot (replacing nop at i + 1)
@@ -504,6 +517,10 @@ module Citrine
             offset_bytes = target_vaddr.to_i32 - (inst_vaddr.to_i32 + 4)
             offset_insts = offset_bytes // 4
             @words[idx] = (@words[idx] & 0xFFFF0000_u32) | ((offset_insts & 0xFFFF).to_u32)
+          when :hi16
+            @words[idx] = (@words[idx] & 0xFFFF0000_u32) | ((target_vaddr >> 16) & 0xFFFF_u32)
+          when :lo16
+            @words[idx] = (@words[idx] & 0xFFFF0000_u32) | (target_vaddr & 0xFFFF_u32)
           end
         end
       end
@@ -511,9 +528,34 @@ module Citrine
 
       # --- MIPS Macro DSL & Assembly Idiom Helpers ---
 
+      # Loads the 32-bit address of a label into register rt via %hi/%lo fixups
+      def la(rt : Int32, label_name : String)
+        @fixups << {@words.size, label_name, :hi16}
+        lui(rt, 0)
+        @fixups << {@words.size, label_name, :lo16}
+        ori(rt, rt, 0)
+      end
+
+      # Emits a null-terminated 4-byte aligned ASCII string literal directly into words
+      def emit_string(str : String)
+        bytes = str.to_slice
+        i = 0
+        while i < bytes.size
+          b0 = bytes[i].to_u32
+          b1 = (i + 1 < bytes.size) ? bytes[i + 1].to_u32 : 0_u32
+          b2 = (i + 2 < bytes.size) ? bytes[i + 2].to_u32 : 0_u32
+          b3 = (i + 3 < bytes.size) ? bytes[i + 3].to_u32 : 0_u32
+          emit(b0 | (b1 << 8) | (b2 << 16) | (b3 << 24))
+          i += 4
+        end
+        if (bytes.size % 4) == 0
+          emit(0x00000000_u32)
+        end
+      end
+
       # Loads a 32-bit or 16-bit immediate value into register rt
       def li(rt : Int32, val : UInt32 | Int32)
-        u = val.to_u32
+        u = val.is_a?(Int32) ? (val.to_i64 & 0xFFFFFFFF_i64).to_u32 : val
         if u <= 0xFFFF_u32
           ori(rt, ZERO, u.to_i32)
         elsif (u & 0xFFFF_u32) == 0_u32

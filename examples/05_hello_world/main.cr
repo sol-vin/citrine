@@ -114,6 +114,7 @@ Citrine.main_loop do
 
   # Cross button: spawn 1 new bouncing logo at random position & trajectory
   if (Action.is_pressed?(Actions::SpawnOne) || pad.button_pressed?(Button::Cross)) && logos.size < 128
+    puts "[CITRINE] Button Cross (X) pressed!"
     rx = rng.rand(40, 400)
     ry = rng.rand(40, 320)
     sx = rng.rand(4, 7)
@@ -127,6 +128,7 @@ Citrine.main_loop do
 
   # R1 button: stress test - spawn 10 logos at once!
   if (Action.is_pressed?(Actions::SpawnTen) || pad.button_pressed?(Button::R1)) && logos.size < 128
+    puts "[CITRINE] Button R1 pressed!"
     10.times do
       if logos.size < 128
         rx = rng.rand(40, 400)
@@ -144,6 +146,7 @@ Citrine.main_loop do
 
   # Triangle button: reset back to 1 logo
   if Action.is_pressed?(Actions::Reset) || pad.button_pressed?(Button::Triangle)
+    puts "[CITRINE] Button Triangle pressed!"
     while logos.size > 1
       logos.pop
     end
