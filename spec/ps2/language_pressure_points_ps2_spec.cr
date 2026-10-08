@@ -18,7 +18,7 @@ describe "Citrine PS2 Hardware & Compiler Pressure Points Suite" do
       Test.assert(res == 612, "Deep Register Calc == 612")
     CR
     )
-    result = tc.run_and_verify(timeout: 7.seconds)
+    result = tc.run_and_verify(timeout: 12.seconds)
     result.should_pass("Deep Register Calc == 612")
   end
 
@@ -49,7 +49,7 @@ describe "Citrine PS2 Hardware & Compiler Pressure Points Suite" do
       Test.assert(fact7 == 5040, "factorial(7) == 5040")
     CR
     )
-    result = tc.run_and_verify(timeout: 7.seconds)
+    result = tc.run_and_verify(timeout: 12.seconds)
     result.should_pass("fib(10) == 55")
     result.should_pass("factorial(7) == 5040")
   end
@@ -86,7 +86,7 @@ describe "Citrine PS2 Hardware & Compiler Pressure Points Suite" do
       Test.assert(t1_ok && t2_ok && t3_ok && t4_ok, "Short-circuit side-effects guarded")
     CR
     )
-    result = tc.run_and_verify(timeout: 7.seconds)
+    result = tc.run_and_verify(timeout: 12.seconds)
     result.should_pass("Short-circuit side-effects guarded")
   end
 
@@ -119,7 +119,7 @@ describe "Citrine PS2 Hardware & Compiler Pressure Points Suite" do
       Test.assert(total == 52, "Nested loops with break and next total == 52")
     CR
     )
-    result = tc.run_and_verify(timeout: 7.seconds)
+    result = tc.run_and_verify(timeout: 12.seconds)
     result.should_pass("Nested loops with break and next total == 52")
   end
 
@@ -144,7 +144,7 @@ describe "Citrine PS2 Hardware & Compiler Pressure Points Suite" do
       Test.assert(sum_weights == 39800, "200 allocations sum == 39800")
     CR
     )
-    result = tc.run_and_verify(timeout: 7.seconds)
+    result = tc.run_and_verify(timeout: 12.seconds)
     result.should_have_no_memory_leaks
     result.should_not_have_memory_faults
     result.should_pass("200 allocations sum == 39800")

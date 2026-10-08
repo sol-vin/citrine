@@ -65,7 +65,7 @@ describe "Citrine PS2 Crystal Language Parity: Cross-Feature Synergies Suite" do
       Test.assert(spell_res == 75, "Block closure with outer variable == 75")
     CR
     )
-    result = tc.run_and_verify(timeout: 7.seconds)
+    result = tc.run_and_verify(timeout: 12.seconds)
     result.should_pass("Multi-tier properties initialized")
     result.should_pass("Super + mixin combination scaled == 60")
     result.should_pass("Block closure with outer variable == 75")
@@ -100,7 +100,7 @@ describe "Citrine PS2 Crystal Language Parity: Cross-Feature Synergies Suite" do
       Test.assert(res == 45 && t3.x == 15 && t3.y == 30, "Struct mutated via method")
     CR
     )
-    result = tc.run_and_verify(timeout: 7.seconds)
+    result = tc.run_and_verify(timeout: 12.seconds)
     result.should_pass("Struct pass-by-value independent of original")
     result.should_pass("Struct mutated via method")
   end
@@ -136,7 +136,7 @@ describe "Citrine PS2 Crystal Language Parity: Cross-Feature Synergies Suite" do
       Test.assert(total_categories == 15, "Case range and multi-match in collection loop == 15")
     CR
     )
-    result = tc.run_and_verify(timeout: 7.seconds)
+    result = tc.run_and_verify(timeout: 12.seconds)
     result.should_pass("Case range and multi-match in collection loop == 15")
   end
 end

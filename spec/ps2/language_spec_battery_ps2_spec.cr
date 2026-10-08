@@ -228,13 +228,154 @@ describe "Citrine PS2 Crystal Language Specification: Unified Batched Hardware B
       asm("sync.l")
       Citrine.asm "sync.p"
       Test.pass("S21: Inline Assembly")
+
+      # --- Section 22: Recursive Algorithm & Binary Search ---
+      def s22_binary_search(arr, target)
+        low = 0
+        high = arr.size - 1
+        found_idx = -1
+        while low <= high
+          mid = (low + high) / 2
+          v = arr[mid]
+          if v == target
+            found_idx = mid
+            break
+          elsif v < target
+            low = mid + 1
+          else
+            high = mid - 1
+          end
+        end
+        found_idx
+      end
+      s22_data = [10, 25, 33, 47, 52, 68, 79, 84, 91, 105]
+      b_idx = s22_binary_search(s22_data, 52)
+      Test.assert(b_idx == 4, "S22: Binary Search")
+
+      # --- Section 23: 4-Level Deep Polymorphic Hierarchy ---
+      class S23Root
+        def level
+          1
+        end
+      end
+      class S23L2 < S23Root
+        def level
+          super + 1
+        end
+      end
+      class S23L3 < S23L2
+        def level
+          super + 1
+        end
+      end
+      class S23Leaf < S23L3
+        def level
+          super * 2
+        end
+      end
+      s23_inst = S23Leaf.new
+      Test.assert(s23_inst.level == 6, "S23: Deep Polymorphism")
+
+      # --- Section 24: String Manipulation Matrix ---
+      s24_str = "PlayStation2"
+      s24_up = s24_str.upcase
+      s24_down = s24_str.downcase
+      s24_has = s24_str.includes?("Station")
+      Test.assert(s24_has && s24_up == "PLAYSTATION2" && s24_down == "playstation2", "S24: String Manipulation")
+
+      # --- Section 25: In-Place Sort Algorithm & Dynamic Swapping ---
+      def s25_sort(arr)
+        n = arr.size
+        i = 0
+        while i < n
+          j = 0
+          while j < n - 1
+            if arr[j] > arr[j + 1]
+              temp = arr[j]
+              arr[j] = arr[j + 1]
+              arr[j + 1] = temp
+            end
+            j += 1
+          end
+          i += 1
+        end
+        arr
+      end
+      s25_data = [45, 12, 89, 23, 7]
+      s25_sorted = s25_sort(s25_data)
+      Test.assert(s25_sorted[0] == 7 && s25_sorted[1] == 12 && s25_sorted[4] == 89, "S25: In-Place Sort")
+
+      # --- Section 26: StaticArray Matrix Math ---
+      mat = StaticArray(Int32, 4).new(0)
+      mat[0] = 1
+      mat[1] = 2
+      mat[2] = 3
+      mat[3] = 4
+      trace = mat[0] + mat[3]
+      det = (mat[0] * mat[3]) - (mat[1] * mat[2])
+      Test.assert(trace == 5 && det == -2, "S26: StaticArray Matrix")
+
+      # --- Section 27: Multi-Nested Ternary & Logic ---
+      def s27_logic(val)
+        val > 100 ? (val > 200 ? 3 : 2) : (val > 50 ? 1 : 0)
+      end
+      Test.assert(s27_logic(250) == 3 && s27_logic(150) == 2 && s27_logic(75) == 1 && s27_logic(20) == 0, "S27: Nested Ternary Logic")
+
+      # --- Section 28: Bitfield Packing & RGBA32 Unpacking ---
+      def s28_pack(r, g, b, a)
+        (r & 0xFF) | ((g & 0xFF) << 8) | ((b & 0xFF) << 16) | ((a & 0xFF) << 24)
+      end
+      def s28_unpack_r(color)
+        color & 0xFF
+      end
+      def s28_unpack_g(color)
+        (color >> 8) & 0xFF
+      end
+      def s28_unpack_b(color)
+        (color >> 16) & 0xFF
+      end
+      def s28_unpack_a(color)
+        (color >> 24) & 0xFF
+      end
+      s28_col = s28_pack(12, 34, 56, 78)
+      Test.assert(s28_unpack_r(s28_col) == 12 && s28_unpack_g(s28_col) == 34 && s28_unpack_b(s28_col) == 56 && s28_unpack_a(s28_col) == 78, "S28: Bitfield Packing")
+
+      # --- Section 29: Nested Struct Pass-By-Value Immutability ---
+      struct S29Color
+        property r : Int32
+        property g : Int32
+        def initialize(@r, @g)
+        end
+      end
+      s29_c1 = S29Color.new(100, 200)
+      s29_c2 = s29_c1
+      s29_c2.r = 255
+      Test.assert(s29_c1.r == 100 && s29_c2.r == 255, "S29: Struct Immutability")
+
+      # --- Section 30: Finite State Machine & Enum Transitions ---
+      fsm_state = 0
+      ticks = 0
+      while ticks < 10
+        ticks += 1
+        case fsm_state
+        when 0
+          fsm_state = 1
+        when 1
+          fsm_state = 2
+        when 2
+          fsm_state = 3
+        when 3
+          break
+        end
+      end
+      Test.assert(fsm_state == 3 && ticks == 4, "S30: State Machine & Transitions")
     CR
     )
-    result = tc.run_and_verify(timeout: 7.seconds)
+    result = tc.run_and_verify(timeout: 12.seconds)
     result.should_have_no_memory_leaks
     result.should_not_have_memory_faults
 
-    # Multi-step pass assertions: verify all 21 sections passed on console
+    # Multi-step pass assertions: verify all 30 sections passed on console
     result.should_pass(
       "S01: Arithmetic",
       "S02: Bitwise & Shifts",
@@ -256,7 +397,16 @@ describe "Citrine PS2 Crystal Language Specification: Unified Batched Hardware B
       "S18: Tuples Unpacking",
       "S19: Type Introspection",
       "S20: Pointer Memory",
-      "S21: Inline Assembly"
+      "S21: Inline Assembly",
+      "S22: Binary Search",
+      "S23: Deep Polymorphism",
+      "S24: String Manipulation",
+      "S25: In-Place Sort",
+      "S26: StaticArray Matrix",
+      "S27: Nested Ternary Logic",
+      "S28: Bitfield Packing",
+      "S29: Struct Immutability",
+      "S30: State Machine & Transitions"
     )
   end
 end

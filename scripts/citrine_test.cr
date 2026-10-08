@@ -119,7 +119,14 @@ module CitrineTest
         [
           "spec/opcode_spec.cr",
           "spec/bytecode_compiler_spec.cr",
+          "spec/optimizer_spec.cr",
+          "spec/mips/mips_emitter_spec.cr",
           "spec/compiler/language_matrix_compiler_spec.cr",
+          "spec/compiler/language_expressions_spec.cr",
+          "spec/compiler/control_flow_compiler_spec.cr",
+          "spec/compiler/oop_and_structs_compiler_spec.cr",
+          "spec/compiler/concurrency_compiler_spec.cr",
+          "spec/compiler/collections_and_strings_compiler_spec.cr",
         ].select { |p| File.exists?(p) }
       when :tier2
         [

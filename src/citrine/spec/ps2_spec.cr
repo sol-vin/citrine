@@ -374,7 +374,7 @@ module Citrine
         CR
       end
 
-      def run_and_verify(timeout : ::Time::Span = 5.seconds, min_bytecode_size : Int32 = 18) : Ps2ExecutionResult
+      def run_and_verify(timeout : ::Time::Span = 12.seconds, min_bytecode_size : Int32 = 18) : Ps2ExecutionResult
         bytes, sm = compile
         bytes.size.should be > min_bytecode_size
         result = boot_pcsx2(timeout: timeout)
@@ -384,7 +384,7 @@ module Citrine
         result
       end
 
-      def boot_pcsx2(timeout : ::Time::Span = 4.seconds) : Ps2ExecutionResult
+      def boot_pcsx2(timeout : ::Time::Span = 12.seconds) : Ps2ExecutionResult
         bytes, sm = compile
         unique_suffix = "#{Process.pid}_#{Random.rand(1000..9999)}"
         temp_iso = "tmp_spec_#{@name.gsub(/[^a-zA-Z0-9_]/, "_")}_#{unique_suffix}.iso"

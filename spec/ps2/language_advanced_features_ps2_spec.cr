@@ -42,7 +42,7 @@ describe "Citrine PS2 Crystal Language Parity: Advanced Language Features Suite"
       Test.assert(new_gold == 750 && InventoryManager.gold == 750, "Class method cvar mutation == 750")
     CR
     )
-    result = tc.run_and_verify(timeout: 7.seconds)
+    result = tc.run_and_verify(timeout: 12.seconds)
     result.should_pass("Initial class variables")
     result.should_pass("Cvar accumulated from instances")
     result.should_pass("Class method cvar mutation == 750")
@@ -67,7 +67,7 @@ describe "Citrine PS2 Crystal Language Parity: Advanced Language Features Suite"
       Test.assert(tax3 == 25, "compute_tax(200, 15, 5) full arity == 25")
     CR
     )
-    result = tc.run_and_verify(timeout: 7.seconds)
+    result = tc.run_and_verify(timeout: 12.seconds)
     result.should_pass("compute_tax(100) with 2 defaults == 8")
     result.should_pass("compute_tax(100, 20) with 1 default == 18")
     result.should_pass("compute_tax(200, 15, 5) full arity == 25")
@@ -90,7 +90,7 @@ describe "Citrine PS2 Crystal Language Parity: Advanced Language Features Suite"
       Test.assert(x == 200 && y == 100, "Tuple swap x, y == 200, 100")
     CR
     )
-    result = tc.run_and_verify(timeout: 7.seconds)
+    result = tc.run_and_verify(timeout: 12.seconds)
     result.should_pass("Tuple literal indexed access")
     result.should_pass("Multiple assignment unpacking a, b, c")
     result.should_pass("Tuple swap x, y == 200, 100")

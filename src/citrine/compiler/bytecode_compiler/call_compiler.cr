@@ -238,141 +238,16 @@ module Citrine
         return compile_spawn(node, allocator, instructions, fn)
       end
 
-      # Concurrency: yield
-      if node.name == "yield" && (obj_str.empty? || obj_str == "Citrine" || obj_str == "Fiber")
-        instructions << Instruction.encode_yield
-        return dest
+      # Concurrency calls (yield, Channel.new, send, receive, try_receive, size, capacity)
+      if conc_dest = compile_concurrency_call(node, allocator, instructions, fn, dest, obj_str)
+        return conc_dest
       end
 
-      # Concurrency: Channel.new(cap)
-      if (obj_str.includes?("Channel") || node.name == "channel_new") && (node.name == "new" || node.name == "channel_new")
-        cap_reg = if node.args.size > 0
-                    compile_node(node.args[0], allocator, instructions, fn)
-                  else
-                    r = allocator.alloc_temp
-                    instructions << Instruction.encode_load_int(r, 32_u16)
-                    r
-                  end
-        instr_val = Instruction.call_native_raw(dest, cap_reg, NativeId::ChannelNew)
-        instructions << Instruction.new(instr_val)
-        allocator.free_temp(cap_reg)
-        return dest
+      # Controller and Input Action calls
+      if ctrl_dest = compile_controller_call(node, allocator, instructions, fn, dest, obj_str)
+        return ctrl_dest
       end
 
-      # Concurrency: ch.send(val)
-      if node.name == "send" && node.obj && node.args.size == 1
-        ch_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        val_reg = compile_node(node.args[0], allocator, instructions, fn)
-        arg0 = allocator.alloc_temp
-        arg1 = allocator.alloc_temp
-        instructions << Instruction.encode_abc(Opcode::Move, arg0, ch_reg, 0_u8)
-        instructions << Instruction.encode_abc(Opcode::Move, arg1, val_reg, 0_u8)
-        instr_val = Instruction.call_native_raw(dest, arg0, NativeId::ChannelSend)
-        instructions << Instruction.new(instr_val)
-        allocator.free_temp(ch_reg)
-        allocator.free_temp(val_reg)
-        allocator.free_temp(arg0)
-        allocator.free_temp(arg1)
-        return dest
-      end
-
-      # Concurrency: ch.receive
-      if node.name == "receive" && node.obj
-        ch_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        instr_val = Instruction.call_native_raw(dest, ch_reg, NativeId::ChannelReceive)
-        instructions << Instruction.new(instr_val)
-        allocator.free_temp(ch_reg)
-        return dest
-      end
-
-      # Concurrency: ch.try_receive
-      if node.name == "try_receive" && node.obj
-        ch_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        instr_val = Instruction.call_native_raw(dest, ch_reg, NativeId::ChannelTryReceive)
-        instructions << Instruction.new(instr_val)
-        allocator.free_temp(ch_reg)
-        return dest
-      end
-
-      # Concurrency: ch.size / ch.count
-      is_chan = obj_str.downcase.includes?("chan") || (node.obj.is_a?(Crystal::Var) && @var_types[node.obj.as(Crystal::Var).name]?.try(&.downcase.includes?("chan")) == true)
-      if is_chan && node.obj && (node.name == "size" || node.name == "count") && node.args.empty?
-        ch_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        instr_val = Instruction.call_native_raw(dest, ch_reg, NativeId::ChannelCount)
-        instructions << Instruction.new(instr_val)
-        allocator.free_temp(ch_reg)
-        return dest
-      end
-
-      # Concurrency: ch.capacity
-      if is_chan && node.name == "capacity" && node.obj && node.args.empty?
-        ch_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        instr_val = Instruction.call_native_raw(dest, ch_reg, NativeId::ChannelCapacity)
-        instructions << Instruction.new(instr_val)
-        allocator.free_temp(ch_reg)
-        return dest
-      end
-
-      # Controller handles: Citrine.player(port) or Citrine.pad(port)
-      if (obj_str == "Citrine" || obj_str.empty?) && (node.name == "player" || node.name == "pad")
-        if node.args.size != 1
-          compile_error("Citrine.#{node.name} requires exactly 1 argument: (port)", node)
-        end
-        check_port_literal(node.args[0], node.name, node)
-        port_reg = compile_node(node.args[0], allocator, instructions, fn)
-        instructions << Instruction.encode_abc(Opcode::Move, dest, port_reg, 0_u8)
-        allocator.free_temp(port_reg)
-        return dest
-      end
-
-      # Controller Method Calls on Controller instance (e.g. p1.button_pressed?(Button::Cross))
-      if (node.name == "button_pressed?" || node.name == "button_down?" || node.name == "button_released?") && node.obj && obj_str != "Citrine" && !obj_str.includes?("VirtualPad")
-        if node.args.size != 1
-          compile_error("Controller##{node.name} requires exactly 1 argument: (button)", node)
-        end
-        ctrl_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
-        btn_reg = compile_node(node.args[0], allocator, instructions, fn)
-        seq_base = allocator.alloc_contiguous(2)
-        instructions << Instruction.encode_abc(Opcode::Move, seq_base, ctrl_reg, 0_u8)
-        instructions << Instruction.encode_abc(Opcode::Move, (seq_base + 1).to_u8, btn_reg, 0_u8)
-        native_id = case node.name
-                    when "button_pressed?"  then NativeId::ButtonPressed
-                    when "button_down?"     then NativeId::ButtonDown
-                    else                         NativeId::ButtonReleased
-                    end
-        instr_val = Instruction.call_native_raw(dest, seq_base, native_id)
-        instructions << Instruction.new(instr_val)
-        allocator.free_temp(ctrl_reg)
-        allocator.free_temp(btn_reg)
-        allocator.free_temp(seq_base)
-        allocator.free_temp((seq_base + 1).to_u8)
-        return dest
-      end
-
-      # Godot-style InputMap Action queries (Action.is_pressed?, Action.is_down?, Action.is_released?)
-      if (obj_str == "Action" || obj_str == "Citrine::Action")
-        if ["is_pressed?", "is_down?", "is_released?", "is_action_just_pressed", "is_action_pressed", "is_action_just_released"].includes?(node.name)
-          if node.args.size != 1
-            compile_error("Action.#{node.name} requires exactly 1 argument: (action)", node)
-          end
-          act_reg = compile_node(node.args[0], allocator, instructions, fn)
-          seq_base = allocator.alloc_contiguous(1)
-          instructions << Instruction.encode_abc(Opcode::Move, seq_base, act_reg, 0_u8)
-          native_id = case node.name
-                      when "is_pressed?", "is_action_just_pressed" then NativeId::ActionPressed
-                      when "is_down?", "is_action_pressed"         then NativeId::ActionDown
-                      when "is_released?", "is_action_just_released" then NativeId::ActionReleased
-                      else                                         nil
-                      end
-          if native_id
-            instr_val = Instruction.call_native_raw(dest, seq_base, native_id)
-            instructions << Instruction.new(instr_val)
-            allocator.free_temp(act_reg)
-            allocator.free_temp(seq_base)
-            return dest
-          end
-        end
-      end
 
       # Native API Calls (Citrine.draw_rectangle, GL.begin, etc.)
       is_gl_obj = obj_str == "Citrine::GL" || obj_str == "GL"

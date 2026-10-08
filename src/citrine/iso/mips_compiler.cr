@@ -242,7 +242,12 @@ module Citrine
           when 1 # Bool
             emitter.ori(T0, ZERO, instr.imm16.to_i32)
             emitter.sw(T0, (dst.to_i32 * 4), FP)
-          when 2, 3, 5 # Int16, UInt16, Zero
+          when 2 # Int16
+            raw_imm = instr.imm16.to_i32
+            signed_imm = raw_imm >= 0x8000 ? raw_imm - 0x10000 : raw_imm
+            emitter.li(T0, signed_imm)
+            emitter.sw(T0, (dst.to_i32 * 4), FP)
+          when 3, 5 # UInt16, Zero
             emitter.li(T0, instr.imm16.to_i32)
             emitter.sw(T0, (dst.to_i32 * 4), FP)
           when 4 # Upper16
@@ -348,7 +353,7 @@ module Citrine
             cmp_done_lbl = "cmp_eq_done_#{fn_idx}_#{pc}"
             emitter.beq(T0, T1, cmp_eq_lbl)
             emitter.nop
-            emitter.lui(T2, 0x0050)
+            emitter.lui(T2, 0x0010)
             emitter.sltu(T3, T0, T2)
             emitter.bnez(T3, "cmp_eq_fail_#{fn_idx}_#{pc}")
             emitter.nop
@@ -373,7 +378,7 @@ module Citrine
             cmp_ne_done = "cmp_ne_done_#{fn_idx}_#{pc}"
             emitter.beq(T0, T1, cmp_ne_lbl)
             emitter.nop
-            emitter.lui(T2, 0x0050)
+            emitter.lui(T2, 0x0010)
             emitter.sltu(T3, T0, T2)
             emitter.bnez(T3, "cmp_ne_pass_#{fn_idx}_#{pc}")
             emitter.nop
