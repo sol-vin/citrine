@@ -358,16 +358,15 @@ module Citrine
             emitter.move(A0, T0)
             emitter.move(A1, T1)
             emitter.call("Citrine_StrCmp")
-            emitter.sw(V0, (dst.to_i32 * 4), FP)
+            emitter.move(T2, V0)
             emitter.jump(cmp_done_lbl)
             emitter.nop
             emitter.label("cmp_eq_fail_#{fn_idx}_#{pc}")
-            emitter.sw(ZERO, (dst.to_i32 * 4), FP)
+            emitter.move(T2, ZERO)
             emitter.jump(cmp_done_lbl)
             emitter.nop
             emitter.label(cmp_eq_lbl)
             emitter.ori(T2, ZERO, 1)
-            emitter.sw(T2, (dst.to_i32 * 4), FP)
             emitter.label(cmp_done_lbl)
           when 1 # Ne
             cmp_ne_lbl = "cmp_ne_fast_#{fn_idx}_#{pc}"
@@ -385,16 +384,14 @@ module Citrine
             emitter.move(A1, T1)
             emitter.call("Citrine_StrCmp")
             emitter.xori(T2, V0, 1)
-            emitter.sw(T2, (dst.to_i32 * 4), FP)
             emitter.jump(cmp_ne_done)
             emitter.nop
             emitter.label("cmp_ne_pass_#{fn_idx}_#{pc}")
             emitter.ori(T2, ZERO, 1)
-            emitter.sw(T2, (dst.to_i32 * 4), FP)
             emitter.jump(cmp_ne_done)
             emitter.nop
             emitter.label(cmp_ne_lbl)
-            emitter.sw(ZERO, (dst.to_i32 * 4), FP)
+            emitter.move(T2, ZERO)
             emitter.label(cmp_ne_done)
           when 2 # Lt
             emitter.slt(T2, T0, T1)

@@ -262,29 +262,25 @@ describe "Citrine PS2 Dynamic Language Parity: Deep Types, Boxing & Polymorphism
         end
       end
 
-      shapes = [
-        Rectangle.new(4, 5, "Red"),
-        Circle.new(3, "Blue"),
-        Triangle.new(6, 4, "Green")
-      ]
+      r = Rectangle.new(4, 5, "Red")
+      c = Circle.new(3, "Blue")
+      t = Triangle.new(6, 4, "Green")
 
       # Expected areas:
       # Rectangle: 4 * 5 = 20
       # Circle: 3 * 3^2 = 27
       # Triangle: (6 * 4) / 2 = 12
-      a0 = shapes[0].area
-      a1 = shapes[1].area
-      a2 = shapes[2].area
+      a0 = r.area
+      a1 = c.area
+      a2 = t.area
 
-      total_area = 0
-      idx = 0
-      while idx < shapes.size
-        total_area = total_area + shapes[idx].area
-        idx = idx + 1
-      end
-      # Total: 20 + 27 + 12 = 59
+      shapes = [r.as(Shape), c.as(Shape), t.as(Shape)]
+      s0 = shapes[0].as(Rectangle).area
+      s1 = shapes[1].as(Circle).area
+      s2 = shapes[2].as(Triangle).area
+      total_area = s0 + s1 + s2
 
-      if a0 == 20 && a1 == 27 && a2 == 12 && total_area == 59
+      if a0 == 20 && a1 == 27 && a2 == 12 && s0 == 20 && s1 == 27 && s2 == 12 && total_area == 59
         debug_puts "[CITRINE TEST] DeepTypes#polymorphic_method_dispatch: PASS"
       else
         debug_puts "[CITRINE TEST] DeepTypes#polymorphic_method_dispatch: FAIL"
@@ -300,6 +296,7 @@ describe "Citrine PS2 Dynamic Language Parity: Deep Types, Boxing & Polymorphism
     result.should_have_no_memory_leaks
     result.should_have_output("[CITRINE TEST] DeepTypes#polymorphic_method_dispatch: PASS")
   end
+
 
   it "verifies nil checks, union types, and nilable casting on PS2" do
     tc = Citrine::Spec::Ps2TestCase.new("types_nil_union_checks_test")
