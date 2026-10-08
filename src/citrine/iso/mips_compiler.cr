@@ -768,6 +768,30 @@ module Citrine
           emitter.call("Citrine_ArrayClear")
           emitter.sw(V0, (dst * 4), FP)
 
+        when 130 # StaticArrayNew(size, def_val)
+          emitter.lw(A0, (base * 4), FP)
+          emitter.lw(A1, ((base + 1) * 4), FP)
+          emitter.call("Citrine_StaticArrayNew")
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 131 # StaticArrayGet(arr, index)
+          emitter.lw(A0, (base * 4), FP)
+          emitter.lw(A1, ((base + 1) * 4), FP)
+          emitter.call("Citrine_ArrayGet")
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 132 # StaticArraySet(arr, index, val)
+          emitter.lw(A0, (base * 4), FP)
+          emitter.lw(A1, ((base + 1) * 4), FP)
+          emitter.lw(A2, ((base + 2) * 4), FP)
+          emitter.call("Citrine_ArraySet")
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 133 # StaticArraySize(arr)
+          emitter.lw(A0, (base * 4), FP)
+          emitter.call("Citrine_ArraySize")
+          emitter.sw(V0, (dst * 4), FP)
+
         when 150 # ObjectNew(class_id, field_count)
           emitter.lw(A0, (base * 4), FP)
           emitter.lw(A1, ((base + 1) * 4), FP)
@@ -785,6 +809,11 @@ module Citrine
           emitter.lw(A1, ((base + 1) * 4), FP)
           emitter.lw(A2, ((base + 2) * 4), FP)
           emitter.call("Citrine_ObjectSetField")
+          emitter.sw(V0, (dst * 4), FP)
+
+        when 153 # StructCopy(src_obj)
+          emitter.lw(A0, (base * 4), FP)
+          emitter.call("Citrine_StructCopy")
           emitter.sw(V0, (dst * 4), FP)
 
         when 180, 181 # ContextSet, ContextClear
@@ -911,7 +940,29 @@ module Citrine
           emitter.sw(ZERO, (dst * 4), FP)
 
         when 170 # TypeIsA
-          emitter.ori(V0, ZERO, 1)
+          emitter.lw(T0, (base * 4), FP)       # obj_reg
+          emitter.lw(T1, ((base + 1) * 4), FP) # target_type_id
+          emitter.ori(T2, ZERO, 0xF001)        # TypeKind::Nil
+          type_is_nil_lbl = "type_is_nil_#{fn_idx}_#{pc}"
+          type_check_done = "type_check_done_#{fn_idx}_#{pc}"
+          emitter.beq(T1, T2, type_is_nil_lbl)
+          emitter.nop
+
+          # Target is NOT Nil:
+          # If obj == 0 (nil), result is 0 (false)
+          # If obj != 0 (non-nil), result is 1 (true)
+          emitter.sltu(V0, ZERO, T0)
+          emitter.jump(type_check_done)
+          emitter.nop
+
+          # Target IS Nil:
+          # If obj == 0 (nil), result is 1 (true)
+          # If obj != 0 (non-nil), result is 0 (false)
+          emitter.label(type_is_nil_lbl)
+          emitter.sltu(V0, ZERO, T0)
+          emitter.xori(V0, V0, 1)
+
+          emitter.label(type_check_done)
           emitter.sw(V0, (dst * 4), FP)
 
         when 171 # TypeAsCast

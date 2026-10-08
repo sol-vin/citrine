@@ -350,6 +350,64 @@ def debug_log(msg : String)
   Citrine.debug_log(msg)
 end
 
+# Standard Citrine hardware test assertion and lifecycle module.
+module Test
+  @@pass_count : Int32 = 0
+  @@fail_count : Int32 = 0
+
+  def self.init(name : String = "")
+    @@pass_count = 0
+    @@fail_count = 0
+    if name != ""
+      debug_puts "[CITRINE TEST] INIT: #{name}"
+    else
+      debug_puts "[CITRINE TEST] INIT"
+    end
+  end
+
+  def self.pass(msg : String = "")
+    @@pass_count += 1
+    if msg != ""
+      debug_puts "[CITRINE TEST] #{msg}: PASS"
+    else
+      debug_puts "[CITRINE TEST] PASS"
+    end
+  end
+
+  def self.fail(msg : String = "")
+    @@fail_count += 1
+    if msg != ""
+      debug_puts "[CITRINE TEST] #{msg}: FAIL"
+    else
+      debug_puts "[CITRINE TEST] FAIL"
+    end
+  end
+
+  def self.assert(cond : Bool, msg : String = "")
+    if cond
+      Test.pass(msg)
+    else
+      Test.fail(msg)
+    end
+  end
+
+  def self.assert_equal(expected, actual, msg : String = "")
+    if expected == actual
+      Test.pass(msg)
+    else
+      Test.fail(msg)
+    end
+  end
+
+  def self.close
+    if @@fail_count > 0
+      debug_puts "[CITRINE TEST] CLOSE: FAILED"
+    else
+      debug_puts "[CITRINE TEST] CLOSE: PASSED"
+    end
+  end
+end
+
 # Core Citrine runtime module exposing display, rendering, input, audio, video,
 # coroutine fibers, channels, and diagnostic facilities.
 module Citrine

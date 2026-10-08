@@ -18,6 +18,11 @@ module Citrine
       getter boot_time_seconds : Float64
       getter screenshot_path : String?
       getter memory_reads : Hash(UInt64, Bytes) = Hash(UInt64, Bytes).new
+      getter test_inits : Array(String) = [] of String
+      getter test_closes : Int32 = 0
+      getter close_status : Symbol? = nil
+      getter passed_assertions : Array(String) = [] of String
+      getter failed_assertions : Array(String) = [] of String
 
       def initialize(
         @lines : Array(String) = [] of String,
@@ -28,8 +33,34 @@ module Citrine
         @spram_canary_valid : Bool = true,
         @boot_time_seconds : Float64 = 0.0,
         @screenshot_path : String? = nil,
-        @memory_reads : Hash(UInt64, Bytes) = Hash(UInt64, Bytes).new
+        @memory_reads : Hash(UInt64, Bytes) = Hash(UInt64, Bytes).new,
       )
+        parse_test_events
+      end
+
+      private def parse_test_events
+        @lines.each do |line|
+          clean_line = line.strip
+          if clean_line.includes?("[CITRINE TEST] INIT")
+            raw_name = clean_line.split("[CITRINE TEST] INIT").last.strip.sub(/^:\s*/, "")
+            @test_inits << raw_name unless @test_inits.includes?(raw_name)
+          elsif clean_line.includes?("[CITRINE TEST] CLOSE")
+            @test_closes += 1
+            if clean_line.includes?("FAILED")
+              @close_status = :failed
+            elsif clean_line.includes?("PASSED")
+              @close_status = :passed
+            end
+          elsif clean_line.includes?("[CITRINE TEST]")
+            if clean_line.ends_with?(": PASS") || clean_line.ends_with?("[CITRINE TEST] PASS")
+              msg = clean_line.split("[CITRINE TEST]").last.strip
+              @passed_assertions << msg unless @passed_assertions.includes?(msg)
+            elsif clean_line.ends_with?(": FAIL") || clean_line.ends_with?("[CITRINE TEST] FAIL")
+              msg = clean_line.split("[CITRINE TEST]").last.strip
+              @failed_assertions << msg unless @failed_assertions.includes?(msg)
+            end
+          end
+        end
       end
 
       def pcsx2_available? : Bool
@@ -123,6 +154,94 @@ module Citrine
           fail "Expected screenshot to be captured, but file '#{path || "nil"}' does not exist or is empty.", file, line
         end
       end
+
+      def initialized?(test_name : String? = nil) : Bool
+        if test_name
+          @test_inits.any? { |init_name| init_name.includes?(test_name) }
+        else
+          !@test_inits.empty?
+        end
+      end
+
+      def closed? : Bool
+        @test_closes > 0
+      end
+
+      def passed_count : Int32
+        @passed_assertions.size
+      end
+
+      def failed_count : Int32
+        @failed_assertions.size
+      end
+
+      def should_have_init(test_name : String? = nil, file = __FILE__, line = __LINE__)
+        return if check_pcsx2_availability(file, line)
+        unless initialized?(test_name)
+          fail "Expected test to execute Test.init#{test_name ? "('#{test_name}')" : ""}, but init marker was not found in #{@lines.size} log lines.", file, line
+        end
+      end
+
+      def should_have_close(file = __FILE__, line = __LINE__)
+        return if check_pcsx2_availability(file, line)
+        unless closed?
+          fail "Expected test to execute Test.close, but close marker was not found in #{@lines.size} log lines (test may have crashed, hung, or halted prematurely).", file, line
+        end
+      end
+
+      def should_pass(file = __FILE__, line = __LINE__)
+        return if check_pcsx2_availability(file, line)
+        should_boot_cleanly(file, line)
+        should_preserve_spram(file, line)
+        should_have_init(file: file, line: line)
+        should_have_close(file: file, line: line)
+
+        if @failed_assertions.size > 0
+          fail "Test failed with #{@failed_assertions.size} failure(s):\n  #{@failed_assertions.join("\n  ")}", file, line
+        end
+
+        if @close_status == :failed
+          fail "Test execution closed with failure status (CLOSE: FAILED).", file, line
+        end
+
+        if @passed_assertions.empty?
+          fail "Expected at least one passed assertion (Test.pass), but none were recorded.", file, line
+        end
+      end
+
+      def should_pass(first_msg : String, *more_msgs : String, file = __FILE__, line = __LINE__)
+        return if check_pcsx2_availability(file, line)
+        should_pass(file: file, line: line)
+        all_msgs = [first_msg] + more_msgs.to_a
+        all_msgs.each do |msg|
+          matched = @passed_assertions.any? { |p| p.includes?(msg) }
+          unless matched
+            fail "Expected test to pass check '#{msg}', but it was not found among passed assertions:\n  #{@passed_assertions.join("\n  ")}", file, line
+          end
+        end
+      end
+
+      def should_fail(file = __FILE__, line = __LINE__)
+        return if check_pcsx2_availability(file, line)
+        should_boot_cleanly(file, line)
+        should_have_init(file: file, line: line)
+
+        if @failed_assertions.empty?
+          fail "Expected test to fail, but zero failures were recorded.", file, line
+        end
+      end
+
+      def should_fail(first_msg : String, *more_msgs : String, file = __FILE__, line = __LINE__)
+        return if check_pcsx2_availability(file, line)
+        should_fail(file: file, line: line)
+        all_msgs = [first_msg] + more_msgs.to_a
+        all_msgs.each do |msg|
+          matched = @failed_assertions.any? { |f| f.includes?(msg) }
+          unless matched
+            fail "Expected test failure matching '#{msg}', but found:\n  #{@failed_assertions.join("\n  ")}", file, line
+          end
+        end
+      end
     end
 
     class Ps2TestCase
@@ -136,6 +255,7 @@ module Citrine
       property screenshot_output : String? = nil
       property gdb_port : Int32? = nil
       property memory_queries : Array(Tuple(UInt64, Int32)) = [] of Tuple(UInt64, Int32)
+      property auto_test_harness : Bool = false
 
       def initialize(@name : String)
       end
@@ -173,6 +293,10 @@ module Citrine
         end
         raise "No source code or target file provided for #{name}" unless src
 
+        if (@auto_test_harness || src.includes?("Test.")) && !src.includes?("module Test")
+          src = build_harnessed_source(src)
+        end
+
         parser = DslParser.new(@target_file || "test.cr")
         prog = parser.parse(src)
         compiler = BytecodeCompiler.new(@target_file || "test.cr")
@@ -183,9 +307,87 @@ module Citrine
         {bytes, compiler.source_map}
       end
 
+      private def build_harnessed_source(src : String) : String
+        <<-CR
+        boot_screen false
+
+        module Test
+          @@pass_count : Int32 = 0
+          @@fail_count : Int32 = 0
+
+          def self.init(name : String = "")
+            @@pass_count = 0
+            @@fail_count = 0
+            if name != ""
+              debug_puts "[CITRINE TEST] INIT: " + name
+            else
+              debug_puts "[CITRINE TEST] INIT"
+            end
+          end
+
+          def self.pass(msg : String = "")
+            @@pass_count += 1
+            if msg != ""
+              debug_puts "[CITRINE TEST] " + msg + ": PASS"
+            else
+              debug_puts "[CITRINE TEST] PASS"
+            end
+          end
+
+          def self.fail(msg : String = "")
+            @@fail_count += 1
+            if msg != ""
+              debug_puts "[CITRINE TEST] " + msg + ": FAIL"
+            else
+              debug_puts "[CITRINE TEST] FAIL"
+            end
+          end
+
+          def self.assert(cond : Bool, msg : String = "")
+            if cond
+              Test.pass(msg)
+            else
+              Test.fail(msg)
+            end
+          end
+
+          def self.assert_equal(expected, actual, msg : String = "")
+            if expected == actual
+              Test.pass(msg)
+            else
+              Test.fail(msg)
+            end
+          end
+
+          def self.close
+            if @@fail_count > 0
+              debug_puts "[CITRINE TEST] CLOSE: FAILED"
+            else
+              debug_puts "[CITRINE TEST] CLOSE: PASSED"
+            end
+          end
+        end
+
+        Test.init("#{name}")
+        #{src}
+        Test.close
+        CR
+      end
+
+      def run_and_verify(timeout : ::Time::Span = 5.seconds, min_bytecode_size : Int32 = 18) : Ps2ExecutionResult
+        bytes, sm = compile
+        bytes.size.should be > min_bytecode_size
+        result = boot_pcsx2(timeout: timeout)
+        result.should_boot_cleanly
+        result.should_preserve_spram
+        result.should_pass
+        result
+      end
+
       def boot_pcsx2(timeout : ::Time::Span = 4.seconds) : Ps2ExecutionResult
         bytes, sm = compile
-        temp_iso = "tmp_spec_#{@name.gsub(/[^a-zA-Z0-9_]/, "_")}.iso"
+        unique_suffix = "#{Process.pid}_#{Random.rand(1000..9999)}"
+        temp_iso = "tmp_spec_#{@name.gsub(/[^a-zA-Z0-9_]/, "_")}_#{unique_suffix}.iso"
 
         extra_files = Hash(String, Bytes).new
         audio_tracks = [] of String
@@ -302,5 +504,18 @@ def ps2_spec(name : String, &block : Citrine::Spec::Ps2TestCase -> Nil)
   describe "PS2 [#{name}]" do
     test_case = Citrine::Spec::Ps2TestCase.new(name)
     block.call(test_case)
+  end
+end
+
+# Spec test case macro for PS2 hardware test execution
+macro ps2_test(name, description = nil, &block)
+  {% desc = description || name %}
+  it {{desc}}, file: __FILE__, line: __LINE__ do
+    __ps2_tc = Citrine::Spec::Ps2TestCase.new({{name}})
+    __ps2_tc.auto_test_harness = true
+    {% if block.args.size > 0 %}
+      {{block.args.first}} = __ps2_tc
+    {% end %}
+    {{block.body}}
   end
 end

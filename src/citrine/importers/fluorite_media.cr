@@ -285,17 +285,19 @@ module Citrine
       ) : Bool
         raise "FFmpeg is not installed or not in PATH." unless ffmpeg_installed?
 
-        temp_bmp = "#{output_path}.tmp_conv.bmp"
+        temp_raw = "#{output_path}.tmp_conv.raw"
         w = config.width || 128
         h = config.height || 128
 
-        args = ["-y", "-i", input_path, "-vf", "scale=#{w}:#{h}", "-frames:v", "1", "-update", "1", temp_bmp]
+        # Maintain aspect ratio and pad to exact target dimensions with transparent pixels
+        vf_filter = "scale=#{w}:#{h}:force_original_aspect_ratio=decrease,pad=#{w}:#{h}:(ow-iw)/2:(oh-ih)/2:color=0x00000000"
+        args = ["-y", "-i", input_path, "-vf", vf_filter, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgba", temp_raw]
         status = Process.run("ffmpeg", args)
-        return false unless status.success? && File.exists?(temp_bmp)
+        return false unless status.success? && File.exists?(temp_raw)
 
         begin
-          bmp_bytes = File.read(temp_bmp).to_slice
-          tex = ImageImporter.import_bmp(bmp_bytes)
+          raw_bytes = File.read(temp_raw).to_slice
+          tex = TextureAsset.new(w, h, GSColorFormat::PSMCT32, raw_bytes)
 
           # Palettize if 8-bit or 4-bit requested
           tex_asset = if config.clut_bits == 8
@@ -308,7 +310,7 @@ module Citrine
           File.write(output_path, cbt_bytes)
           true
         ensure
-          File.delete(temp_bmp) if File.exists?(temp_bmp)
+          File.delete(temp_raw) if File.exists?(temp_raw)
         end
       end
 

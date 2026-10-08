@@ -18,7 +18,12 @@ module Citrine
 
     # Computes sine of `x` (in radians) using an accurate Taylor series polynomial.
     def self.sin(x : Float32) : Float32
-      x = normalize_angle(x)
+      while x > PI
+        x -= TAU
+      end
+      while x < -PI
+        x += TAU
+      end
       if x > PI * 0.5_f32
         x = PI - x
       elsif x < -PI * 0.5_f32

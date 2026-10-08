@@ -302,6 +302,10 @@ module Citrine
       ColorGrade
       HeatHaze
       CelShading
+      Glitch
+      PaletteSwap
+      Quantize
+      RainbowCycle
     end
 
     # Represents an individual post-processing pass dispatched to the GS.

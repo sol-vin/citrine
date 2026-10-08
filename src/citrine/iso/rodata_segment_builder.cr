@@ -470,28 +470,35 @@ module Citrine
         pal = bytes[14, pal_size]
         pixels = bytes[14 + pal_size + 4, w * h]
 
-        step_x = w // grid_res
-        step_y = h // grid_res
-
         grid_res.times do |gy|
           gx = 0
           while gx < grid_res
-            px = (gx * step_x).clamp(0, w - 1)
-            py = (gy * step_y).clamp(0, h - 1)
+            px = ((gx * w) // grid_res).clamp(0, w - 1)
+            py = ((gy * h) // grid_res).clamp(0, h - 1)
             pal_idx = pixels[py * w + px].to_i
+            a = (pal_idx * 4 + 3 < pal.size) ? pal[pal_idx * 4 + 3].to_u32 : 255_u32
+
+            if pal_idx == 0 || a < 32_u32
+              gx += 1
+              next
+            end
+
             r = pal[pal_idx * 4].to_u32
             g = pal[pal_idx * 4 + 1].to_u32
             b = pal[pal_idx * 4 + 2].to_u32
-            color = 0xFF000000_u32 | (b << 16) | (g << 8) | r
+            color = (a << 24) | (b << 16) | (g << 8) | r
 
             span_len = 1
             while (gx + span_len) < grid_res
-              npx = ((gx + span_len) * step_x).clamp(0, w - 1)
+              npx = (((gx + span_len) * w) // grid_res).clamp(0, w - 1)
               npal_idx = pixels[py * w + npx].to_i
+              na = (npal_idx * 4 + 3 < pal.size) ? pal[npal_idx * 4 + 3].to_u32 : 255_u32
+              break if npal_idx == 0 || na < 32_u32
+
               nr = pal[npal_idx * 4].to_u32
               ng = pal[npal_idx * 4 + 1].to_u32
               nb = pal[npal_idx * 4 + 2].to_u32
-              ncolor = 0xFF000000_u32 | (nb << 16) | (ng << 8) | nr
+              ncolor = (na << 24) | (nb << 16) | (ng << 8) | nr
               break if ncolor != color
               span_len += 1
             end

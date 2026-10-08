@@ -128,25 +128,31 @@ module Citrine
         return texture if texture.format == GSColorFormat::PSMT8
 
         # Build 256-color palette (RGBA32)
+        # Index 0 is reserved for transparent pixels (A = 0)
         palette = Bytes.new(256 * 4, 0_u8)
         indices = Bytes.new(texture.width * texture.height, 0_u8)
 
-        # Simple color quantization / indexing
+        # Color quantization / indexing with transparency preservation
         (texture.width * texture.height).times do |i|
           r = texture.pixels[i * 4]
           g = texture.pixels[i * 4 + 1]
           b = texture.pixels[i * 4 + 2]
           a = texture.pixels[i * 4 + 3]
 
-          # Map to 8-bit index (3 bits R, 3 bits G, 2 bits B)
-          palette_idx = ((r >> 5) << 5) | ((g >> 5) << 2) | (b >> 6)
-          indices[i] = palette_idx.to_u8
+          if a < 32_u8
+            indices[i] = 0_u8
+          else
+            # Map opaque colors to palette index 1..255 (3 bits R, 3 bits G, 2 bits B)
+            raw_idx = ((r.to_u32 >> 5) << 5) | ((g.to_u32 >> 5) << 2) | (b.to_u32 >> 6)
+            palette_idx = ((raw_idx % 255) + 1).to_u8
+            indices[i] = palette_idx
 
-          pal_offset = palette_idx.to_i * 4
-          palette[pal_offset] = r
-          palette[pal_offset + 1] = g
-          palette[pal_offset + 2] = b
-          palette[pal_offset + 3] = a
+            pal_offset = palette_idx.to_i * 4
+            palette[pal_offset] = r
+            palette[pal_offset + 1] = g
+            palette[pal_offset + 2] = b
+            palette[pal_offset + 3] = a
+          end
         end
 
         TextureAsset.new(texture.width, texture.height, GSColorFormat::PSMT8, indices, palette)
