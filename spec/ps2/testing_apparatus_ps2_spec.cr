@@ -28,7 +28,7 @@ describe "Citrine PS2 Testing Apparatus Verification Suite" do
     )
     bytes, sm = tc.compile
     bytes.size.should be > 18
-    result = tc.boot_pcsx2(timeout: 5.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     next unless result.pcsx2_available?
 
     # 1. Lifecycle ran

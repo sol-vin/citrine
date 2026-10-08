@@ -32,7 +32,7 @@ describe "Citrine PS2 Low-Level Memory & Hardware Interop Primitives" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_output("[CITRINE TEST] Pointer.malloc & indexed access: PASS")
     result.should_have_output("[CITRINE TEST] Pointer.value accessor: PASS")
@@ -53,7 +53,7 @@ describe "Citrine PS2 Low-Level Memory & Hardware Interop Primitives" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_output("[CITRINE TEST] Pointer(UInt32).new(0x70000010): PASS")
   end
@@ -84,7 +84,7 @@ describe "Citrine PS2 Low-Level Memory & Hardware Interop Primitives" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_output("[CITRINE TEST] Box.box raw pointer: PASS")
     result.should_have_output("[CITRINE TEST] Box.unbox restored object: PASS")

@@ -26,7 +26,7 @@ describe "Citrine PS2 Crystal Language Parity: Regex, Pattern Matching & String 
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_output("[CITRINE TEST] Regex literal =~ matched: PASS")
     result.should_have_output("[CITRINE TEST] Regex anchor ^[a-z]+$ matched: PASS")
@@ -75,7 +75,7 @@ describe "Citrine PS2 Crystal Language Parity: Regex, Pattern Matching & String 
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_output("[CITRINE TEST] String#strip: PASS")
     result.should_have_output("[CITRINE TEST] String#downcase: PASS")

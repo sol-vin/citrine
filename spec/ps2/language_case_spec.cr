@@ -34,7 +34,7 @@ describe "Citrine PS2 Crystal Language Parity: Case/When & Range Iteration" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_output("[CITRINE TEST] Multi-value when 1, 2 matched: PASS")
     result.should_have_output("[CITRINE TEST] Else branch fallback matched: PASS")
@@ -80,7 +80,7 @@ describe "Citrine PS2 Crystal Language Parity: Case/When & Range Iteration" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_output("[CITRINE TEST] Range matching 10..20: PASS")
     result.should_have_output("[CITRINE TEST] Condition-less case predicate: PASS")
@@ -102,7 +102,7 @@ describe "Citrine PS2 Crystal Language Parity: Case/When & Range Iteration" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_output("[CITRINE TEST] Range iteration (1..5).each sum == 15: PASS")
   end

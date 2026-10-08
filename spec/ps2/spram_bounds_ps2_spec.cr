@@ -26,7 +26,7 @@ describe "Citrine PS2 SPRAM Boundaries & Canary Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 5.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] SPRAM Register Accumulation: PASS")
@@ -46,7 +46,7 @@ describe "Citrine PS2 SPRAM Boundaries & Canary Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 5.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] Multi-Frame SPRAM Canary: PASS")

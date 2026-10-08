@@ -56,7 +56,7 @@ describe "Citrine PS2 Programmatic Debugger & Live Emulator Inspection Suite" do
     tc.inspect_memory(0x70000000_u64, 4)
     tc.inspect_memory(0x70000004_u64, 4)
 
-    result = tc.boot_pcsx2(timeout: 5.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
 

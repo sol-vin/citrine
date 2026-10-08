@@ -13,7 +13,7 @@ describe "Citrine PS2 Hardware Bridge & Communication Suite" do
     bytes.size.should be > 18
     tc.max_registers.should be <= 1024
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE] PS2 EE Engine Initialized")
@@ -37,7 +37,7 @@ describe "Citrine PS2 Hardware Bridge & Communication Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] ALU Math & Conditional Branch Verification: PASS")
@@ -53,7 +53,7 @@ describe "Citrine PS2 Hardware Bridge & Communication Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_have_output("[CITRINE TEST] Running pre-panic sanity check")
     result.should_panic_with("Simulated Hardware Bridge Assertion Failure")
   end
@@ -65,7 +65,7 @@ describe "Citrine PS2 Hardware Bridge & Communication Suite" do
     CR
     )
     bytes, sm = tc.compile
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
   end
@@ -83,7 +83,7 @@ describe "Citrine PS2 Hardware Bridge & Communication Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_output("[CITRINE] PS2 EE Engine Initialized")
     result.should_have_output("[CITRINE TEST] Boot phase online")

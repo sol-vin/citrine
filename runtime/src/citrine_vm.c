@@ -98,12 +98,16 @@ static Value citrine_array_pop(CitrineArray* arr) {
 
 static Value citrine_array_get(CitrineArray* arr, int32_t index) {
     Value nil_val = { .type = VAL_NIL, .flags = 0, .as = { .i = 0 } };
-    if (!arr || index < 0 || (uint32_t)index >= arr->size) return nil_val;
+    if (!arr) return nil_val;
+    if (index < 0) index += (int32_t)arr->size;
+    if (index < 0 || (uint32_t)index >= arr->size) return nil_val;
     return arr->elements[index];
 }
 
 static void citrine_array_set(CitrineArray* arr, int32_t index, Value val) {
-    if (!arr || index < 0) return;
+    if (!arr) return;
+    if (index < 0) index += (int32_t)arr->size;
+    if (index < 0) return;
     if ((uint32_t)index >= arr->capacity) {
         if (arr->is_static) return;
         uint32_t new_cap = ((uint32_t)index + 1) * 2;

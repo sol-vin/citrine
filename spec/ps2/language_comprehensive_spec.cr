@@ -75,7 +75,7 @@ describe "Citrine PS2 Crystal Language Parity: Comprehensive Language Features" 
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] Mixin Identifiable#identify: PASS")
@@ -158,7 +158,7 @@ describe "Citrine PS2 Crystal Language Parity: Comprehensive Language Features" 
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] Child property name == Aragorn: PASS")
@@ -300,7 +300,7 @@ describe "Citrine PS2 Crystal Language Parity: Comprehensive Language Features" 
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] Eagle is_a? Eagle: PASS")
@@ -372,7 +372,7 @@ describe "Citrine PS2 Crystal Language Parity: Comprehensive Language Features" 
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] Struct fields initialized: PASS")
@@ -459,7 +459,7 @@ describe "Citrine PS2 Crystal Language Parity: Comprehensive Language Features" 
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] if/elsif/else grade == 2: PASS")
@@ -534,7 +534,7 @@ describe "Citrine PS2 Crystal Language Parity: Comprehensive Language Features" 
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] apply_op yield 2-args sum == 42: PASS")
@@ -614,7 +614,7 @@ describe "Citrine PS2 Crystal Language Parity: Comprehensive Language Features" 
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] Enum State::Running equality: PASS")

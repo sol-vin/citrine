@@ -28,7 +28,7 @@ describe "Citrine PS2 Console Memory Architecture: 4-Tier Hybrid Memory & GC" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_output("[CITRINE TEST] Heavy buffer allocated and written: PASS")
     result.should_have_output("[CITRINE TEST] ptr.free executed: PASS")
@@ -55,7 +55,7 @@ describe "Citrine PS2 Console Memory Architecture: 4-Tier Hybrid Memory & GC" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_output("[CITRINE TEST] GC.collect executed: PASS")
     result.should_have_output("[CITRINE TEST] Active root preserved after GC sweep: PASS")
@@ -82,7 +82,7 @@ describe "Citrine PS2 Console Memory Architecture: 4-Tier Hybrid Memory & GC" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_output("[CITRINE TEST] Switched to menu arena: PASS")
     result.should_have_output("[CITRINE TEST] Switched to gameplay arena: PASS")

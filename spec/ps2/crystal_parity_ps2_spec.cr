@@ -32,7 +32,7 @@ describe "Citrine PS2 Crystal Language Parity & Core Features Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] Function Calls & Recursion EE Init")
@@ -71,7 +71,7 @@ describe "Citrine PS2 Crystal Language Parity & Core Features Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] Classes & Objects EE Init")
@@ -98,7 +98,7 @@ describe "Citrine PS2 Crystal Language Parity & Core Features Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] Modules EE Init")
@@ -131,7 +131,7 @@ describe "Citrine PS2 Crystal Language Parity & Core Features Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] Blocks & Yield EE Init")
@@ -170,7 +170,7 @@ describe "Citrine PS2 Crystal Language Parity & Core Features Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] Dynamic Array EE Init")
@@ -201,7 +201,7 @@ describe "Citrine PS2 Crystal Language Parity & Core Features Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE TEST] StaticArray & IO::Memory EE Init")

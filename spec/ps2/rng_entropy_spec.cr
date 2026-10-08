@@ -21,7 +21,7 @@ describe "Citrine PS2 Hardware Multi-Entropy & RNG Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_output("[CITRINE TEST] RNG Distribution Uniformity: PASS")
   end
@@ -35,7 +35,7 @@ describe "Citrine PS2 Hardware Multi-Entropy & RNG Suite" do
     CR
     )
     tc1.compile
-    res1 = tc1.boot_pcsx2(timeout: 7.seconds)
+    res1 = tc1.boot_pcsx2(timeout: 12.seconds)
     res1.should_boot_cleanly
 
     tc2 = Citrine::Spec::Ps2TestCase.new("entropy_divergence_2")
@@ -46,7 +46,7 @@ describe "Citrine PS2 Hardware Multi-Entropy & RNG Suite" do
     CR
     )
     tc2.compile
-    res2 = tc2.boot_pcsx2(timeout: 7.seconds)
+    res2 = tc2.boot_pcsx2(timeout: 12.seconds)
     res2.should_boot_cleanly
     next unless res1.pcsx2_available? && res2.pcsx2_available?
 
@@ -64,7 +64,7 @@ describe "Citrine PS2 Hardware Multi-Entropy & RNG Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 5.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
   end

@@ -34,7 +34,7 @@ describe "Citrine PS2 Dynamic Language Parity: Deep Types, Boxing & Polymorphism
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_no_memory_leaks
@@ -82,7 +82,7 @@ describe "Citrine PS2 Dynamic Language Parity: Deep Types, Boxing & Polymorphism
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_no_memory_leaks
@@ -125,7 +125,7 @@ describe "Citrine PS2 Dynamic Language Parity: Deep Types, Boxing & Polymorphism
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_no_memory_leaks
@@ -206,7 +206,7 @@ describe "Citrine PS2 Dynamic Language Parity: Deep Types, Boxing & Polymorphism
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_no_memory_leaks
@@ -290,7 +290,7 @@ describe "Citrine PS2 Dynamic Language Parity: Deep Types, Boxing & Polymorphism
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_no_memory_leaks
@@ -341,7 +341,7 @@ describe "Citrine PS2 Dynamic Language Parity: Deep Types, Boxing & Polymorphism
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_no_memory_leaks

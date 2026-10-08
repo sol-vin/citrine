@@ -1154,8 +1154,9 @@ module Citrine
                     arr_id = regs[base_r]
                     idx = (regs[base_r + 1] & 0xFFFFFFFF_i64).to_i32!
                     if arr = arrays[arr_id]?
-                      regs[dst_r] = (idx >= 0) ? (arr[idx]? || 0_i64) : 0_i64
-                      reg_types[dst_r] = array_types[arr_id]?.try(&.[idx]?) || 2_u8
+                      effective_idx = idx < 0 ? (idx + arr.size) : idx
+                      regs[dst_r] = (effective_idx >= 0) ? (arr[effective_idx]? || 0_i64) : 0_i64
+                      reg_types[dst_r] = (effective_idx >= 0) ? (array_types[arr_id]?.try(&.[effective_idx]?) || 2_u8) : 2_u8
                     elsif arr_id >= 0x00100000_i64
                       target_addr = arr_id &+ (idx.to_i64 &* 4)
                       if target_addr == 0x70000010_i64 || target_addr == 0x70000018_i64
@@ -1175,16 +1176,17 @@ module Citrine
                     val = regs[base_r + 2]
                     val_t = reg_types[base_r + 2]
                     if arr = arrays[arr_id]?
-                      if idx >= 0 && idx < 65536
-                        while arr.size <= idx
+                      effective_idx = idx < 0 ? (idx + arr.size) : idx
+                      if effective_idx >= 0 && effective_idx < 65536
+                        while arr.size <= effective_idx
                           arr << 0_i64
                         end
-                        arr[idx] = val
+                        arr[effective_idx] = val
                         if arr_t = array_types[arr_id]?
-                          while arr_t.size <= idx
+                          while arr_t.size <= effective_idx
                             arr_t << 2_u8
                           end
-                          arr_t[idx] = val_t
+                          arr_t[effective_idx] = val_t
                         end
                       end
                     elsif arr_id >= 0x00100000_i64
@@ -1237,16 +1239,24 @@ module Citrine
                   when 131 # StaticArrayGet
                     arr_id = regs[base_r]
                     idx = regs[base_r + 1].to_i
-                    regs[dst_r] = arrays[arr_id]?.try(&.[idx]?) || 0_i64
+                    if arr = arrays[arr_id]?
+                      effective_idx = idx < 0 ? (idx + arr.size) : idx
+                      regs[dst_r] = (effective_idx >= 0) ? (arr[effective_idx]? || 0_i64) : 0_i64
+                    else
+                      regs[dst_r] = 0_i64
+                    end
                   when 132 # StaticArraySet
                     arr_id = regs[base_r]
                     idx = regs[base_r + 1].to_i
                     val = regs[base_r + 2]
                     if arr = arrays[arr_id]?
-                      while arr.size <= idx
-                        arr << 0_i64
+                      effective_idx = idx < 0 ? (idx + arr.size) : idx
+                      if effective_idx >= 0 && effective_idx < 65536
+                        while arr.size <= effective_idx
+                          arr << 0_i64
+                        end
+                        arr[effective_idx] = val
                       end
-                      arr[idx] = val
                     end
                     regs[dst_r] = val
                   when 133 # StaticArraySize

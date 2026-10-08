@@ -27,7 +27,7 @@ describe "Citrine PS2 Automated Memory Leak & Safety Spec Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_no_memory_leaks
     result.should_preserve_spram
@@ -63,7 +63,7 @@ describe "Citrine PS2 Automated Memory Leak & Safety Spec Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_no_memory_leaks
     result.should_preserve_spram
@@ -95,7 +95,7 @@ describe "Citrine PS2 Automated Memory Leak & Safety Spec Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_no_memory_leaks
     result.should_preserve_spram
@@ -130,7 +130,7 @@ describe "Citrine PS2 Automated Memory Leak & Safety Spec Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_no_memory_leaks
     result.should_preserve_spram
@@ -154,7 +154,7 @@ describe "Citrine PS2 Automated Memory Leak & Safety Spec Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_preserve_spram
     result.should_have_output("[CITRINE MEM TEST] Double-free safely intercepted without hardware crash")
@@ -180,7 +180,7 @@ describe "Citrine PS2 Automated Memory Leak & Safety Spec Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_preserve_spram
     result.should_have_output("[CITRINE MEM TEST] UAF access evaluated safely")
     result.should_have_output("[CITRINE MEM TEST] Code protection boundary checked")

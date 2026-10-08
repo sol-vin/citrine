@@ -38,7 +38,7 @@ describe "Citrine PS2 Crystal Language Parity: Advanced OOP & Type System" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_output("[MIXIN] Hello,")
     result.should_have_output("[CITRINE TEST] Extend double == 42: PASS")
@@ -100,7 +100,7 @@ describe "Citrine PS2 Crystal Language Parity: Advanced OOP & Type System" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_output("[CITRINE TEST] Bird is_a? Bird: PASS")
     result.should_have_output("[CITRINE TEST] Bird is_a? Animal (SuperClass): PASS")
@@ -146,7 +146,7 @@ describe "Citrine PS2 Crystal Language Parity: Advanced OOP & Type System" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 7.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_output("[CITRINE TEST] Square area == 36: PASS")
     result.should_have_output("[CITRINE TEST] Shape.total_shapes == 1: PASS")

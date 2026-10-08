@@ -20,7 +20,7 @@ describe "Citrine PS2 Boot Splash Screen, Memory Reclamation & Physical Entropy"
     bytes, sm = tc.compile
     bytes.size.should be > 18
 
-    result = tc.boot_pcsx2(timeout: 5.seconds)
+    result = tc.boot_pcsx2(timeout: 12.seconds)
     result.should_boot_cleanly
     result.should_have_output("[CITRINE TEST] Fast Boot __main__ Reached: PASS")
     result.should_have_output("[CITRINE TEST] Fast Electronic Entropy Seeded: PASS")

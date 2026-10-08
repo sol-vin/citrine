@@ -113,6 +113,10 @@ module Citrine
           emitter.nop
           emitter.label("arr_get_ok")
           emitter.lw(T1, 0, A0) # size
+          emitter.bgez(A1, "arr_get_check_bounds")
+          emitter.nop
+          emitter.addu(A1, A1, T1) # negative index: A1 += size
+          emitter.label("arr_get_check_bounds")
           emitter.sltu(T2, A1, T1)
           emitter.bnez(T2, "arr_get_in_bounds")
           emitter.nop
@@ -132,9 +136,27 @@ module Citrine
           emitter.jr(RA)
           emitter.nop
           emitter.label("arr_set_ok")
+          emitter.lw(T1, 0, A0) # size
+          emitter.bgez(A1, "arr_set_check_cap")
+          emitter.nop
+          emitter.addu(A1, A1, T1) # negative index: A1 += size
+          emitter.label("arr_set_check_cap")
+          emitter.bltz(A1, "arr_set_done")
+          emitter.nop
+          emitter.lw(T2, 4, A0) # capacity
+          emitter.sltu(T3, A1, T2)
+          emitter.beqz(T3, "arr_set_done")
+          emitter.nop
+          emitter.sltu(T3, A1, T1) # A1 < size?
+          emitter.bnez(T3, "arr_set_store")
+          emitter.nop
+          emitter.addiu(T1, A1, 1)
+          emitter.sw(T1, 0, A0)
+          emitter.label("arr_set_store")
           emitter.sll(T0, A1, 2)
           emitter.addu(T0, A0, T0)
           emitter.sw(A2, 8, T0)
+          emitter.label("arr_set_done")
           emitter.move(V0, A2)
           emitter.jr(RA)
           emitter.nop
