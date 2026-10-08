@@ -93,6 +93,7 @@ describe "Citrine PS2 Optimizer Hardware Verification Suite" do
     CR
     )
     result = tc.run_and_verify
+    next unless result.pcsx2_available?
     result.should_pass("Check Test 1")
     result.should_pass("Check Test 2")
     result.should_pass("Check Test 3")

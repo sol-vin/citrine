@@ -13,6 +13,10 @@ module Citrine
       getter last_crash_pc : UInt32? = nil
       getter log_history : Array(String) = [] of String
 
+      def self.available? : Bool
+        new.find_pcsx2_executable != nil
+      end
+
       def initialize
         @pcsx2_path = find_pcsx2_executable
         @log_path = find_emulog_path

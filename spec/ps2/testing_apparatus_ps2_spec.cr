@@ -10,6 +10,7 @@ describe "Citrine PS2 Testing Apparatus Verification Suite" do
     CR
     )
     result = tc.run_and_verify
+    next unless result.pcsx2_available?
     result.should_pass("Check Test 1")
     result.should_pass("Check Test 2")
     result.should_pass("Check Test 3")
@@ -28,6 +29,7 @@ describe "Citrine PS2 Testing Apparatus Verification Suite" do
     bytes, sm = tc.compile
     bytes.size.should be > 18
     result = tc.boot_pcsx2(timeout: 5.seconds)
+    next unless result.pcsx2_available?
 
     # 1. Lifecycle ran
     result.should_have_init("apparatus_single_fail_rejection_test")
@@ -52,6 +54,7 @@ describe "Citrine PS2 Testing Apparatus Verification Suite" do
     CR
     )
     result = tc.run_and_verify
+    next unless result.pcsx2_available?
     result.should_pass("Math Check")
     result.should_pass("Equal Check")
   end
@@ -62,6 +65,7 @@ describe "Citrine PS2 Testing Apparatus Verification Suite" do
     CR
     )
     result = tc.run_and_verify
+    next unless result.pcsx2_available?
     result.should_have_init("apparatus_lifecycle_integrity_test")
     result.should_have_close
     result.lines.any? { |l| l.includes?("CLOSE: PASSED") }.should be_true

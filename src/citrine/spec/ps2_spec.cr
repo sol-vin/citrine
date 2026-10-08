@@ -511,6 +511,9 @@ end
 macro ps2_test(name, description = nil, &block)
   {% desc = description || name %}
   it {{desc}}, file: __FILE__, line: __LINE__ do
+    if !Citrine::Debugger::Pcsx2Bridge.available? && ENV["REQUIRE_PCSX2"]? != "1"
+      next
+    end
     __ps2_tc = Citrine::Spec::Ps2TestCase.new({{name}})
     __ps2_tc.auto_test_harness = true
     {% if block.args.size > 0 %}
