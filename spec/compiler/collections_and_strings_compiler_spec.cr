@@ -115,6 +115,6 @@ describe "Citrine Tier 1: Collections, Strings & Streams Compiler Suite" do
     native_ids.should contain(Citrine::NativeId::ArraySize)
     native_ids.should contain(Citrine::NativeId::MemoryIORewind)
     native_ids.should contain(Citrine::NativeId::MemoryIOToS)
-    native_ids.should contain(Citrine::NativeId::ArrayClear)
+    native_ids.should contain(Citrine::NativeId::MemoryIOClear)
   end
 end

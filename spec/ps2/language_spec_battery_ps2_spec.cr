@@ -369,13 +369,129 @@ describe "Citrine PS2 Crystal Language Specification: Unified Batched Hardware B
         end
       end
       Test.assert(fsm_state == 3 && ticks == 4, "S30: State Machine & Transitions")
+
+      # --- Section 31: Advanced String Operations (Prefix, Suffix, Strip, Concat) ---
+      s31_raw = "  Citrine PS2  "
+      s31_trimmed = s31_raw.strip
+      s31_has_prefix = s31_trimmed.starts_with?("Citrine")
+      s31_has_suffix = s31_trimmed.ends_with?("PS2")
+      s31_concat = s31_trimmed + "_Engine"
+      Test.assert(s31_trimmed == "Citrine PS2" && s31_has_prefix && s31_has_suffix && s31_concat == "Citrine PS2_Engine", "S31: Advanced String Operations")
+
+      # --- Section 32: Ring Buffer & Negative Indexing ---
+      s32_rb = [10, 20, 30]
+      s32_rb.push(40)
+      s32_last = s32_rb[-1]
+      s32_penultimate = s32_rb[-2]
+      s32_popped = s32_rb.pop
+      s32_new_last = s32_rb[-1]
+      Test.assert(s32_last == 40 && s32_penultimate == 30 && s32_popped == 40 && s32_new_last == 30 && s32_rb.size == 3, "S32: Ring Buffer & Negative Indexing")
+
+      # --- Section 33: Recursive Tree Traversal & Composite Objects ---
+      class S33Leaf
+        property value : Int32
+        def initialize(@value)
+        end
+        def compute
+          @value * 2
+        end
+      end
+      class S33Branch
+        property weight : Int32
+        property leaf : S33Leaf
+        def initialize(@weight, @leaf)
+        end
+        def total_weight
+          @weight + @leaf.compute
+        end
+      end
+      s33_leaf = S33Leaf.new(25)
+      s33_branch = S33Branch.new(100, s33_leaf)
+      Test.assert(s33_branch.total_weight == 150, "S33: Composite Object Graph")
+
+      # --- Section 34: Fixed-Point 2D Rotation Matrix ---
+      # 8.8 fixed-point arithmetic: 1.0 = 256
+      def s34_fp_mul(a, b)
+        (a * b) >> 8
+      end
+      def s34_rot_x(x, y, cos_val, sin_val)
+        s34_fp_mul(x, cos_val) - s34_fp_mul(y, sin_val)
+      end
+      def s34_rot_y(x, y, cos_val, sin_val)
+        s34_fp_mul(x, sin_val) + s34_fp_mul(y, cos_val)
+      end
+      s34_x = 50 << 8
+      s34_y = 0
+      # 90 degrees: cos = 0, sin = 256
+      s34_rx = s34_rot_x(s34_x, s34_y, 0, 256) >> 8
+      s34_ry = s34_rot_y(s34_x, s34_y, 0, 256) >> 8
+      Test.assert(s34_rx == 0 && s34_ry == 50, "S34: Fixed-Point Matrix Rotation")
+
+      # --- Section 35: Bitmask Flags & State Encodings ---
+      flag_collidable = 1 << 0
+      flag_renderable = 1 << 1
+      flag_invincible = 1 << 2
+      actor_flags = flag_collidable | flag_renderable
+      has_col = (actor_flags & flag_collidable) != 0
+      has_inv = (actor_flags & flag_invincible) != 0
+      actor_flags = actor_flags | flag_invincible
+      now_inv = (actor_flags & flag_invincible) != 0
+      Test.assert(has_col && !has_inv && now_inv, "S35: Bitmask Flags & Logic")
+
+      # --- Section 36: Associative Map Key-Value Emulation ---
+      class S36Map
+        property keys : Array(String)
+        property vals : Array(Int32)
+        def initialize
+          @keys = ["health", "mana"]
+          @vals = [100, 50]
+        end
+        def get(k)
+          idx = 0
+          ret = -1
+          while idx < @keys.size
+            if @keys[idx] == k
+              ret = @vals[idx]
+              break
+            end
+            idx += 1
+          end
+          ret
+        end
+        def set(k, v)
+          idx = 0
+          found = false
+          while idx < @keys.size
+            if @keys[idx] == k
+              @vals[idx] = v
+              found = true
+              break
+            end
+            idx += 1
+          end
+          if !found
+            @keys.push(k)
+            @vals.push(v)
+          end
+          v
+        end
+      end
+      s36_map = S36Map.new
+      s36_h = s36_map.get("health")
+      s36_m = s36_map.get("mana")
+      s36_map.set("health", 75)
+      s36_map.set("speed", 30)
+      s36_h_updated = s36_map.get("health")
+      s36_spd = s36_map.get("speed")
+      s36_missing = s36_map.get("defense")
+      Test.assert(s36_h == 100 && s36_m == 50 && s36_h_updated == 75 && s36_spd == 30 && s36_missing == -1, "S36: Associative Map Emulation")
     CR
     )
     result = tc.run_and_verify(timeout: 12.seconds)
     result.should_have_no_memory_leaks
     result.should_not_have_memory_faults
 
-    # Multi-step pass assertions: verify all 30 sections passed on console
+    # Multi-step pass assertions: verify all 36 sections passed on console
     result.should_pass(
       "S01: Arithmetic",
       "S02: Bitwise & Shifts",
@@ -406,7 +522,13 @@ describe "Citrine PS2 Crystal Language Specification: Unified Batched Hardware B
       "S27: Nested Ternary Logic",
       "S28: Bitfield Packing",
       "S29: Struct Immutability",
-      "S30: State Machine & Transitions"
+      "S30: State Machine & Transitions",
+      "S31: Advanced String Operations",
+      "S32: Ring Buffer & Negative Indexing",
+      "S33: Composite Object Graph",
+      "S34: Fixed-Point Matrix Rotation",
+      "S35: Bitmask Flags & Logic",
+      "S36: Associative Map Emulation"
     )
   end
 end

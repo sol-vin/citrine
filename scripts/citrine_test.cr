@@ -127,6 +127,9 @@ module CitrineTest
           "spec/compiler/oop_and_structs_compiler_spec.cr",
           "spec/compiler/concurrency_compiler_spec.cr",
           "spec/compiler/collections_and_strings_compiler_spec.cr",
+          "spec/compiler/memory_and_pointers_compiler_spec.cr",
+          "spec/compiler/math3d_and_graphics_compiler_spec.cr",
+          "spec/compiler/mips_native_dispatch_spec.cr",
         ].select { |p| File.exists?(p) }
       when :tier2
         [

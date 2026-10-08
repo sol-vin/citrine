@@ -172,8 +172,8 @@ module Citrine
         case name
         when "begin" then return NativeId::GLBegin
         when "end" then return NativeId::GLEnd
-        when "vertex" then return NativeId::GLVertex
-        when "color" then return NativeId::GLColor
+        when "vertex", "vertex3f", "vertex2f" then return NativeId::GLVertex
+        when "color", "color4f", "color3f" then return NativeId::GLColor
         when "tex_coord" then return NativeId::GLTexCoord
         when "push_matrix" then return NativeId::GLPushMatrix
         when "pop_matrix" then return NativeId::GLPopMatrix
