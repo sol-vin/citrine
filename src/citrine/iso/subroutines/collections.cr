@@ -21,6 +21,14 @@ module Citrine
           emitter.addiu(T1, T1, 15)
           emitter.andi(T1, T1, 0xFFF0)
           emitter.addu(T2, V0, T1)
+          # Heap Redzone Guard: ensure array allocation does not cross 0x00400000
+          emitter.lui(T3, 0x0040)
+          emitter.sltu(T3, T2, T3)
+          emitter.bnez(T3, "arr_alloc_in_bounds")
+          emitter.nop
+          emitter.move(A0, ZERO)
+          emitter.call("citrine_vm_panic")
+          emitter.label("arr_alloc_in_bounds")
           emitter.sw(T2, 0x8C, T0)
           emitter.sw(ZERO, 0, V0) # size = 0
           emitter.sw(A0, 4, V0)   # capacity = A0
@@ -38,6 +46,14 @@ module Citrine
           emitter.addiu(T1, T1, 15)
           emitter.andi(T1, T1, 0xFFF0)
           emitter.addu(T2, V0, T1)
+          # Heap Redzone Guard: ensure static array allocation does not cross 0x00400000
+          emitter.lui(T3, 0x0040)
+          emitter.sltu(T3, T2, T3)
+          emitter.bnez(T3, "sarr_alloc_in_bounds")
+          emitter.nop
+          emitter.move(A0, ZERO)
+          emitter.call("citrine_vm_panic")
+          emitter.label("sarr_alloc_in_bounds")
           emitter.sw(T2, 0x8C, T0)
           emitter.sw(A0, 0, V0) # size = A0
           emitter.sw(A0, 4, V0) # capacity = A0

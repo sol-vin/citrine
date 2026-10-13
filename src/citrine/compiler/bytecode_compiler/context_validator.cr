@@ -214,5 +214,21 @@ module Citrine
         # no extra constraints
       end
     end
+
+    private def is_struct_expression?(node : Crystal::ASTNode) : Bool
+      case node
+      when Crystal::Call
+        if node.name == "new" && (recv = node.obj)
+          name = recv.to_s
+          return true if @classes[name]?.try(&.is_struct) || @classes[name.split("::").last]?.try(&.is_struct)
+        end
+      when Crystal::Var
+        if vtype = @var_types[node.name]?
+          return true if @classes[vtype]?.try(&.is_struct) || @classes[vtype.split("::").last]?.try(&.is_struct)
+        end
+      end
+      false
+    end
   end
 end
+

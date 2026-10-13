@@ -2421,6 +2421,16 @@ static void native_dispatch(CitrineVM* vm, uint16_t native_id, Value* args, uint
             out_ret->type = VAL_NIL;
             break;
         }
+        case 182: { // MemoryStats()
+            out_ret->type = VAL_INT32;
+            out_ret->as.i = (int32_t)(vm->context_arena.offset + vm->frame_arena.offset);
+            break;
+        }
+        case 185: { // GCCycle()
+            out_ret->type = VAL_INT32;
+            out_ret->as.i = 0;
+            break;
+        }
 
         case 230: { // DrawRectangleRotated(x, y, w, h, angle, ox, oy, color)
             Citrine_DrawRectangleRotated(

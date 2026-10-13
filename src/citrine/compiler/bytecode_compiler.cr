@@ -339,6 +339,9 @@ module Citrine
 
       when Crystal::Assign
         if node.target.is_a?(Crystal::InstanceVar) && (cls = @current_class) && (self_reg = @current_self_reg)
+          if !cls.is_struct && is_struct_expression?(node.value)
+            compile_error("Safety Error: Value struct '#{node.value}' cannot escape to persistent class field '#{node.target}'. Allocate as a class or convert to heap object.", node)
+          end
           val_reg = compile_node(node.value, allocator, instructions, fn)
           f_idx = cls.field_index(node.target.to_s)
           f_reg = allocator.alloc_temp
@@ -357,6 +360,9 @@ module Citrine
         end
 
         if node.target.is_a?(Crystal::ClassVar)
+          if is_struct_expression?(node.value)
+            compile_error("Safety Error: Value struct '#{node.value}' cannot escape to persistent class variable '#{node.target}'. Allocate as a class or convert to heap object.", node)
+          end
           val_reg = compile_node(node.value, allocator, instructions, fn)
           cvar_name = node.target.to_s
           scope = @current_class.try(&.name) || fn.name.split("#").first.split(".").first

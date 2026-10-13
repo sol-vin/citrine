@@ -136,6 +136,58 @@ module Citrine
         return dest
       end
 
+      # Pointer(T).open(size) do |ptr| ... end - block-scoped automatic memory reclamation (RAII)
+      if obj_str.starts_with?("Pointer") && node.name == "open" && (block = node.block)
+        size_reg = if node.args.size > 0
+                     compile_node(node.args[0], allocator, instructions, fn)
+                   else
+                     r = allocator.alloc_temp
+                     instructions << Instruction.encode_load_int(r, 1_u16)
+                     r
+                   end
+        ptr_reg = allocator.alloc_temp
+        instr_val = Instruction.call_native_raw(ptr_reg, size_reg, NativeId::PointerMalloc)
+        instructions << Instruction.new(instr_val)
+        allocator.free_temp(size_reg)
+
+        old_local_reg : UInt8? = nil
+        old_var_type : String? = nil
+        block_arg_name : String? = nil
+
+        if block_arg = block.args.first?
+          block_arg_name = block_arg.name
+          old_local_reg = allocator.local_map[block_arg.name]?
+          old_var_type = @var_types[block_arg.name]?
+          allocator.local_map[block_arg.name] = ptr_reg
+          @var_types[block_arg.name] = "Pointer"
+        end
+
+        body_dest = compile_node(block.body, allocator, instructions, fn)
+        instructions << Instruction.encode_abc(Opcode::Move, dest, body_dest, 0_u8) if body_dest
+
+        if b_name = block_arg_name
+          if orig_r = old_local_reg
+            allocator.local_map[b_name] = orig_r
+          else
+            allocator.local_map.delete(b_name)
+          end
+          if orig_t = old_var_type
+            @var_types[b_name] = orig_t
+          else
+            @var_types.delete(b_name)
+          end
+        end
+
+        # Automatic deallocation at block exit
+        seq_base = allocator.alloc_contiguous(1)
+        instructions << Instruction.encode_abc(Opcode::Move, seq_base, ptr_reg, 0_u8)
+        free_val = Instruction.call_native_raw(allocator.alloc_temp, seq_base, NativeId::PointerFree)
+        instructions << Instruction.new(free_val)
+        allocator.free_temp(seq_base)
+        allocator.free_temp(ptr_reg)
+        return dest
+      end
+
       # Pointer(T).new(addr)
       if obj_str.starts_with?("Pointer") && node.name == "new" && node.args.size > 0
         addr_reg = compile_node(node.args[0], allocator, instructions, fn)

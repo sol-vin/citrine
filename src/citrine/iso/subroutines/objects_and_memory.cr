@@ -22,6 +22,14 @@ module Citrine
           emitter.addiu(T1, T1, 15)
           emitter.andi(T1, T1, 0xFFF0) # 16-byte align
           emitter.addu(T2, V0, T1)
+          # Heap Redzone Guard: ensure allocation does not cross into scratch pool (0x00400000)
+          emitter.lui(T3, 0x0040)
+          emitter.sltu(T3, T2, T3)
+          emitter.bnez(T3, "obj_alloc_in_bounds")
+          emitter.nop
+          emitter.move(A0, ZERO)
+          emitter.call("citrine_vm_panic")
+          emitter.label("obj_alloc_in_bounds")
           emitter.sw(T2, 0x8C, T0) # store updated heap_ptr
           # zero allocated memory
           emitter.move(T3, V0)
@@ -75,6 +83,14 @@ module Citrine
           emitter.lui(V0, 0x0022)
           emitter.label("struct_heap_ok")
           emitter.addiu(T1, V0, 32)
+          # Heap Redzone Guard: ensure struct copy does not cross 0x00400000
+          emitter.lui(T2, 0x0040)
+          emitter.sltu(T2, T1, T2)
+          emitter.bnez(T2, "struct_alloc_in_bounds")
+          emitter.nop
+          emitter.move(A0, ZERO)
+          emitter.call("citrine_vm_panic")
+          emitter.label("struct_alloc_in_bounds")
           emitter.sw(T1, 0x8C, T0)
           8.times do |i|
             emitter.lw(T1, i * 4, A0)

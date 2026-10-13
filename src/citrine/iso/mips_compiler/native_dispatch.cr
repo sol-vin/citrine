@@ -310,6 +310,16 @@ module Citrine
           emitter.lw(A0, (base * 4), FP) # element count
           emitter.sll(A0, A0, 2)         # bytes = count * 4
           emitter.lui(T0, 0x7000)
+          # Free-list recycling check: check bucket at 0x700000B0
+          emitter.lw(V0, 0xB0, T0)
+          emitter.beqz(V0, "malloc_from_heap_#{fn_idx}_#{pc}")
+          emitter.nop
+          # Pop from free-list
+          emitter.lw(T1, 0, V0)    # next = head->next
+          emitter.sw(T1, 0xB0, T0) # head = next
+          emitter.jump("malloc_done_#{fn_idx}_#{pc}")
+          emitter.nop
+          emitter.label("malloc_from_heap_#{fn_idx}_#{pc}")
           emitter.lw(V0, 0x8C, T0)       # current heap_ptr
           emitter.bnez(V0, "malloc_heap_ok_#{fn_idx}_#{pc}")
           emitter.nop
@@ -318,8 +328,19 @@ module Citrine
           emitter.addiu(T1, A0, 15)
           emitter.andi(T1, T1, 0xFFF0)   # 16-byte align
           emitter.addu(T2, V0, T1)
+          # Heap Redzone Guard: ensure allocation does not cross 0x00400000
+          emitter.lui(T3, 0x0040)
+          emitter.sltu(T3, T2, T3)
+          emitter.bnez(T3, "malloc_in_bounds_#{fn_idx}_#{pc}")
+          emitter.nop
+          emitter.move(A0, ZERO)
+          emitter.call("citrine_vm_panic")
+          emitter.label("malloc_in_bounds_#{fn_idx}_#{pc}")
           emitter.sw(T2, 0x8C, T0)       # store updated heap_ptr
+          emitter.label("malloc_done_#{fn_idx}_#{pc}")
           emitter.move(T3, V0)
+          emitter.addiu(T1, A0, 15)
+          emitter.andi(T1, T1, 0xFFF0)
           emitter.label("malloc_zero_loop_#{fn_idx}_#{pc}")
           emitter.beqz(T1, "malloc_zero_done_#{fn_idx}_#{pc}")
           emitter.nop
@@ -343,7 +364,13 @@ module Citrine
           emitter.lw(T2, ((base + 2) * 4), FP) # val
           emitter.sll(T1, T1, 2)
           emitter.addu(T0, T0, T1)
-          emitter.sw(T2, 0, T0)                # store word
+          # Memory Safety Guard: prevent writes to NULL (0) and read-only code space (< 0x00200000)
+          emitter.lui(T3, 0x0020)
+          emitter.sltu(T3, T0, T3)
+          emitter.bnez(T3, "ptr_set_guard_skip_#{fn_idx}_#{pc}")
+          emitter.nop
+          emitter.sw(T2, 0, T0)                # store word safely
+          emitter.label("ptr_set_guard_skip_#{fn_idx}_#{pc}")
           emitter.sw(T2, (dst * 4), FP)
         when 163 # PointerOffset: dest = ptr + idx * 4
           emitter.lw(T0, (base * 4), FP)       # ptr
@@ -371,6 +398,17 @@ module Citrine
           emitter.lw(V0, 0, T0)
           emitter.sw(V0, (dst * 4), FP)
         when 168 # PointerFree
+          emitter.lw(T0, (base * 4), FP) # ptr to free
+          # Free-list recycling: if valid pointer >= 0x00200000, link into SPRAM 0x700000B0
+          emitter.lui(T1, 0x0020)
+          emitter.sltu(T2, T0, T1)
+          emitter.bnez(T2, "ptr_free_done_#{fn_idx}_#{pc}")
+          emitter.nop
+          emitter.lui(T1, 0x7000)
+          emitter.lw(T2, 0xB0, T1) # current free-list head
+          emitter.sw(T2, 0, T0)    # ptr->next = current_head
+          emitter.sw(T0, 0xB0, T1) # free-list head = ptr
+          emitter.label("ptr_free_done_#{fn_idx}_#{pc}")
           emitter.sw(ZERO, (dst * 4), FP)
         when 186 # StringStrip(str)
           emitter.lw(A0, (base * 4), FP)
@@ -443,8 +481,35 @@ module Citrine
         when 99 # Panic(msg)
           emitter.lw(A0, (base * 4), FP)
           emitter.call("citrine_vm_panic")
-        when 180, 181 # ContextSet, ContextClear
+        when 180 # ContextSet
+          # Snapshot current heap_ptr (0x7000008C) into 0x70000098 (context_heap_base)
+          emitter.lui(T0, 0x7000)
+          emitter.lw(T1, 0x8C, T0)
+          emitter.sw(T1, 0x98, T0)
           emitter.ori(V0, ZERO, 1)
+          emitter.sw(V0, (dst * 4), FP)
+        when 181 # ContextClear
+          # Restore heap_ptr (0x7000008C) from 0x70000098 (context_heap_base)
+          emitter.lui(T0, 0x7000)
+          emitter.lw(T1, 0x98, T0)
+          emitter.bnez(T1, "ctx_clear_restore_#{fn_idx}_#{pc}")
+          emitter.nop
+          emitter.lui(T1, 0x0022) # fallback default base if not set
+          emitter.label("ctx_clear_restore_#{fn_idx}_#{pc}")
+          emitter.sw(T1, 0x8C, T0)
+          # Reset free-list head at 0x700000B0
+          emitter.sw(ZERO, 0xB0, T0)
+          emitter.ori(V0, ZERO, 1)
+          emitter.sw(V0, (dst * 4), FP)
+        when 182 # MemoryStats
+          # Return active heap bytes (current heap_ptr - base 0x00220000)
+          emitter.lui(T0, 0x7000)
+          emitter.lw(T1, 0x8C, T0)
+          emitter.lui(T2, 0x0022)
+          emitter.subu(V0, T1, T2)
+          emitter.sw(V0, (dst * 4), FP)
+        when 185 # GCCycle
+          emitter.move(V0, ZERO)
           emitter.sw(V0, (dst * 4), FP)
         when 170 # TypeIsA
           emitter.lw(T0, (base * 4), FP)       # obj_reg

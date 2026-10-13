@@ -1,6 +1,18 @@
 # Citrine Core Stubs and Native API Definitions for PlayStation 2 EE Runtime
 # Modular engine abstraction - require "citrine"
 
+struct Pointer(T)
+  # Allocates memory block, yields to block, and automatically deallocates upon block exit (RAII)
+  def self.open(size : Int, &block : Pointer(T) ->)
+    ptr = Pointer(T).malloc(size)
+    begin
+      yield ptr
+    ensure
+      ptr.free
+    end
+  end
+end
+
 # 2D mathematical vector with single-precision floating point coordinates.
 struct Vector2
   # Horizontal coordinate.
