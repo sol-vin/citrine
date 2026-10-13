@@ -1,6 +1,8 @@
 require "./citrine/version"
 require "./citrine/core/dma"
 require "./citrine/dsl/dma"
+require "./citrine/core/regression"
+require "./citrine/dsl/regression"
 require "./citrine/cli/compile_command"
 require "./citrine/cli/run_command"
 require "./citrine/cli/disasm_command"
@@ -99,7 +101,7 @@ module Citrine
       run [file.cr | file.cbc | iso]    Compile, build ISO, and boot in PCSX2
       debug <file.cbc> [--port <port>]  Launch radare2 debugging session on PCSX2 GDB stub
       mem-check [file] [--gdb <port>]   Audit memory leaks, canary integrity, and safety
-      test [spec_path]                  Run PS2 automated test suite & PCSX2 hardware specs
+      test [spec_path | --headless]     Run PS2 automated test suite & headless PCSX2 regression battery
       import <type> <file> [options]    Import & optimize media via Fluorite (video, audio, textures)
       disasm <file.cbc>                 Disassemble bytecode and inspect symbols
       monitor [--port <port>]           Connect live telemetry monitor to PS2 / PCSX2
@@ -112,6 +114,7 @@ module Citrine
       citrine new my_game
       citrine run examples/01_hello_world/main.cr --watch
       citrine test spec/ps2/
+      citrine test --headless
       citrine import video cutscene.mp4 --fps 15 --dvd-track
       citrine debug build/game.cbc
       citrine compile src/main.cr -o build/game.cbc
