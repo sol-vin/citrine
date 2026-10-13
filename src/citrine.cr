@@ -1,4 +1,6 @@
 require "./citrine/version"
+require "./citrine/core/dma"
+require "./citrine/dsl/dma"
 require "./citrine/cli/compile_command"
 require "./citrine/cli/run_command"
 require "./citrine/cli/disasm_command"
