@@ -164,6 +164,7 @@ module Citrine
         debugger_gui : Bool = false,
         gdb_port : Int32? = nil,
         timeout : Time::Span? = nil,
+        early_exit_predicate : Proc(String, Bool)? = nil,
         &block : String -> Nil
       ) : Process::Status?
         bin = @pcsx2_path
@@ -192,6 +193,7 @@ module Citrine
           args << "-gdb" << port.to_s
         end
 
+        args << "--"
         args << File.expand_path(iso_path)
 
         home = Path.home
@@ -226,6 +228,7 @@ module Citrine
           error: Process::Redirect::Pipe
         )
         @is_running = true
+        early_exit_triggered = false
 
         # Start background fibers to capture stdout and stderr directly
         spawn do
@@ -236,6 +239,9 @@ module Citrine
                 @log_history << line_clean
                 block.call(line_clean)
                 check_for_faults(line_clean)
+                if early_exit_predicate.try(&.call(line_clean))
+                  early_exit_triggered = true
+                end
               end
             end
           end
@@ -250,6 +256,9 @@ module Citrine
                 @log_history << line_clean
                 block.call(line_clean)
                 check_for_faults(line_clean)
+                if early_exit_predicate.try(&.call(line_clean))
+                  early_exit_triggered = true
+                end
               end
             end
           end
@@ -277,6 +286,9 @@ module Citrine
                         @log_history << line_clean
                         block.call(line_clean)
                         check_for_faults(line_clean)
+                        if early_exit_predicate.try(&.call(line_clean))
+                          early_exit_triggered = true
+                        end
                       end
                     end
                     current_offset = f.pos
@@ -295,7 +307,7 @@ module Citrine
         if timeout
           # Run with supervisor timeout
           elapsed = 0.0
-          interval = 0.1
+          interval = 0.05
           while elapsed < timeout.total_seconds
             sleep interval.seconds
             elapsed += interval
@@ -303,6 +315,13 @@ module Citrine
             # Check if process terminated on its own
             if process.terminated?
               status = process.wait
+              break
+            end
+
+            # Check if early exit condition was triggered
+            if early_exit_triggered
+              kill_process_tree(process)
+              status = process.wait rescue nil
               break
             end
 

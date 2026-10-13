@@ -461,8 +461,9 @@ module Citrine
         temp_cue = temp_iso.sub(/\.iso$/i, ".cue")
 
         nogui_mode = @screenshot_frame.nil?
+        early_exit = ->(line : String) { line.includes?("[CITRINE TEST] CLOSE") }
         begin
-          status = bridge.spawn_pcsx2(target_image, batch: true, nogui: nogui_mode, gdb_port: active_port, timeout: timeout) do |line|
+          status = bridge.spawn_pcsx2(target_image, batch: true, nogui: nogui_mode, gdb_port: active_port, timeout: timeout, early_exit_predicate: early_exit) do |line|
             lines << line
             if rep = Debugger::CrashAnalyzer.analyze(line, sm)
               panic_found = true
