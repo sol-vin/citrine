@@ -1,5 +1,7 @@
 require "io/memory"
 require "./gs_config"
+require "../core/dma"
+require "../dsl/dma"
 
 module Citrine
   module GS
@@ -126,66 +128,32 @@ module Citrine
         '~' => [0x08, 0x04, 0x08, 0x10, 0x08]
       }
 
+      # Builds a custom DMA packet using the Two-Tier Declarative `Citrine::DSL::DMA` builder.
+      def self.build(
+        channel : Citrine::Core::DMA::Channel = Citrine::Core::DMA::Channel::GIF,
+        capacity_qwc : Int32 = 4096,
+        &block : Citrine::DSL::DMA::PacketBuilder ->
+      ) : Bytes
+        Citrine::DSL::DMA.packet(channel, capacity_qwc, &block)
+      end
+
+      # Builds a single-batch GIF A+D (`0x0E`) drawing packet using the declarative `AdBuilder`.
+      def self.draw(capacity_qwc : Int32 = 4096, eop : Bool = true, &block : Citrine::DSL::DMA::AdBuilder ->) : Bytes
+        Citrine::DSL::DMA.draw(capacity_qwc, eop, &block)
+      end
+
+      # Builds a Source-Chain DMA packet (`MOD = Chain`) using the declarative `PacketBuilder`.
+      def self.chain(
+        channel : Citrine::Core::DMA::Channel = Citrine::Core::DMA::Channel::GIF,
+        capacity_qwc : Int32 = 4096,
+        auto_terminate : Bool = true,
+        &block : Citrine::DSL::DMA::PacketBuilder ->
+      ) : Citrine::Core::DMA::PacketBuffer
+        Citrine::DSL::DMA.chain(channel, capacity_qwc, auto_terminate, &block)
+      end
+
       def self.build_env_packet : Bytes
-        mem = IO::Memory.new(224)
-        # GIFTag: NLOOP=13, EOP=1, PRE=0, PRIM=0, FLG=PACKED(0), NREG=1, REGS=0x0E (A+D)
-        mem.write_bytes(0x100000000000800d_u64, IO::ByteFormat::LittleEndian)
-        mem.write_bytes(0x0e_u64, IO::ByteFormat::LittleEndian)
-
-        # 1. FRAME_1 (0x4C): FBP=0, FBW=10 (640), PSM=0 (PSMCT32), FBMSK=0
-        mem.write_bytes(0x000a0000_u64, IO::ByteFormat::LittleEndian)
-        mem.write_bytes(0x4c_u64, IO::ByteFormat::LittleEndian)
-
-        # 2. FRAME_2 (0x4D): FBP=0, FBW=10 (640), PSM=0 (PSMCT32), FBMSK=0
-        mem.write_bytes(0x000a0000_u64, IO::ByteFormat::LittleEndian)
-        mem.write_bytes(0x4d_u64, IO::ByteFormat::LittleEndian)
-
-        # 3. ZBUF_1 (0x4E): ZBP=140, PSM=0, ZMSK=1 (Mask Z writes)
-        mem.write_bytes(0x000000010000008c_u64, IO::ByteFormat::LittleEndian)
-        mem.write_bytes(0x4e_u64, IO::ByteFormat::LittleEndian)
-
-        # 4. ZBUF_2 (0x4F): ZBP=140, PSM=0, ZMSK=1 (Mask Z writes)
-        mem.write_bytes(0x000000010000008c_u64, IO::ByteFormat::LittleEndian)
-        mem.write_bytes(0x4f_u64, IO::ByteFormat::LittleEndian)
-
-        # 5. XYOFFSET_1 (0x18): OFX=0, OFY=0 (Direct pixel coordinate space)
-        mem.write_bytes(0_u64, IO::ByteFormat::LittleEndian)
-        mem.write_bytes(0x18_u64, IO::ByteFormat::LittleEndian)
-
-        # 6. XYOFFSET_2 (0x19): OFX=0, OFY=0
-        mem.write_bytes(0_u64, IO::ByteFormat::LittleEndian)
-        mem.write_bytes(0x19_u64, IO::ByteFormat::LittleEndian)
-
-        # 7. SCISSOR_1 (0x40): X0=0, X1=639, Y0=0, Y1=447
-        sciss = (447_u64 << 48) | (639_u64 << 16)
-        mem.write_bytes(sciss, IO::ByteFormat::LittleEndian)
-        mem.write_bytes(0x40_u64, IO::ByteFormat::LittleEndian)
-
-        # 8. SCISSOR_2 (0x41)
-        mem.write_bytes(sciss, IO::ByteFormat::LittleEndian)
-        mem.write_bytes(0x41_u64, IO::ByteFormat::LittleEndian)
-
-        # 9. PRMODECONT (0x1A): 1 (Use attributes from PRIM register)
-        mem.write_bytes(1_u64, IO::ByteFormat::LittleEndian)
-        mem.write_bytes(0x1a_u64, IO::ByteFormat::LittleEndian)
-
-        # 10. COLCLAMP (0x46): 1
-        mem.write_bytes(1_u64, IO::ByteFormat::LittleEndian)
-        mem.write_bytes(0x46_u64, IO::ByteFormat::LittleEndian)
-
-        # 11. DTHE (0x45): 0
-        mem.write_bytes(0_u64, IO::ByteFormat::LittleEndian)
-        mem.write_bytes(0x45_u64, IO::ByteFormat::LittleEndian)
-
-        # 12. TEST_1 (0x47): ZTE=1, ZTST=1 (ALLPASS - unconditional pass)
-        mem.write_bytes(0x00030000_u64, IO::ByteFormat::LittleEndian)
-        mem.write_bytes(0x47_u64, IO::ByteFormat::LittleEndian)
-
-        # 13. TEST_2 (0x48): ZTE=1, ZTST=1 (ALLPASS)
-        mem.write_bytes(0x00030000_u64, IO::ByteFormat::LittleEndian)
-        mem.write_bytes(0x48_u64, IO::ByteFormat::LittleEndian)
-
-        mem.to_slice
+        Citrine::DSL::DMA.env_packet
       end
 
       def self.build_draw_packet(commands : Array(DrawCommand)) : Bytes

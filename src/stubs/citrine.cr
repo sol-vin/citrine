@@ -1331,6 +1331,7 @@ require "./citrine/hardware/iop"
 require "./citrine/hardware/vu0"
 require "./citrine/hardware/virtual_pad"
 require "./citrine/hardware/gif"
+require "./citrine/hardware/dma"
 require "./citrine/audio"
 require "./citrine/rng"
 
