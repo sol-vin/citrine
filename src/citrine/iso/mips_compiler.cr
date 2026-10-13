@@ -52,7 +52,7 @@ module Citrine
       def self.compile(
         cbc_bytes : Bytes,
         emitter : MipsEmitter,
-        rodata : RodataResult
+        rodata : RodataResult,
       ) : MipsCompiler?
         compiler = new
         compiler.load_cbc(cbc_bytes)
@@ -66,7 +66,7 @@ module Citrine
         return unless magic == "CBC1" || magic == "CBC2"
 
         io = IO::Memory.new(bytes)
-        io.read_string(4) # magic
+        io.read_string(4)                                   # magic
         io.read_bytes(UInt16, IO::ByteFormat::LittleEndian) # version
         num_fns = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
         num_consts = io.read_bytes(UInt32, IO::ByteFormat::LittleEndian)
@@ -155,12 +155,11 @@ module Citrine
         fn_idx : Int32,
         fn : FunctionMeta,
         emitter : MipsEmitter,
-        rodata : RodataResult
+        rodata : RodataResult,
       )
         emitter.label("fn_#{fn_idx}")
         emitter.addiu(SP, SP, -32)
         emitter.sw(RA, 28, SP)
-
 
         instr_slice = @raw_instructions[fn.offset, fn.count]
 
@@ -202,14 +201,13 @@ module Citrine
         emitter.nop
       end
 
-
       private def emit_instruction(
         fn_idx : Int32,
         pc : Int32,
         instr : Instruction,
         fn : FunctionMeta,
         emitter : MipsEmitter,
-        rodata : RodataResult
+        rodata : RodataResult,
       )
         op = instr.opcode
         dst = instr.dst
@@ -230,11 +228,9 @@ module Citrine
           else
             emitter.nop
           end
-
         when Opcode::Move
           emitter.lw(T0, (a.to_i32 * 4), FP)
           emitter.sw(T0, (dst.to_i32 * 4), FP)
-
         when Opcode::LoadImm
           case subop
           when 0 # Nil
@@ -260,7 +256,6 @@ module Citrine
             emitter.li(T0, instr.imm16.to_i32)
             emitter.sw(T0, (dst.to_i32 * 4), FP)
           end
-
         when Opcode::LoadConst
           const_idx = instr.imm16.to_i32
           if const_idx >= 0 && const_idx < @constants.size
@@ -276,26 +271,22 @@ module Citrine
           else
             emitter.sw(ZERO, (dst.to_i32 * 4), FP)
           end
-
         when Opcode::Add
           emitter.lw(T0, (a.to_i32 * 4), FP)
           emitter.lw(T1, (b.to_i32 * 4), FP)
           emitter.addu(T2, T0, T1)
           emitter.sw(T2, (dst.to_i32 * 4), FP)
-
         when Opcode::Sub
           emitter.lw(T0, (a.to_i32 * 4), FP)
           emitter.lw(T1, (b.to_i32 * 4), FP)
           emitter.subu(T2, T0, T1)
           emitter.sw(T2, (dst.to_i32 * 4), FP)
-
         when Opcode::Mul
           emitter.lw(T0, (a.to_i32 * 4), FP)
           emitter.lw(T1, (b.to_i32 * 4), FP)
           emitter.mult(T0, T1)
           emitter.mflo(T2)
           emitter.sw(T2, (dst.to_i32 * 4), FP)
-
         when Opcode::DivMod
           emitter.lw(T0, (a.to_i32 * 4), FP)
           emitter.lw(T1, (b.to_i32 * 4), FP)
@@ -311,7 +302,6 @@ module Citrine
             emitter.mfhi(T2)
           end
           emitter.sw(T2, (dst.to_i32 * 4), FP)
-
         when Opcode::Bitwise
           emitter.lw(T0, (a.to_i32 * 4), FP)
           emitter.lw(T1, (b.to_i32 * 4), FP)
@@ -328,7 +318,6 @@ module Citrine
             emitter.and_(T2, T0, T1)
           end
           emitter.sw(T2, (dst.to_i32 * 4), FP)
-
         when Opcode::Shift
           emitter.lw(T0, (a.to_i32 * 4), FP)
           emitter.lw(T1, (b.to_i32 * 4), FP)
@@ -343,7 +332,6 @@ module Citrine
             emitter.sllv(T2, T0, T1)
           end
           emitter.sw(T2, (dst.to_i32 * 4), FP)
-
         when Opcode::Compare
           emitter.lw(T0, (a.to_i32 * 4), FP)
           emitter.lw(T1, (b.to_i32 * 4), FP)
@@ -412,12 +400,10 @@ module Citrine
             emitter.slt(T2, T0, T1)
           end
           emitter.sw(T2, (dst.to_i32 * 4), FP)
-
         when Opcode::Jump
           target_pc = pc + 1 + instr.jump_offset24
           emitter.jump("fn_#{fn_idx}_pc_#{target_pc}")
           emitter.nop
-
         when Opcode::BranchZ
           target_pc = pc + 1 + instr.branch_offset
           emitter.lw(T0, (dst.to_i32 * 4), FP)
@@ -427,7 +413,6 @@ module Citrine
             emitter.beqz(T0, "fn_#{fn_idx}_pc_#{target_pc}")
           end
           emitter.nop
-
         when Opcode::BranchCmp
           target_pc = pc + 1 + instr.offset8.to_i32
           emitter.lw(T0, (dst.to_i32 * 4), FP)
@@ -453,7 +438,6 @@ module Citrine
             emitter.beq(T0, T1, "fn_#{fn_idx}_pc_#{target_pc}")
           end
           emitter.nop
-
         when Opcode::Call
           target_fn = instr.imm16.to_i32
           target_argc = (target_fn >= 0 && target_fn < @fns.size) ? @fns[target_fn].argc.to_i32 : 0
@@ -483,17 +467,14 @@ module Citrine
 
           # Store return value (V0) to caller's destination register
           emitter.sw(V0, (dst.to_i32 * 4), FP)
-
         when Opcode::Return
           emitter.lw(V0, (dst.to_i32 * 4), FP)
           emitter.lw(RA, 28, SP)
           emitter.addiu(SP, SP, 32)
           emitter.jr(RA)
           emitter.nop
-
         when Opcode::CallNative
           emit_native_call(fn_idx, pc, instr, emitter)
-
         when Opcode::FiberOp
           case subop
           when 0 # Spawn
@@ -507,11 +488,9 @@ module Citrine
           else
             emitter.nop
           end
-
         when Opcode::FloatAlu
           emitter.lw(T0, (a.to_i32 * 4), FP)
           emitter.sw(T0, (dst.to_i32 * 4), FP)
-
         else
           emitter.nop
         end
@@ -521,7 +500,7 @@ module Citrine
         fn_idx : Int32,
         pc : Int32,
         instr : Instruction,
-        emitter : MipsEmitter
+        emitter : MipsEmitter,
       )
         dst = instr.dst.to_i32
         base = instr.a.to_i32
@@ -540,4 +519,3 @@ module Citrine
 end
 
 require "./mips_compiler/native_dispatch"
-

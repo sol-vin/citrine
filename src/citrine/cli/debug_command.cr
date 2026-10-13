@@ -154,7 +154,6 @@ module Citrine
           puts "[Citrine Debugger] Packaging bootable ISO: #{iso_path}..."
           IsoBuilder.build(iso_path, cbc_bytes)
           return {iso_path, source_map}
-
         elsif resolved.ends_with?(".cbc")
           cbc_bytes = File.read(resolved).to_slice
           sym_path = resolved.gsub(/\.cbc$/, ".cbcsym")
@@ -165,7 +164,6 @@ module Citrine
           iso_path = resolved.gsub(/\.cbc$/, ".iso")
           IsoBuilder.build(iso_path, cbc_bytes)
           return {iso_path, source_map}
-
         else
           # Assume ISO
           sym_path = resolved.gsub(/\.iso$/, ".cbcsym")

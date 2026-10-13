@@ -7,21 +7,21 @@ require "../core/dma"
 module Citrine
   module DSL
     module DMA
-      alias Channel        = Citrine::Core::DMA::Channel
-      alias Direction      = Citrine::Core::DMA::Direction
-      alias TransferMode   = Citrine::Core::DMA::TransferMode
-      alias DmaTagId       = Citrine::Core::DMA::DmaTagId
-      alias GifFormat      = Citrine::Core::DMA::GifFormat
-      alias GifReg         = Citrine::Core::DMA::GifReg
-      alias GsReg          = Citrine::Core::DMA::GsReg
-      alias Primitive      = Citrine::Core::DMA::Primitive
-      alias PixelFormat    = Citrine::Core::DMA::PixelFormat
-      alias Quadword       = Citrine::Core::DMA::Quadword
+      alias Channel = Citrine::Core::DMA::Channel
+      alias Direction = Citrine::Core::DMA::Direction
+      alias TransferMode = Citrine::Core::DMA::TransferMode
+      alias DmaTagId = Citrine::Core::DMA::DmaTagId
+      alias GifFormat = Citrine::Core::DMA::GifFormat
+      alias GifReg = Citrine::Core::DMA::GifReg
+      alias GsReg = Citrine::Core::DMA::GsReg
+      alias Primitive = Citrine::Core::DMA::Primitive
+      alias PixelFormat = Citrine::Core::DMA::PixelFormat
+      alias Quadword = Citrine::Core::DMA::Quadword
       alias ChannelControl = Citrine::Core::DMA::ChannelControl
-      alias DmaTag         = Citrine::Core::DMA::DmaTag
-      alias GifTag         = Citrine::Core::DMA::GifTag
-      alias GsEncoder      = Citrine::Core::DMA::GsEncoder
-      alias PacketBuffer   = Citrine::Core::DMA::PacketBuffer
+      alias DmaTag = Citrine::Core::DMA::DmaTag
+      alias GifTag = Citrine::Core::DMA::GifTag
+      alias GsEncoder = Citrine::Core::DMA::GsEncoder
+      alias PacketBuffer = Citrine::Core::DMA::PacketBuffer
 
       # =========================================================================
       # Declarative GIF A+D & Primitive Stream Receiver (`AdBuilder`)
@@ -58,7 +58,7 @@ module Citrine
           antialias : Bool = false,
           use_uv : Bool = false,
           context : Int = 0,
-          fix : Bool = false
+          fix : Bool = false,
         ) : self
           p_enum = parse_primitive(type)
           encoded = GsEncoder.encode_prim(
@@ -125,7 +125,7 @@ module Citrine
           width : Int32 = 640,
           psm : PixelFormat = PixelFormat::PSMCT32,
           fbmsk : UInt32 = 0_u32,
-          context : Int = 0
+          context : Int = 0,
         ) : self
           target = context == 1 ? GsReg::Frame_2 : GsReg::Frame_1
           @buffer.emit_ad(target, GsEncoder.encode_frame(fbp, width, psm, fbmsk))
@@ -137,7 +137,7 @@ module Citrine
           zbp : UInt32 = 140_u32,
           psm : PixelFormat = PixelFormat::PSMZ32,
           zmsk : Bool = false,
-          context : Int = 0
+          context : Int = 0,
         ) : self
           target = context == 1 ? GsReg::Zbuf_2 : GsReg::Zbuf_1
           @buffer.emit_ad(target, GsEncoder.encode_zbuf(zbp, psm, zmsk))
@@ -168,7 +168,7 @@ module Citrine
           datm : UInt8 = 0_u8,
           zte : Bool = true,
           ztst : UInt8 = 1_u8,
-          context : Int = 0
+          context : Int = 0,
         ) : self
           target = context == 1 ? GsReg::Test_2 : GsReg::Test_1
           @buffer.emit_ad(target, GsEncoder.encode_test(ate, atst, aref, afail, date, datm, zte, ztst))
@@ -194,7 +194,7 @@ module Citrine
           cbp : UInt32 = 0_u32,
           cpsm : PixelFormat = PixelFormat::PSMCT32,
           csm : UInt8 = 0_u8,
-          context : Int = 0
+          context : Int = 0,
         ) : self
           target = context == 1 ? GsReg::Tex0_2 : GsReg::Tex0_1
           @buffer.emit_ad(target, GsEncoder.encode_tex0(tbp0, tbw, psm, tw, th, tcc, tfx, cbp, cpsm, csm))
@@ -253,7 +253,7 @@ module Citrine
           g : Int = 255,
           b : Int = 255,
           a : Int = 0x80,
-          z : UInt32 = 0_u32
+          z : UInt32 = 0_u32,
         ) : self
           prim(Primitive::Sprite)
           rgba(r, g, b, a)
@@ -268,7 +268,7 @@ module Citrine
           x2 : Int32, y2 : Int32,
           x3 : Int32, y3 : Int32,
           r : Int = 255, g : Int = 255, b : Int = 255, a : Int = 0x80,
-          z : UInt32 = 0_u32
+          z : UInt32 = 0_u32,
         ) : self
           prim(Primitive::Triangle)
           rgba(r, g, b, a)
@@ -283,7 +283,7 @@ module Citrine
           x1 : Int32, y1 : Int32,
           x2 : Int32, y2 : Int32,
           r : Int = 255, g : Int = 255, b : Int = 255, a : Int = 0x80,
-          z : UInt32 = 0_u32
+          z : UInt32 = 0_u32,
         ) : self
           prim(Primitive::Line)
           rgba(r, g, b, a)
@@ -384,7 +384,7 @@ module Citrine
           psm : PixelFormat = PixelFormat::PSMCT32,
           dsax : Int32 = 0,
           dsay : Int32 = 0,
-          eop : Bool = true
+          eop : Bool = true,
         ) : self
           if (pixels.size & 0xF) != 0
             raise ArgumentError.new("VRAM upload pixel buffer size (#{pixels.size}) must be a multiple of 16 bytes (1 quadword)")

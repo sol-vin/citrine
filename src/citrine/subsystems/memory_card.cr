@@ -26,7 +26,7 @@ module Citrine
         @bg_color_top_left : UInt32 = 0x00000000_u32,
         @bg_color_top_right : UInt32 = 0x00000000_u32,
         @bg_color_bottom_left : UInt32 = 0x00000000_u32,
-        @bg_color_bottom_right : UInt32 = 0x00000000_u32
+        @bg_color_bottom_right : UInt32 = 0x00000000_u32,
       )
       end
 
@@ -56,7 +56,7 @@ module Citrine
         (32 - 9).times { io.write_byte(0_u8) }
         io.write("copy.icn\0".to_slice) # Copying icon
         (32 - 9).times { io.write_byte(0_u8) }
-        io.write("del.icn\0".to_slice)  # Deleting icon
+        io.write("del.icn\0".to_slice) # Deleting icon
         (32 - 8).times { io.write_byte(0_u8) }
 
         # Pad to exactly 964 bytes

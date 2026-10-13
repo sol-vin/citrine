@@ -17,9 +17,9 @@ module Citrine
   end
 
   class BudgetChecker
-    MAX_VRAM_BYTES = 4 * 1024 * 1024       # 4 MB GS eDRAM
-    FRAMEBUFFER_BYTES = 2 * 640 * 448 * 4  # ~2.3 MB (Double buffered 32-bit RGBA)
-    ZBUFFER_BYTES = 640 * 448 * 4          # ~1.15 MB (32-bit Z-buffer)
+    MAX_VRAM_BYTES         = 4 * 1024 * 1024                                    # 4 MB GS eDRAM
+    FRAMEBUFFER_BYTES      = 2 * 640 * 448 * 4                                  # ~2.3 MB (Double buffered 32-bit RGBA)
+    ZBUFFER_BYTES          = 640 * 448 * 4                                      # ~1.15 MB (32-bit Z-buffer)
     AVAILABLE_TEXTURE_VRAM = MAX_VRAM_BYTES - FRAMEBUFFER_BYTES - ZBUFFER_BYTES # ~550 KB
 
     def self.check(
@@ -28,7 +28,7 @@ module Citrine
       texture_dimensions : Array(Tuple(Int32, Int32, Int32)) = [] of Tuple(Int32, Int32, Int32),
       max_fibers : Int32 = 64,
       max_channels : Int32 = 32,
-      channel_capacity : Int32 = 32
+      channel_capacity : Int32 = 32,
     ) : BudgetReport
       report = BudgetReport.new
       report.total_bytecode_bytes = bytecode_size
@@ -63,7 +63,7 @@ module Citrine
       end
 
       # 3. Concurrency Safety & Memory Footprint Checks
-      fiber_struct_bytes = 1088 # 64 saved regs * 16 bytes + 64 bytes metadata/call_stack
+      fiber_struct_bytes = 1088                           # 64 saved regs * 16 bytes + 64 bytes metadata/call_stack
       channel_struct_bytes = 32 + (channel_capacity * 16) # Header + Ring buffer
       concurrency_ram = (max_fibers * fiber_struct_bytes) + (max_channels * channel_struct_bytes)
       report.concurrency_memory_bytes = concurrency_ram

@@ -20,7 +20,7 @@ module Citrine
         @line : Int32? = nil,
         @column : Int32? = nil,
         @code_frame : String? = nil,
-        @remedy : String = ""
+        @remedy : String = "",
       )
       end
 

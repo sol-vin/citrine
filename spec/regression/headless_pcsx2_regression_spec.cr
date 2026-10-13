@@ -89,7 +89,7 @@ describe "Citrine Headless PCSX2 Automated Regression Subsystem" do
         status: Citrine::Core::Regression::ExecutionStatus::Passed,
         duration: 1.25.seconds,
         passed_assertions: [
-          Citrine::Core::Regression::AssertionRecord.new(:pass, "Check 1", 0.5.seconds, "")
+          Citrine::Core::Regression::AssertionRecord.new(:pass, "Check 1", 0.5.seconds, ""),
         ]
       )
       res2 = Citrine::Core::Regression::TestResult.new(
@@ -97,7 +97,7 @@ describe "Citrine Headless PCSX2 Automated Regression Subsystem" do
         status: Citrine::Core::Regression::ExecutionStatus::Failed,
         duration: 2.10.seconds,
         failed_assertions: [
-          Citrine::Core::Regression::AssertionRecord.new(:fail, "Check 2 Failed", 1.8.seconds, "")
+          Citrine::Core::Regression::AssertionRecord.new(:fail, "Check 2 Failed", 1.8.seconds, ""),
         ],
         raw_logs: ["Log line 1", "Log line 2", "Failure trace"]
       )
@@ -148,11 +148,11 @@ describe "Citrine Headless PCSX2 Automated Regression Subsystem" do
         name: "expectation_test",
         status: Citrine::Core::Regression::ExecutionStatus::Passed,
         milestones: [
-          Citrine::Core::Regression::MilestoneRecord.new(Citrine::Core::Regression::Milestone::GsCrtcConfigured, "CRTC", 0.5.seconds, "")
+          Citrine::Core::Regression::MilestoneRecord.new(Citrine::Core::Regression::Milestone::GsCrtcConfigured, "CRTC", 0.5.seconds, ""),
         ],
         passed_assertions: [
           Citrine::Core::Regression::AssertionRecord.new(:pass, "Check A", 0.2.seconds, ""),
-          Citrine::Core::Regression::AssertionRecord.new(:pass, "Check B", 0.4.seconds, "")
+          Citrine::Core::Regression::AssertionRecord.new(:pass, "Check B", 0.4.seconds, ""),
         ]
       )
 

@@ -15,7 +15,7 @@ module Citrine
         when 2 # CloseWindow
           emitter.call("Citrine_CloseWindow")
           emitter.sw(V0, (dst * 4), FP)
-        when 3 # WindowOpen
+        when 3                     # WindowOpen
           emitter.ori(V0, ZERO, 1) # Always open on PS2
           emitter.sw(V0, (dst * 4), FP)
         when 4 # SetTargetFPS
@@ -93,12 +93,12 @@ module Citrine
           emitter.call("Citrine_DrawTexture")
           emitter.addiu(SP, SP, 32)
           emitter.sw(V0, (dst * 4), FP)
-        when 32 # DrawTextureRec
-          emitter.lw(A0, (base * 4), FP)        # tex_id
-          emitter.lw(A1, ((base + 5) * 4), FP)  # dx
-          emitter.lw(A2, ((base + 6) * 4), FP)  # dy
-          emitter.lw(A3, ((base + 3) * 4), FP)  # dw
-          emitter.lw(T0, ((base + 4) * 4), FP)  # dh
+        when 32                                # DrawTextureRec
+          emitter.lw(A0, (base * 4), FP)       # tex_id
+          emitter.lw(A1, ((base + 5) * 4), FP) # dx
+          emitter.lw(A2, ((base + 6) * 4), FP) # dy
+          emitter.lw(A3, ((base + 3) * 4), FP) # dw
+          emitter.lw(T0, ((base + 4) * 4), FP) # dh
           emitter.addiu(SP, SP, -32)
           emitter.sw(T0, 16, SP)
           emitter.call("Citrine_DrawTexture")
@@ -106,12 +106,12 @@ module Citrine
           emitter.sw(V0, (dst * 4), FP)
         when 33 # UnloadTexture
           emitter.sw(ZERO, (dst * 4), FP)
-        when 237 # DrawTexturePro
-          emitter.lw(A0, (base * 4), FP)        # tex_id
-          emitter.lw(A1, ((base + 5) * 4), FP)  # dx
-          emitter.lw(A2, ((base + 6) * 4), FP)  # dy
-          emitter.lw(A3, ((base + 7) * 4), FP)  # dw
-          emitter.lw(T0, ((base + 8) * 4), FP)  # dh
+        when 237                               # DrawTexturePro
+          emitter.lw(A0, (base * 4), FP)       # tex_id
+          emitter.lw(A1, ((base + 5) * 4), FP) # dx
+          emitter.lw(A2, ((base + 6) * 4), FP) # dy
+          emitter.lw(A3, ((base + 7) * 4), FP) # dw
+          emitter.lw(T0, ((base + 8) * 4), FP) # dh
           emitter.addiu(SP, SP, -32)
           emitter.sw(T0, 16, SP)
           emitter.call("Citrine_DrawTexture")
@@ -231,7 +231,7 @@ module Citrine
         native_id : Int32,
         emitter : MipsEmitter,
         fn_idx : Int32,
-        pc : Int32
+        pc : Int32,
       ) : Bool
         case native_id
         when 120 # ArrayNew(capacity)
@@ -306,7 +306,7 @@ module Citrine
           emitter.lw(A0, (base * 4), FP)
           emitter.call("Citrine_StructCopy")
           emitter.sw(V0, (dst * 4), FP)
-        when 160 # PointerMalloc: dest = malloc(count * 4)
+        when 160                         # PointerMalloc: dest = malloc(count * 4)
           emitter.lw(A0, (base * 4), FP) # element count
           emitter.sll(A0, A0, 2)         # bytes = count * 4
           emitter.lui(T0, 0x7000)
@@ -320,13 +320,13 @@ module Citrine
           emitter.jump("malloc_done_#{fn_idx}_#{pc}")
           emitter.nop
           emitter.label("malloc_from_heap_#{fn_idx}_#{pc}")
-          emitter.lw(V0, 0x8C, T0)       # current heap_ptr
+          emitter.lw(V0, 0x8C, T0) # current heap_ptr
           emitter.bnez(V0, "malloc_heap_ok_#{fn_idx}_#{pc}")
           emitter.nop
-          emitter.lui(V0, 0x0022)        # default heap base 0x00220000
+          emitter.lui(V0, 0x0022) # default heap base 0x00220000
           emitter.label("malloc_heap_ok_#{fn_idx}_#{pc}")
           emitter.addiu(T1, A0, 15)
-          emitter.andi(T1, T1, 0xFFF0)   # 16-byte align
+          emitter.andi(T1, T1, 0xFFF0) # 16-byte align
           emitter.addu(T2, V0, T1)
           # Heap Redzone Guard: ensure allocation does not cross 0x00400000
           emitter.lui(T3, 0x0040)
@@ -336,7 +336,7 @@ module Citrine
           emitter.move(A0, ZERO)
           emitter.call("citrine_vm_panic")
           emitter.label("malloc_in_bounds_#{fn_idx}_#{pc}")
-          emitter.sw(T2, 0x8C, T0)       # store updated heap_ptr
+          emitter.sw(T2, 0x8C, T0) # store updated heap_ptr
           emitter.label("malloc_done_#{fn_idx}_#{pc}")
           emitter.move(T3, V0)
           emitter.addiu(T1, A0, 15)
@@ -351,14 +351,14 @@ module Citrine
           emitter.nop
           emitter.label("malloc_zero_done_#{fn_idx}_#{pc}")
           emitter.sw(V0, (dst * 4), FP)
-        when 161 # PointerGet: dest = *(ptr + idx * 4)
+        when 161                               # PointerGet: dest = *(ptr + idx * 4)
           emitter.lw(T0, (base * 4), FP)       # ptr
           emitter.lw(T1, ((base + 1) * 4), FP) # idx
           emitter.sll(T1, T1, 2)
-          emitter.addu(T0, T0, T1)             # address
-          emitter.lw(V0, 0, T0)                # load word from address
+          emitter.addu(T0, T0, T1) # address
+          emitter.lw(V0, 0, T0)    # load word from address
           emitter.sw(V0, (dst * 4), FP)
-        when 162 # PointerSet: *(ptr + idx * 4) = val
+        when 162                               # PointerSet: *(ptr + idx * 4) = val
           emitter.lw(T0, (base * 4), FP)       # ptr
           emitter.lw(T1, ((base + 1) * 4), FP) # idx
           emitter.lw(T2, ((base + 2) * 4), FP) # val
@@ -369,10 +369,10 @@ module Citrine
           emitter.sltu(T3, T0, T3)
           emitter.bnez(T3, "ptr_set_guard_skip_#{fn_idx}_#{pc}")
           emitter.nop
-          emitter.sw(T2, 0, T0)                # store word safely
+          emitter.sw(T2, 0, T0) # store word safely
           emitter.label("ptr_set_guard_skip_#{fn_idx}_#{pc}")
           emitter.sw(T2, (dst * 4), FP)
-        when 163 # PointerOffset: dest = ptr + idx * 4
+        when 163                               # PointerOffset: dest = ptr + idx * 4
           emitter.lw(T0, (base * 4), FP)       # ptr
           emitter.lw(T1, ((base + 1) * 4), FP) # idx
           emitter.sll(T1, T1, 2)
@@ -397,7 +397,7 @@ module Citrine
           emitter.lw(T0, (base * 4), FP)
           emitter.lw(V0, 0, T0)
           emitter.sw(V0, (dst * 4), FP)
-        when 168 # PointerFree
+        when 168                         # PointerFree
           emitter.lw(T0, (base * 4), FP) # ptr to free
           # Free-list recycling: if valid pointer >= 0x00200000, link into SPRAM 0x700000B0
           emitter.lui(T1, 0x0020)
@@ -459,7 +459,7 @@ module Citrine
         native_id : Int32,
         emitter : MipsEmitter,
         fn_idx : Int32,
-        pc : Int32
+        pc : Int32,
       ) : Bool
         case native_id
         when 65 # Sleep(frames)
@@ -511,7 +511,7 @@ module Citrine
         when 185 # GCCycle
           emitter.move(V0, ZERO)
           emitter.sw(V0, (dst * 4), FP)
-        when 170 # TypeIsA
+        when 170                               # TypeIsA
           emitter.lw(T0, (base * 4), FP)       # obj_reg
           emitter.lw(T1, ((base + 1) * 4), FP) # target_type_id
           emitter.ori(T2, ZERO, 0xF001)        # TypeKind::Nil

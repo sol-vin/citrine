@@ -20,7 +20,7 @@ module Citrine
       when Crystal::StringLiteral then arg.value
       when Crystal::Var           then arg.name
       when Crystal::Call          then arg.name
-      else nil
+      else                             nil
       end
     end
 
@@ -30,16 +30,16 @@ module Citrine
         if ctx = p.vm_contexts[ctx_name]?
           ctx.requires.each do |req|
             case req
-            when "citrine/draw2d" then mask |= (1_u32 << 1)
+            when "citrine/draw2d"                 then mask |= (1_u32 << 1)
             when "citrine/draw3d", "citrine/draw" then mask |= (1_u32 << 2)
-            when "citrine/gl" then mask |= (1_u32 << 3)
-            when "citrine/audio" then mask |= (1_u32 << 4)
-            when "citrine/video" then mask |= (1_u32 << 5)
-            when "citrine/physics" then mask |= (1_u32 << 6)
-            when "citrine/shader" then mask |= (1_u32 << 7)
-            when "citrine/compute" then mask |= (1_u32 << 8)
-            when "citrine/inputmap" then mask |= (1_u32 << 9)
-            when "citrine/ui" then mask |= (1_u32 << 10)
+            when "citrine/gl"                     then mask |= (1_u32 << 3)
+            when "citrine/audio"                  then mask |= (1_u32 << 4)
+            when "citrine/video"                  then mask |= (1_u32 << 5)
+            when "citrine/physics"                then mask |= (1_u32 << 6)
+            when "citrine/shader"                 then mask |= (1_u32 << 7)
+            when "citrine/compute"                then mask |= (1_u32 << 8)
+            when "citrine/inputmap"               then mask |= (1_u32 << 9)
+            when "citrine/ui"                     then mask |= (1_u32 << 10)
             end
           end
         else
@@ -58,17 +58,17 @@ module Citrine
       ctx = p.vm_contexts[active_ctx]?
 
       req_for_obj : String? = case obj_str
-      when "Citrine::Draw2D", "Draw2D" then "citrine/draw2d"
-      when "Citrine::Draw3D", "Draw3D" then "citrine/draw3d"
-      when "Citrine::GL", "GL"         then "citrine/gl"
-      when "Citrine::Audio", "Audio"   then "citrine/audio"
-      when "Citrine::Video", "Video"   then "citrine/video"
+      when "Citrine::Draw2D", "Draw2D"                         then "citrine/draw2d"
+      when "Citrine::Draw3D", "Draw3D"                         then "citrine/draw3d"
+      when "Citrine::GL", "GL"                                 then "citrine/gl"
+      when "Citrine::Audio", "Audio"                           then "citrine/audio"
+      when "Citrine::Video", "Video"                           then "citrine/video"
       when "Citrine::Physics", "Physics", "Citrine::Physics2D" then "citrine/physics"
-      when "Citrine::Shader", "Shader" then "citrine/shader"
-      when "Citrine::Compute", "Compute" then "citrine/compute"
-      when "Citrine::UI", "UI"         then "citrine/ui"
-      when "Citrine::InputMap", "InputMap" then "citrine/inputmap"
-      else nil
+      when "Citrine::Shader", "Shader"                         then "citrine/shader"
+      when "Citrine::Compute", "Compute"                       then "citrine/compute"
+      when "Citrine::UI", "UI"                                 then "citrine/ui"
+      when "Citrine::InputMap", "InputMap"                     then "citrine/inputmap"
+      else                                                          nil
       end
 
       if req_for_obj
@@ -134,7 +134,6 @@ module Citrine
         compile_error("Citrine.draw_text_rotated requires 8 arguments: (text, x, y, size, angle, ox, oy, color)", node) if argc != 8
       when NativeId::DrawText
         compile_error("Citrine.draw_text requires 5 arguments: (text, x, y, size, color)", node) if argc != 5
-
       when NativeId::DrawCube, NativeId::DrawCubeWires
         compile_error("Citrine.#{name} requires 5 or 7 arguments: (pos, w, h, d, color) or (x, y, z, w, h, d, color)", node) if argc != 5 && argc != 7
       when NativeId::DrawGrid
@@ -151,7 +150,6 @@ module Citrine
         compile_error("Citrine.load_palette requires 1 argument: (filename)", node) if argc != 1
       when NativeId::SetPalette
         compile_error("Citrine.set_palette requires 1 argument: (palette_id)", node) if argc != 1
-
       when NativeId::LoadSound
         compile_error("Citrine.load_sound requires 1 argument: (filename)", node) if argc != 1
       when NativeId::PlaySound
@@ -215,20 +213,29 @@ module Citrine
       end
     end
 
+    BUILTIN_VALUE_STRUCTS = Set{
+      "Vector2", "Vector3", "Vector4", "Matrix4", "Quaternion",
+      "BoundingBox", "Color", "Rect", "RasterConfig", "BlendConfig",
+      "Transform", "AABB",
+    }
+
     private def is_struct_expression?(node : Crystal::ASTNode) : Bool
       case node
       when Crystal::Call
         if node.name == "new" && (recv = node.obj)
           name = recv.to_s
-          return true if @classes[name]?.try(&.is_struct) || @classes[name.split("::").last]?.try(&.is_struct)
+          short_name = name.split("::").last
+          return false if BUILTIN_VALUE_STRUCTS.includes?(short_name)
+          return true if @classes[name]?.try(&.is_struct) || @classes[short_name]?.try(&.is_struct)
         end
       when Crystal::Var
         if vtype = @var_types[node.name]?
-          return true if @classes[vtype]?.try(&.is_struct) || @classes[vtype.split("::").last]?.try(&.is_struct)
+          short_name = vtype.split("::").last
+          return false if BUILTIN_VALUE_STRUCTS.includes?(short_name)
+          return true if @classes[vtype]?.try(&.is_struct) || @classes[short_name]?.try(&.is_struct)
         end
       end
       false
     end
   end
 end
-

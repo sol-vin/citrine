@@ -13,7 +13,7 @@ Citrine.init_window(640, 448, "Citrine PS2 - Physics & Particles")
 Citrine.set_target_fps(60)
 
 # Pre-allocated color constants
-BG_COLOR       = Color.new(14_u8, 18_u8, 28_u8, 255_u8)
+BG_COLOR        = Color.new(14_u8, 18_u8, 28_u8, 255_u8)
 OBSTACLE_NORMAL = Color.new(41_u8, 128_u8, 185_u8, 255_u8)
 OBSTACLE_HIT    = Color.new(231_u8, 76_u8, 60_u8, 255_u8)
 
@@ -29,7 +29,6 @@ obs_x = 360
 obs_y = 180
 obs_w = 80
 obs_h = 80
-
 
 # Pre-allocated array of 12 Verlet Particles (fountain spray)
 particles = [] of Citrine::VerletParticle
@@ -119,7 +118,6 @@ Citrine.main_loop do
   Citrine.draw_rectangle(player_x + 4, player_y + 4, player_w - 8, player_h - 8, Color::Black)
   Citrine.draw_text("P1", player_x + 14, player_y + 14, 14, Color::Yellow)
 
-
   # Draw Verlet Particles
   particles.each_with_index do |p, i|
     col = (i % 2 == 0) ? Color::Cyan : Color::Magenta
@@ -127,7 +125,6 @@ Citrine.main_loop do
     par_y = (p.y > 0.0_f32 && p.y < 448.0_f32) ? p.y.to_i32 : 120 + (i * 12)
     Citrine.draw_circle(par_x, par_y, 4, col)
   end
-
 
   # Footer HUD Card
   Citrine.draw_rectangle(20, 388, 600, 46, Color::DarkGray)

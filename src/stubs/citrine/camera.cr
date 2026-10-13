@@ -29,7 +29,7 @@ struct Camera2D
     @offset_x : Float32 = 320.0_f32,
     @offset_y : Float32 = 224.0_f32,
     @zoom : Float32 = 1.0_f32,
-    @rotation : Float32 = 0.0_f32
+    @rotation : Float32 = 0.0_f32,
   )
   end
 

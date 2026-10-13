@@ -7,7 +7,7 @@ module Citrine
     # and linear handle ownership guards.
     module Safety
       # Magic 64-bit integer placed at the highest address of a fiber stack buffer.
-      CANARY_TOP    = 0xDEADBEEF_CAFEF00D_u64
+      CANARY_TOP = 0xDEADBEEF_CAFEF00D_u64
       # Magic 64-bit integer placed at the lowest address of a fiber stack buffer.
       CANARY_BOTTOM = 0xFEEDFACE_01234567_u64
 

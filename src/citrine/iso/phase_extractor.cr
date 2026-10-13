@@ -265,7 +265,6 @@ module Citrine
                     is_float_reg[dst_r] = false
                     regs[dst_r] = 0_i64 &- regs[a_r]
                   end
-
                 when 16 # BitAnd
                   regs[dst_r] = regs[a_r] & regs[b_r]
                   reg_types[dst_r] = (reg_types[a_r] == 1_u8 && reg_types[b_r] == 1_u8) ? 1_u8 : 2_u8

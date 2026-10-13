@@ -11,7 +11,7 @@ module Citrine
       instructions : Array(Instruction),
       fn : CompiledFunction,
       dest : UInt8,
-      obj_str : String
+      obj_str : String,
     ) : UInt8?
       # IO::Memory.new
       if (obj_str == "IO::Memory" || obj_str.includes?("Memory")) && node.name == "new"
@@ -36,14 +36,14 @@ module Citrine
       )
       if node.obj && is_io && ["to_s", "write_byte", "write", "print", "puts", "rewind", "pos", "clear"].includes?(node.name)
         native_op = case node.name
-                    when "write_byte" then NativeId::MemoryIOWriteByte
+                    when "write_byte"     then NativeId::MemoryIOWriteByte
                     when "write", "print" then NativeId::MemoryIOWrite
-                    when "puts" then NativeId::MemoryIOPuts
-                    when "to_s" then NativeId::MemoryIOToS
-                    when "rewind" then NativeId::MemoryIORewind
-                    when "pos" then NativeId::MemoryIOPos
-                    when "clear" then NativeId::MemoryIOClear
-                    else nil
+                    when "puts"           then NativeId::MemoryIOPuts
+                    when "to_s"           then NativeId::MemoryIOToS
+                    when "rewind"         then NativeId::MemoryIORewind
+                    when "pos"            then NativeId::MemoryIOPos
+                    when "clear"          then NativeId::MemoryIOClear
+                    else                       nil
                     end
         if native_op && (node.name == "to_s" || node.name == "rewind" || node.name == "pos" || node.name == "clear" || !node.args.empty?)
           io_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
@@ -221,7 +221,7 @@ module Citrine
         ctx_val = case arg_node
                   when Crystal::SymbolLiteral then arg_node.value
                   when Crystal::StringLiteral then arg_node.value
-                  else arg_node.to_s
+                  else                             arg_node.to_s
                   end
         s_idx = add_string(ctx_val)
         ctx_reg = allocator.alloc_temp
@@ -246,7 +246,7 @@ module Citrine
         ctx_val = case arg_node
                   when Crystal::SymbolLiteral then arg_node.value
                   when Crystal::StringLiteral then arg_node.value
-                  else arg_node.to_s
+                  else                             arg_node.to_s
                   end
         s_idx = add_string(ctx_val)
         ctx_reg = allocator.alloc_temp
@@ -274,7 +274,7 @@ module Citrine
         ctx_val = case arg_node
                   when Crystal::SymbolLiteral then arg_node.value
                   when Crystal::StringLiteral then arg_node.value
-                  else arg_node.to_s
+                  else                             arg_node.to_s
                   end
         s_idx = add_string(ctx_val)
         ctx_reg = allocator.alloc_temp

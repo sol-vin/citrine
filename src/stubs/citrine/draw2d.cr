@@ -26,7 +26,7 @@ module Citrine
         @c : Float32 = 0.0_f32,
         @d : Float32 = 1.0_f32,
         @tx : Float32 = 0.0_f32,
-        @ty : Float32 = 0.0_f32
+        @ty : Float32 = 0.0_f32,
       )
       end
 
@@ -80,7 +80,7 @@ module Citrine
       def transform_point(x : Number, y : Number) : Tuple(Float32, Float32)
         fx = x.to_f32
         fy = y.to_f32
-        { @a * fx + @c * fy + @tx, @b * fx + @d * fy + @ty }
+        {@a * fx + @c * fy + @tx, @b * fx + @d * fy + @ty}
       end
     end
 
@@ -97,7 +97,7 @@ module Citrine
         @fill_color : Color = Color::White,
         @stroke_enabled : Bool = false,
         @stroke_color : Color = Color::Black,
-        @stroke_weight : Float32 = 1.0_f32
+        @stroke_weight : Float32 = 1.0_f32,
       )
       end
     end
@@ -266,7 +266,7 @@ module Citrine
       x1 : Number, y1 : Number,
       x2 : Number, y2 : Number,
       color : Color? = nil,
-      weight : Number? = nil
+      weight : Number? = nil,
     )
       tx1, ty1 = @@current_transform.transform_point(x1, y1)
       tx2, ty2 = @@current_transform.transform_point(x2, y2)
@@ -281,7 +281,7 @@ module Citrine
       x3 : Number, y3 : Number,
       fill : Color? = nil,
       stroke : Color? = nil,
-      weight : Number? = nil
+      weight : Number? = nil,
     )
       tx1, ty1 = @@current_transform.transform_point(x1, y1)
       tx2, ty2 = @@current_transform.transform_point(x2, y2)
@@ -307,7 +307,7 @@ module Citrine
       x3 : Number, y3 : Number,
       x4 : Number, y4 : Number,
       fill : Color? = nil,
-      stroke : Color? = nil
+      stroke : Color? = nil,
     )
       tx1, ty1 = @@current_transform.transform_point(x1, y1)
       tx2, ty2 = @@current_transform.transform_point(x2, y2)
@@ -339,7 +339,7 @@ module Citrine
       radius : Number = 0.0,
       fill : Color? = nil,
       stroke : Color? = nil,
-      weight : Number? = nil
+      weight : Number? = nil,
     )
       fx = x.to_f32
       fy = y.to_f32
@@ -404,7 +404,7 @@ module Citrine
       x : Float32, y : Float32,
       w : Float32, h : Float32,
       r : Float32,
-      f_col : Color?, s_col : Color?, sw : Float32
+      f_col : Color?, s_col : Color?, sw : Float32,
     )
       max_r = Math.min(w, h) * 0.5_f32
       r = Math.min(r, max_r)
@@ -456,7 +456,7 @@ module Citrine
       cx : Number, cy : Number,
       r : Number,
       fill : Color? = nil,
-      stroke : Color? = nil
+      stroke : Color? = nil,
     )
       ellipse(cx, cy, r.to_f32 * 2.0_f32, r.to_f32 * 2.0_f32, fill: fill, stroke: stroke)
     end
@@ -466,7 +466,7 @@ module Citrine
       cx : Number, cy : Number,
       w : Number, h : Number,
       fill : Color? = nil,
-      stroke : Color? = nil
+      stroke : Color? = nil,
     )
       rx = w.to_f32 * 0.5_f32
       ry = h.to_f32 * 0.5_f32
@@ -486,7 +486,7 @@ module Citrine
       inner_r : Number = 10.0,
       outer_r : Number = 25.0,
       fill : Color? = nil,
-      stroke : Color? = nil
+      stroke : Color? = nil,
     )
       fcx = cx.to_f32
       fcy = cy.to_f32
@@ -524,7 +524,7 @@ module Citrine
     def self.polygon(
       points : Array(Vector2),
       fill : Color? = nil,
-      stroke : Color? = nil
+      stroke : Color? = nil,
     )
       return if points.size < 3
       t_points = points.map { |p| @@current_transform.transform_point(p.x, p.y) }
@@ -568,7 +568,7 @@ module Citrine
       color : Color = Color::White,
       rotation : Number = 0.0,
       origin : Vector2? = nil,
-      align : Symbol = :left
+      align : Symbol = :left,
     )
       fx = x.to_f32
       fy = y.to_f32
@@ -580,7 +580,7 @@ module Citrine
       adj_x = case align
               when :center then fx - (str_w * 0.5_f32)
               when :right  then fx - str_w
-              else fx
+              else              fx
               end
 
       if rotation == 0.0 && !origin && @@current_transform.b == 0.0_f32 && @@current_transform.c == 0.0_f32
@@ -660,27 +660,27 @@ module Citrine
     def self.resolve_origin(origin : Symbol | Vector2?, width : Float32, height : Float32) : Tuple(Float32, Float32)
       case origin
       when :center
-        { width * 0.5_f32, height * 0.5_f32 }
+        {width * 0.5_f32, height * 0.5_f32}
       when :top_center, :center_top
-        { width * 0.5_f32, 0.0_f32 }
+        {width * 0.5_f32, 0.0_f32}
       when :bottom_center, :center_bottom
-        { width * 0.5_f32, height }
+        {width * 0.5_f32, height}
       when :center_left, :left_center
-        { 0.0_f32, height * 0.5_f32 }
+        {0.0_f32, height * 0.5_f32}
       when :center_right, :right_center
-        { width, height * 0.5_f32 }
+        {width, height * 0.5_f32}
       when :top_right, :right_top
-        { width, 0.0_f32 }
+        {width, 0.0_f32}
       when :bottom_left, :left_bottom
-        { 0.0_f32, height }
+        {0.0_f32, height}
       when :bottom_right, :right_bottom
-        { width, height }
+        {width, height}
       when :top_left, :left_top, nil
-        { 0.0_f32, 0.0_f32 }
+        {0.0_f32, 0.0_f32}
       when Vector2
-        { origin.x, origin.y }
+        {origin.x, origin.y}
       else
-        { 0.0_f32, 0.0_f32 }
+        {0.0_f32, 0.0_f32}
       end
     end
 
@@ -701,7 +701,7 @@ module Citrine
       flip_y : Bool = false,
       src : Rect? = nil,
       dest : Rect? = nil,
-      palette : Palette | UInt32? = nil
+      palette : Palette | UInt32? = nil,
     )
       # Apply temporary palette if specified
       if palette
@@ -791,7 +791,7 @@ module Citrine
       flip_y : Bool = false,
       src : Rect? = nil,
       dest : Rect? = nil,
-      palette : Palette | UInt32? = nil
+      palette : Palette | UInt32? = nil,
     )
       draw_texture(
         texture, x, y, width: width, height: height,
@@ -801,4 +801,3 @@ module Citrine
     end
   end
 end
-

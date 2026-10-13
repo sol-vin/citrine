@@ -56,7 +56,6 @@ module Citrine
           else
             known_ints.delete(inst.dst)
           end
-
         when Opcode::Move
           if inst.dst == inst.a
             result[idx] = Instruction.encode_rrr(Opcode::Sys, SysSubOp::Nop.value, 0_u8, 0_u8, 0_u8)
@@ -65,7 +64,6 @@ module Citrine
           else
             known_ints.delete(inst.dst)
           end
-
         when Opcode::Add
           dst = inst.dst
           a = inst.a
@@ -95,7 +93,6 @@ module Citrine
           else
             known_ints.delete(dst)
           end
-
         when Opcode::Sub
           dst = inst.dst
           a = inst.a
@@ -118,7 +115,6 @@ module Citrine
           else
             known_ints.delete(dst)
           end
-
         when Opcode::Mul
           dst = inst.dst
           a = inst.a
@@ -151,7 +147,6 @@ module Citrine
           else
             known_ints.delete(dst)
           end
-
         when Opcode::Bitwise
           dst = inst.dst
           a = inst.a
@@ -183,7 +178,6 @@ module Citrine
             else
               known_ints.delete(dst)
             end
-
           when BitwiseSubOp::Or.value
             if known_ints.has_key?(a) && known_ints.has_key?(b)
               val = known_ints[a] | known_ints[b]
@@ -206,7 +200,6 @@ module Citrine
             else
               known_ints.delete(dst)
             end
-
           when BitwiseSubOp::Xor.value
             if known_ints.has_key?(a) && known_ints.has_key?(b)
               val = known_ints[a] ^ known_ints[b]
@@ -235,7 +228,6 @@ module Citrine
           else
             known_ints.delete(dst)
           end
-
         when Opcode::Shift
           dst = inst.dst
           a = inst.a
@@ -258,7 +250,6 @@ module Citrine
             else
               known_ints.delete(dst)
             end
-
           when ShiftSubOp::Srl.value
             if known_ints.has_key?(a) && known_ints.has_key?(b)
               shamt = known_ints[b] & 31
@@ -275,7 +266,6 @@ module Citrine
             else
               known_ints.delete(dst)
             end
-
           when ShiftSubOp::Sra.value
             if known_ints.has_key?(a) && known_ints.has_key?(b)
               shamt = known_ints[b] & 31
@@ -295,13 +285,10 @@ module Citrine
           else
             known_ints.delete(dst)
           end
-
         when Opcode::Call, Opcode::CallNative, Opcode::FiberOp, Opcode::Ps2Hw, Opcode::InlineAsm
           known_ints.clear
-
         when Opcode::Jump, Opcode::BranchZ, Opcode::BranchCmp, Opcode::LoopDecBr
           known_ints.clear
-
         else
           known_ints.delete(inst.dst)
         end
@@ -363,7 +350,7 @@ module Citrine
                             when CompareSubOp::Le then BranchCmpSubOp::Bgt
                             when CompareSubOp::Gt then BranchCmpSubOp::Ble
                             when CompareSubOp::Ge then BranchCmpSubOp::Blt
-                            else nil
+                            else                       nil
                             end
               end
 
@@ -549,7 +536,6 @@ module Citrine
             new_offset = (new_target - new_pc).to_i16
             compacted << Instruction.encode_branch_rel(Opcode::Jump, inst.subop, inst.dst, new_offset)
           end
-
         when Opcode::BranchZ
           old_target = old_idx + 1 + inst.branch_offset.to_i32
           while old_target < instructions.size && old_target >= 0 && new_indices[old_target] == -1
@@ -567,7 +553,6 @@ module Citrine
           new_pc = new_indices[old_idx] + 1
           new_offset = (new_target - new_pc).to_i16
           compacted << Instruction.encode_branch_rel(Opcode::BranchZ, inst.subop, inst.dst, new_offset)
-
         when Opcode::BranchCmp
           old_target = old_idx + 1 + inst.offset8.to_i32
           while old_target < instructions.size && old_target >= 0 && new_indices[old_target] == -1
@@ -585,7 +570,6 @@ module Citrine
           new_pc = new_indices[old_idx] + 1
           new_offset = (new_target - new_pc).to_i8
           compacted << Instruction.encode_branch_cmp(inst.subop, inst.dst, inst.a, new_offset)
-
         when Opcode::LoopDecBr
           old_target = old_idx + 1 + inst.branch_offset.to_i32
           while old_target < instructions.size && old_target >= 0 && new_indices[old_target] == -1
@@ -603,7 +587,6 @@ module Citrine
           new_pc = new_indices[old_idx] + 1
           new_offset = (new_target - new_pc).to_i16
           compacted << Instruction.encode_loop_dec_br(inst.subop, inst.dst, new_offset)
-
         else
           compacted << inst
         end
@@ -623,11 +606,9 @@ module Citrine
                      idx + 1 + inst.branch_offset.to_i32
                    end
           targets.add(target) if target >= 0 && target <= instructions.size
-
         when Opcode::BranchZ, Opcode::LoopDecBr
           target = idx + 1 + inst.branch_offset.to_i32
           targets.add(target) if target >= 0 && target <= instructions.size
-
         when Opcode::BranchCmp
           target = idx + 1 + inst.offset8.to_i32
           targets.add(target) if target >= 0 && target <= instructions.size

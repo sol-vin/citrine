@@ -80,221 +80,191 @@ module Citrine
         case mnemonic
         when "nop"
           0x00000000_u32
-
-        # --- Synchronization & System ---
+          # --- Synchronization & System ---
         when "sync", "sync.l"
           0x0000000F_u32
         when "sync.p"
           0x0000040F_u32
-
-        # --- COP0 System Control (Cycle Counter, etc.) ---
+          # --- COP0 System Control (Cycle Counter, etc.) ---
         when "mfc0"
           # mfc0 $rt, $rd (e.g. mfc0 $v0, $9)
           rt = parse_gpr(args[0])
           rd = parse_cop0_reg(args[1])
           (0x10_u32 << 26) | (rt.to_u32 << 16) | (rd.to_u32 << 11)
-
         when "mtc0"
           rt = parse_gpr(args[0])
           rd = parse_cop0_reg(args[1])
           (0x10_u32 << 26) | (0x04_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11)
 
-        # --- Data Prefetch ---
+          # --- Data Prefetch ---
         when "pref"
           # pref hint, offset(base)
           hint = parse_imm(args[0]) & 0x1F
           offset, base = parse_offset_base(args[1])
           (0x33_u32 << 26) | (base.to_u32 << 21) | (hint.to_u32 << 16) | (offset & 0xFFFF).to_u32
 
-        # --- 128-bit Quadword Memory Moves ---
+          # --- 128-bit Quadword Memory Moves ---
         when "lq"
           # lq $rt, offset($base)
           rt = parse_gpr(args[0])
           offset, base = parse_offset_base(args[1])
           (0x1E_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | (offset & 0xFFFF).to_u32
-
         when "sq"
           # sq $rt, offset($base)
           rt = parse_gpr(args[0])
           offset, base = parse_offset_base(args[1])
           (0x1F_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | (offset & 0xFFFF).to_u32
 
-        # --- 32-bit & 64-bit Memory Moves ---
+          # --- 32-bit & 64-bit Memory Moves ---
         when "lw"
           rt = parse_gpr(args[0])
           offset, base = parse_offset_base(args[1])
           (0x23_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | (offset & 0xFFFF).to_u32
-
         when "sw"
           rt = parse_gpr(args[0])
           offset, base = parse_offset_base(args[1])
           (0x2B_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | (offset & 0xFFFF).to_u32
-
         when "ld"
           rt = parse_gpr(args[0])
           offset, base = parse_offset_base(args[1])
           (0x37_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | (offset & 0xFFFF).to_u32
-
         when "sd"
           rt = parse_gpr(args[0])
           offset, base = parse_offset_base(args[1])
           (0x3F_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | (offset & 0xFFFF).to_u32
 
-        # --- Immediate Arithmetic & Logic ---
+          # --- Immediate Arithmetic & Logic ---
         when "lui"
           rt = parse_gpr(args[0])
           imm = parse_imm(args[1])
           (0x0F_u32 << 26) | (rt.to_u32 << 16) | (imm & 0xFFFF).to_u32
-
         when "addiu"
           rt = parse_gpr(args[0])
           rs = parse_gpr(args[1])
           imm = parse_imm(args[2])
           (0x09_u32 << 26) | (rs.to_u32 << 21) | (rt.to_u32 << 16) | (imm & 0xFFFF).to_u32
-
         when "ori"
           rt = parse_gpr(args[0])
           rs = parse_gpr(args[1])
           imm = parse_imm(args[2])
           (0x0D_u32 << 26) | (rs.to_u32 << 21) | (rt.to_u32 << 16) | (imm & 0xFFFF).to_u32
-
         when "andi"
           rt = parse_gpr(args[0])
           rs = parse_gpr(args[1])
           imm = parse_imm(args[2])
           (0x0C_u32 << 26) | (rs.to_u32 << 21) | (rt.to_u32 << 16) | (imm & 0xFFFF).to_u32
-
         when "xori"
           rt = parse_gpr(args[0])
           rs = parse_gpr(args[1])
           imm = parse_imm(args[2])
           (0x0E_u32 << 26) | (rs.to_u32 << 21) | (rt.to_u32 << 16) | (imm & 0xFFFF).to_u32
 
-        # --- Register Register Arithmetic & Logic ---
+          # --- Register Register Arithmetic & Logic ---
         when "addu"
           rd = parse_gpr(args[0])
           rs = parse_gpr(args[1])
           rt = parse_gpr(args[2])
           (rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x21_u32
-
         when "subu"
           rd = parse_gpr(args[0])
           rs = parse_gpr(args[1])
           rt = parse_gpr(args[2])
           (rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x23_u32
-
         when "or"
           rd = parse_gpr(args[0])
           rs = parse_gpr(args[1])
           rt = parse_gpr(args[2])
           (rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x25_u32
-
         when "and"
           rd = parse_gpr(args[0])
           rs = parse_gpr(args[1])
           rt = parse_gpr(args[2])
           (rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x24_u32
-
         when "xor"
           rd = parse_gpr(args[0])
           rs = parse_gpr(args[1])
           rt = parse_gpr(args[2])
           (rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x26_u32
-
         when "nor"
           rd = parse_gpr(args[0])
           rs = parse_gpr(args[1])
           rt = parse_gpr(args[2])
           (rs.to_u32 << 21) | (rt.to_u32 << 16) | (rd.to_u32 << 11) | 0x27_u32
-
         when "move"
           rd = parse_gpr(args[0])
           rs = parse_gpr(args[1])
           (rs.to_u32 << 21) | (rd.to_u32 << 11) | 0x25_u32 # or rd, rs, zero
 
-        # --- Shifts ---
+          # --- Shifts ---
         when "sll"
           rd = parse_gpr(args[0])
           rt = parse_gpr(args[1])
           sa = parse_imm(args[2]) & 0x1F
           (rt.to_u32 << 16) | (rd.to_u32 << 11) | (sa.to_u32 << 6) | 0x00_u32
-
         when "srl"
           rd = parse_gpr(args[0])
           rt = parse_gpr(args[1])
           sa = parse_imm(args[2]) & 0x1F
           (rt.to_u32 << 16) | (rd.to_u32 << 11) | (sa.to_u32 << 6) | 0x02_u32
-
         when "sra"
           rd = parse_gpr(args[0])
           rt = parse_gpr(args[1])
           sa = parse_imm(args[2]) & 0x1F
           (rt.to_u32 << 16) | (rd.to_u32 << 11) | (sa.to_u32 << 6) | 0x03_u32
 
-        # --- COP2 / VU0 Macro Mode ---
+          # --- COP2 / VU0 Macro Mode ---
         when "qmfc2"
           # qmfc2 $rt, vf_s
           rt = parse_gpr(args[0])
           vs = parse_vu_vf(args[1])
           (0x12_u32 << 26) | (rt.to_u32 << 16) | (vs.to_u32 << 11)
-
         when "qmtc2"
           # qmtc2 $rt, vf_s
           rt = parse_gpr(args[0])
           vs = parse_vu_vf(args[1])
           (0x12_u32 << 26) | (0x04_u32 << 21) | (rt.to_u32 << 16) | (vs.to_u32 << 11)
-
         when "cfc2"
           rt = parse_gpr(args[0])
           vi = parse_vu_vi(args[1])
           (0x12_u32 << 26) | (0x02_u32 << 21) | (rt.to_u32 << 16) | (vi.to_u32 << 11)
-
         when "ctc2"
           rt = parse_gpr(args[0])
           vi = parse_vu_vi(args[1])
           (0x12_u32 << 26) | (0x06_u32 << 21) | (rt.to_u32 << 16) | (vi.to_u32 << 11)
-
         when "vadd.xyzw", "vadd"
           vd = parse_vu_vf(args[0])
           vs = parse_vu_vf(args[1])
           vt = parse_vu_vf(args[2])
           encode_vu0_macro(0x28, vd, vs, vt, 0x0F)
-
         when "vsub.xyzw", "vsub"
           vd = parse_vu_vf(args[0])
           vs = parse_vu_vf(args[1])
           vt = parse_vu_vf(args[2])
           encode_vu0_macro(0x2C, vd, vs, vt, 0x0F)
-
         when "vmul.xyzw", "vmul"
           vd = parse_vu_vf(args[0])
           vs = parse_vu_vf(args[1])
           vt = parse_vu_vf(args[2])
           encode_vu0_macro(0x2A, vd, vs, vt, 0x0F)
-
         when "vmula.xyzw", "vmula"
           vs = parse_vu_vf(args[0])
           vt = parse_vu_vf(args[1])
           encode_vu0_macro(0x3E, 0x0A, vs, vt, 0x0F)
-
         when "vmadd.xyzw", "vmadd"
           vd = parse_vu_vf(args[0])
           vs = parse_vu_vf(args[1])
           vt = parse_vu_vf(args[2])
           encode_vu0_macro(0x29, vd, vs, vt, 0x0F)
-
         when "vmax.xyzw", "vmax"
           vd = parse_vu_vf(args[0])
           vs = parse_vu_vf(args[1])
           vt = parse_vu_vf(args[2])
           encode_vu0_macro(0x2B, vd, vs, vt, 0x0F)
-
         when "vmin.xyzw", "vmin"
           vd = parse_vu_vf(args[0])
           vs = parse_vu_vf(args[1])
           vt = parse_vu_vf(args[2])
           encode_vu0_macro(0x2F, vd, vs, vt, 0x0F)
-
         else
           raise "Citrine::MIPS::Assembler: Unrecognized assembly instruction '#{mnemonic}' in '#{line}'"
         end

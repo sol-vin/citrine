@@ -4,394 +4,402 @@
 # ==============================================================================
 
 {% unless flag?(:release) %}
-module Citrine
-  # The `Citrine::Docs` module is the authoritative technical reference and documentation guide.
-  #
-  # ## Learning Tracks & Topic Index
-  #
-  # The documentation is paced into 12 distinct tracks:
-  #
-  # ### 1. Getting started (`A_GETTING_STARTED`)
-  # <table>
-  #   <thead>
-  #     <tr>
-  #       <th>Submodule</th>
-  #       <th>Title</th>
-  #       <th>Description</th>
-  #     </tr>
-  #   </thead>
-  #   <tbody>
-  #     <tr>
-  #       <td><code>GETTING_STARTED</code></td>
-  #       <td><strong>Getting Started with Citrine PS2</strong></td>
-  #       <td>Complete introduction to the Crystal VM and Raylib-style PlayStation 2 toolkit.</td>
-  #     </tr>
-  #   </tbody>
-  # </table>
-  #
-  # ### 2. Ps2 hardware (`B_PS2_HARDWARE`)
-  # <table>
-  #   <thead>
-  #     <tr>
-  #       <th>Submodule</th>
-  #       <th>Title</th>
-  #       <th>Description</th>
-  #     </tr>
-  #   </thead>
-  #   <tbody>
-  #     <tr>
-  #       <td><code>PS2_HARDWARE</code></td>
-  #       <td><strong>PlayStation 2 Hardware Architecture</strong></td>
-  #       <td>In-depth guide to the Emotion Engine, Scratchpad RAM, and Graphic Synthesizer.</td>
-  #     </tr>
-  #   </tbody>
-  # </table>
-  #
-  # ### 3. Virtual machine (`C_VIRTUAL_MACHINE`)
-  # <table>
-  #   <thead>
-  #     <tr>
-  #       <th>Submodule</th>
-  #       <th>Title</th>
-  #       <th>Description</th>
-  #     </tr>
-  #   </thead>
-  #   <tbody>
-  #     <tr>
-  #       <td><code>VIRTUAL_MACHINE</code></td>
-  #       <td><strong>Citrine Virtual Machine Architecture & Execution Model</strong></td>
-  #       <td>Register-based 32-bit virtual machine architecture, direct-threaded C runtime, and MIPS R5900 JIT emitter for PlayStation 2.</td>
-  #     </tr>
-  #     <tr>
-  #       <td><code>BYTECODE_OPCODES</code></td>
-  #       <td><strong>Complete VM Opcode Reference</strong></td>
-  #       <td>Exhaustive technical specification of all 43 Citrine VM instruction opcodes, operand encodings, and MIPS translations.</td>
-  #     </tr>
-  #     <tr>
-  #       <td><code>NATIVE_FUNCTION_REFERENCE</code></td>
-  #       <td><strong>Citrine Native System Call Reference (NativeId)</strong></td>
-  #       <td>Complete reference of all 50+ Citrine VM native subsystem calls, parameters, return values, and hardware bindings.</td>
-  #     </tr>
-  #     <tr>
-  #       <td><code>HYBRID_MEMORY_MODEL</code></td>
-  #       <td><strong>4-Tier Hybrid Console Memory Architecture</strong></td>
-  #       <td>Zero-pause console memory model combining per-frame scratch pools, context arenas, explicit pointers, and idle mark-sweep.</td>
-  #     </tr>
-  #   </tbody>
-  # </table>
-  #
-  # ### 4. Raylib api (`D_RAYLIB_API`)
-  # <table>
-  #   <thead>
-  #     <tr>
-  #       <th>Submodule</th>
-  #       <th>Title</th>
-  #       <th>Description</th>
-  #     </tr>
-  #   </thead>
-  #   <tbody>
-  #     <tr>
-  #       <td><code>RAYLIB_API</code></td>
-  #       <td><strong>Raylib-style PlayStation 2 API</strong></td>
-  #       <td>Guide to 2D and 3D graphics, DualShock 2 input, and SPU2 audio playback.</td>
-  #     </tr>
-  #   </tbody>
-  # </table>
-  #
-  # ### 5. Asset pipeline (`E_ASSET_PIPELINE`)
-  # <table>
-  #   <thead>
-  #     <tr>
-  #       <th>Submodule</th>
-  #       <th>Title</th>
-  #       <th>Description</th>
-  #     </tr>
-  #   </thead>
-  #   <tbody>
-  #     <tr>
-  #       <td><code>ASSET_PIPELINE</code></td>
-  #       <td><strong>Asset Pipeline & ISO Disc Generation</strong></td>
-  #       <td>Importers for 3D meshes (OBJ, glTF, GLB), fonts (TTF, OTF, FNT), textures, audio, and ISO9660 mastering.</td>
-  #     </tr>
-  #   </tbody>
-  # </table>
-  #
-  # ### 6. Debugging (`F_DEBUGGING`)
-  # <table>
-  #   <thead>
-  #     <tr>
-  #       <th>Submodule</th>
-  #       <th>Title</th>
-  #       <th>Description</th>
-  #     </tr>
-  #   </thead>
-  #   <tbody>
-  #     <tr>
-  #       <td><code>DEBUGGING</code></td>
-  #       <td><strong>Debugging with Radare2 & PCSX2</strong></td>
-  #       <td>Disassembly, SPRAM memory inspection, GDB stub debugging, and symbol exploration.</td>
-  #     </tr>
-  #   </tbody>
-  # </table>
-  #
-  # ### 7. Concurrency (`G_CONCURRENCY`)
-  # <table>
-  #   <thead>
-  #     <tr>
-  #       <th>Submodule</th>
-  #       <th>Title</th>
-  #       <th>Description</th>
-  #     </tr>
-  #   </thead>
-  #   <tbody>
-  #     <tr>
-  #       <td><code>CONCURRENCY</code></td>
-  #       <td><strong>Cooperative Concurrency & CSP Channels</strong></td>
-  #       <td>Microsecond coroutines, bounded CSP channels, zero dynamic allocation, and safety on the PS2 Emotion Engine.</td>
-  #     </tr>
-  #   </tbody>
-  # </table>
-  #
-  # ### 8. Media pipeline (`H_MEDIA_PIPELINE`)
-  # <table>
-  #   <thead>
-  #     <tr>
-  #       <th>Submodule</th>
-  #       <th>Title</th>
-  #       <th>Description</th>
-  #     </tr>
-  #   </thead>
-  #   <tbody>
-  #     <tr>
-  #       <td><code>MEDIA_PIPELINE</code></td>
-  #       <td><strong>Fluorite Universal Media Pipeline</strong></td>
-  #       <td>FFmpeg-powered transcoding for PS2 IPU video streaming, SPU2 ADPCM audio, and GS CLUT paletted textures.</td>
-  #     </tr>
-  #   </tbody>
-  # </table>
-  #
-  # ### 9. Testing suite (`I_TESTING_SUITE`)
-  # <table>
-  #   <thead>
-  #     <tr>
-  #       <th>Submodule</th>
-  #       <th>Title</th>
-  #       <th>Description</th>
-  #     </tr>
-  #   </thead>
-  #   <tbody>
-  #     <tr>
-  #       <td><code>TESTING_SUITE</code></td>
-  #       <td><strong>PS2 Hardware Testing Suite & Spec DSL</strong></td>
-  #       <td>Automated PCSX2 testing suite with hardware matchers, SPRAM corruption detection, and crash symbolication.</td>
-  #     </tr>
-  #   </tbody>
-  # </table>
-  #
-  # ### 10. Metaprogramming (`J_METAPROGRAMMING`)
-  # <table>
-  #   <thead>
-  #     <tr>
-  #       <th>Submodule</th>
-  #       <th>Title</th>
-  #       <th>Description</th>
-  #     </tr>
-  #   </thead>
-  #   <tbody>
-  #     <tr>
-  #       <td><code>METAPROGRAMMING</code></td>
-  #       <td><strong>PS2 Metaprogramming, Macros & ECS</strong></td>
-  #       <td>Compile-time macro expansion, declarative ECS component memory layout, and finite state machines.</td>
-  #     </tr>
-  #   </tbody>
-  # </table>
-  #
-  # ### 11. Modular subsystems (`K_MODULAR_SUBSYSTEMS`)
-  # <table>
-  #   <thead>
-  #     <tr>
-  #       <th>Submodule</th>
-  #       <th>Title</th>
-  #       <th>Description</th>
-  #     </tr>
-  #   </thead>
-  #   <tbody>
-  #     <tr>
-  #       <td><code>MODULAR_REQUIRES_CATALOG</code></td>
-  #       <td><strong>Complete Modular Requires Catalog</strong></td>
-  #       <td>Exhaustive reference of all modular require paths in Citrine, their features, and memory budgets.</td>
-  #     </tr>
-  #     <tr>
-  #       <td><code>MODULAR_SUBSYSTEMS</code></td>
-  #       <td><strong>Modular Subsystems (Physics, UI, Scene, Hardware)</strong></td>
-  #       <td>Opt-in engine modules strictly loaded via require "citrine/..." for zero overhead in core builds.</td>
-  #     </tr>
-  #     <tr>
-  #       <td><code>CONTEXT_DSL_AND_MEMORY_SHIFTS</code></td>
-  #       <td><strong>Require-Based Context DSL & Sequential Loop Shifts</strong></td>
-  #       <td>Declarative subsystem mounting, modular user code separation, compile-time safety, and zero-fragmentation PS2 memory arenas.</td>
-  #     </tr>
-  #     <tr>
-  #       <td><code>DRAW2D_TEXTURES</code></td>
-  #       <td><strong>2D Texture Drawing DSL & PS2 Palette Swapping</strong></td>
-  #       <td>Comprehensive guide to Citrine's 2D draw_texture DSL, arbitrary rotation, matrix stack integration, and hardware CLUT palette swapping on PlayStation 2.</td>
-  #     </tr>
-  #   </tbody>
-  # </table>
-  #
-  # ### 12. Advanced subsystems (`L_ADVANCED_SUBSYSTEMS`)
-  # <table>
-  #   <thead>
-  #     <tr>
-  #       <th>Submodule</th>
-  #       <th>Title</th>
-  #       <th>Description</th>
-  #     </tr>
-  #   </thead>
-  #   <tbody>
-  #     <tr>
-  #       <td><code>ADVANCED_SUBSYSTEMS</code></td>
-  #       <td><strong>Advanced Subsystems (Std, Box2D, Hardware, Shaders)</strong></td>
-  #       <td>Comprehensive standard library, Box2D rigid body physics, USB peripherals, network sockets, and VU1/GS shaders.</td>
-  #     </tr>
-  #   </tbody>
-  # </table>
-  #
-  module Docs
-    # **Quick-Start Commands**: Essential commands for building, running, and testing.
+  module Citrine
+    # The `Citrine::Docs` module is the authoritative technical reference and documentation guide.
     #
-    # #### Citrine PlayStation 2 Toolkit Commands:
-    # ```bash
-    # citrine run examples/01_hello_pad/main.cr
-    # citrine iso examples/05_hello_world/main.cr
-    # citrine debug examples/01_hello_pad/game.cbc
-    # citrine ui
-    # ```
-    def self.topic_01_quick_start : Nil; end
+    # ## Learning Tracks & Topic Index
+    #
+    # The documentation is paced into 12 distinct tracks:
+    #
+    # ### 1. Getting started (`A_GETTING_STARTED`)
+    # <table>
+    #   <thead>
+    #     <tr>
+    #       <th>Submodule</th>
+    #       <th>Title</th>
+    #       <th>Description</th>
+    #     </tr>
+    #   </thead>
+    #   <tbody>
+    #     <tr>
+    #       <td><code>GETTING_STARTED</code></td>
+    #       <td><strong>Getting Started with Citrine PS2</strong></td>
+    #       <td>Complete introduction to the Crystal VM and Raylib-style PlayStation 2 toolkit.</td>
+    #     </tr>
+    #   </tbody>
+    # </table>
+    #
+    # ### 2. Ps2 hardware (`B_PS2_HARDWARE`)
+    # <table>
+    #   <thead>
+    #     <tr>
+    #       <th>Submodule</th>
+    #       <th>Title</th>
+    #       <th>Description</th>
+    #     </tr>
+    #   </thead>
+    #   <tbody>
+    #     <tr>
+    #       <td><code>PS2_HARDWARE</code></td>
+    #       <td><strong>PlayStation 2 Hardware Architecture</strong></td>
+    #       <td>In-depth guide to the Emotion Engine, Scratchpad RAM, and Graphic Synthesizer.</td>
+    #     </tr>
+    #   </tbody>
+    # </table>
+    #
+    # ### 3. Virtual machine (`C_VIRTUAL_MACHINE`)
+    # <table>
+    #   <thead>
+    #     <tr>
+    #       <th>Submodule</th>
+    #       <th>Title</th>
+    #       <th>Description</th>
+    #     </tr>
+    #   </thead>
+    #   <tbody>
+    #     <tr>
+    #       <td><code>VIRTUAL_MACHINE</code></td>
+    #       <td><strong>Citrine Virtual Machine Architecture & Execution Model</strong></td>
+    #       <td>Register-based 32-bit virtual machine architecture, direct-threaded C runtime, and MIPS R5900 JIT emitter for PlayStation 2.</td>
+    #     </tr>
+    #     <tr>
+    #       <td><code>BYTECODE_OPCODES</code></td>
+    #       <td><strong>Complete VM Opcode Reference</strong></td>
+    #       <td>Exhaustive technical specification of all 43 Citrine VM instruction opcodes, operand encodings, and MIPS translations.</td>
+    #     </tr>
+    #     <tr>
+    #       <td><code>NATIVE_FUNCTION_REFERENCE</code></td>
+    #       <td><strong>Citrine Native System Call Reference (NativeId)</strong></td>
+    #       <td>Complete reference of all 50+ Citrine VM native subsystem calls, parameters, return values, and hardware bindings.</td>
+    #     </tr>
+    #     <tr>
+    #       <td><code>HYBRID_MEMORY_MODEL</code></td>
+    #       <td><strong>4-Tier Hybrid Console Memory Architecture</strong></td>
+    #       <td>Zero-pause console memory model combining per-frame scratch pools, context arenas, explicit pointers, and idle mark-sweep.</td>
+    #     </tr>
+    #   </tbody>
+    # </table>
+    #
+    # ### 4. Raylib api (`D_RAYLIB_API`)
+    # <table>
+    #   <thead>
+    #     <tr>
+    #       <th>Submodule</th>
+    #       <th>Title</th>
+    #       <th>Description</th>
+    #     </tr>
+    #   </thead>
+    #   <tbody>
+    #     <tr>
+    #       <td><code>RAYLIB_API</code></td>
+    #       <td><strong>Raylib-style PlayStation 2 API</strong></td>
+    #       <td>Guide to 2D and 3D graphics, DualShock 2 input, and SPU2 audio playback.</td>
+    #     </tr>
+    #   </tbody>
+    # </table>
+    #
+    # ### 5. Asset pipeline (`E_ASSET_PIPELINE`)
+    # <table>
+    #   <thead>
+    #     <tr>
+    #       <th>Submodule</th>
+    #       <th>Title</th>
+    #       <th>Description</th>
+    #     </tr>
+    #   </thead>
+    #   <tbody>
+    #     <tr>
+    #       <td><code>ASSET_PIPELINE</code></td>
+    #       <td><strong>Asset Pipeline & ISO Disc Generation</strong></td>
+    #       <td>Importers for 3D meshes (OBJ, glTF, GLB), fonts (TTF, OTF, FNT), textures, audio, and ISO9660 mastering.</td>
+    #     </tr>
+    #   </tbody>
+    # </table>
+    #
+    # ### 6. Debugging (`F_DEBUGGING`)
+    # <table>
+    #   <thead>
+    #     <tr>
+    #       <th>Submodule</th>
+    #       <th>Title</th>
+    #       <th>Description</th>
+    #     </tr>
+    #   </thead>
+    #   <tbody>
+    #     <tr>
+    #       <td><code>DEBUGGING</code></td>
+    #       <td><strong>Debugging with Radare2 & PCSX2</strong></td>
+    #       <td>Disassembly, SPRAM memory inspection, GDB stub debugging, and symbol exploration.</td>
+    #     </tr>
+    #   </tbody>
+    # </table>
+    #
+    # ### 7. Concurrency (`G_CONCURRENCY`)
+    # <table>
+    #   <thead>
+    #     <tr>
+    #       <th>Submodule</th>
+    #       <th>Title</th>
+    #       <th>Description</th>
+    #     </tr>
+    #   </thead>
+    #   <tbody>
+    #     <tr>
+    #       <td><code>CONCURRENCY</code></td>
+    #       <td><strong>Cooperative Concurrency & CSP Channels</strong></td>
+    #       <td>Microsecond coroutines, bounded CSP channels, zero dynamic allocation, and safety on the PS2 Emotion Engine.</td>
+    #     </tr>
+    #   </tbody>
+    # </table>
+    #
+    # ### 8. Media pipeline (`H_MEDIA_PIPELINE`)
+    # <table>
+    #   <thead>
+    #     <tr>
+    #       <th>Submodule</th>
+    #       <th>Title</th>
+    #       <th>Description</th>
+    #     </tr>
+    #   </thead>
+    #   <tbody>
+    #     <tr>
+    #       <td><code>MEDIA_PIPELINE</code></td>
+    #       <td><strong>Fluorite Universal Media Pipeline</strong></td>
+    #       <td>FFmpeg-powered transcoding for PS2 IPU video streaming, SPU2 ADPCM audio, and GS CLUT paletted textures.</td>
+    #     </tr>
+    #   </tbody>
+    # </table>
+    #
+    # ### 9. Testing suite (`I_TESTING_SUITE`)
+    # <table>
+    #   <thead>
+    #     <tr>
+    #       <th>Submodule</th>
+    #       <th>Title</th>
+    #       <th>Description</th>
+    #     </tr>
+    #   </thead>
+    #   <tbody>
+    #     <tr>
+    #       <td><code>TESTING_SUITE</code></td>
+    #       <td><strong>PS2 Hardware Testing Suite & Spec DSL</strong></td>
+    #       <td>Automated PCSX2 testing suite with hardware matchers, SPRAM corruption detection, and crash symbolication.</td>
+    #     </tr>
+    #   </tbody>
+    # </table>
+    #
+    # ### 10. Metaprogramming (`J_METAPROGRAMMING`)
+    # <table>
+    #   <thead>
+    #     <tr>
+    #       <th>Submodule</th>
+    #       <th>Title</th>
+    #       <th>Description</th>
+    #     </tr>
+    #   </thead>
+    #   <tbody>
+    #     <tr>
+    #       <td><code>METAPROGRAMMING</code></td>
+    #       <td><strong>PS2 Metaprogramming, Macros & ECS</strong></td>
+    #       <td>Compile-time macro expansion, declarative ECS component memory layout, and finite state machines.</td>
+    #     </tr>
+    #   </tbody>
+    # </table>
+    #
+    # ### 11. Modular subsystems (`K_MODULAR_SUBSYSTEMS`)
+    # <table>
+    #   <thead>
+    #     <tr>
+    #       <th>Submodule</th>
+    #       <th>Title</th>
+    #       <th>Description</th>
+    #     </tr>
+    #   </thead>
+    #   <tbody>
+    #     <tr>
+    #       <td><code>MODULAR_REQUIRES_CATALOG</code></td>
+    #       <td><strong>Complete Modular Requires Catalog</strong></td>
+    #       <td>Exhaustive reference of all modular require paths in Citrine, their features, and memory budgets.</td>
+    #     </tr>
+    #     <tr>
+    #       <td><code>MODULAR_SUBSYSTEMS</code></td>
+    #       <td><strong>Modular Subsystems (Physics, UI, Scene, Hardware)</strong></td>
+    #       <td>Opt-in engine modules strictly loaded via require "citrine/..." for zero overhead in core builds.</td>
+    #     </tr>
+    #     <tr>
+    #       <td><code>CONTEXT_DSL_AND_MEMORY_SHIFTS</code></td>
+    #       <td><strong>Require-Based Context DSL & Sequential Loop Shifts</strong></td>
+    #       <td>Declarative subsystem mounting, modular user code separation, compile-time safety, and zero-fragmentation PS2 memory arenas.</td>
+    #     </tr>
+    #     <tr>
+    #       <td><code>DRAW2D_TEXTURES</code></td>
+    #       <td><strong>2D Texture Drawing DSL & PS2 Palette Swapping</strong></td>
+    #       <td>Comprehensive guide to Citrine's 2D draw_texture DSL, arbitrary rotation, matrix stack integration, and hardware CLUT palette swapping on PlayStation 2.</td>
+    #     </tr>
+    #   </tbody>
+    # </table>
+    #
+    # ### 12. Advanced subsystems (`L_ADVANCED_SUBSYSTEMS`)
+    # <table>
+    #   <thead>
+    #     <tr>
+    #       <th>Submodule</th>
+    #       <th>Title</th>
+    #       <th>Description</th>
+    #     </tr>
+    #   </thead>
+    #   <tbody>
+    #     <tr>
+    #       <td><code>ADVANCED_SUBSYSTEMS</code></td>
+    #       <td><strong>Advanced Subsystems (Std, Box2D, Hardware, Shaders)</strong></td>
+    #       <td>Comprehensive standard library, Box2D rigid body physics, USB peripherals, network sockets, and VU1/GS shaders.</td>
+    #     </tr>
+    #   </tbody>
+    # </table>
+    #
+    module Docs
+      # **Quick-Start Commands**: Essential commands for building, running, and testing.
+      #
+      # #### Citrine PlayStation 2 Toolkit Commands:
+      # ```bash
+      # citrine run examples/01_hello_pad/main.cr
+      # citrine iso examples/05_hello_world/main.cr
+      # citrine debug examples/01_hello_pad/game.cbc
+      # citrine ui
+      # ```
+      def self.topic_01_quick_start : Nil; end
 
-    # **Learning Tracks & Reading Paths**: Curated reading order from beginner to advanced.
-    #
-    # #### Structured Learning Tracks
-    #
-    # ##### 1. Getting started (`A_GETTING_STARTED`)
-    # - `A_GETTING_STARTED::GETTING_STARTED`: **Getting Started with Citrine PS2** &mdash; Complete introduction to the Crystal VM and Raylib-style PlayStation 2 toolkit.
-    #
-    # ##### 2. Ps2 hardware (`B_PS2_HARDWARE`)
-    # - `B_PS2_HARDWARE::PS2_HARDWARE`: **PlayStation 2 Hardware Architecture** &mdash; In-depth guide to the Emotion Engine, Scratchpad RAM, and Graphic Synthesizer.
-    #
-    # ##### 3. Virtual machine (`C_VIRTUAL_MACHINE`)
-    # - `C_VIRTUAL_MACHINE::VIRTUAL_MACHINE`: **Citrine Virtual Machine Architecture & Execution Model** &mdash; Register-based 32-bit virtual machine architecture, direct-threaded C runtime, and MIPS R5900 JIT emitter for PlayStation 2.
-    # - `C_VIRTUAL_MACHINE::BYTECODE_OPCODES`: **Complete VM Opcode Reference** &mdash; Exhaustive technical specification of all 43 Citrine VM instruction opcodes, operand encodings, and MIPS translations.
-    # - `C_VIRTUAL_MACHINE::NATIVE_FUNCTION_REFERENCE`: **Citrine Native System Call Reference (NativeId)** &mdash; Complete reference of all 50+ Citrine VM native subsystem calls, parameters, return values, and hardware bindings.
-    # - `C_VIRTUAL_MACHINE::HYBRID_MEMORY_MODEL`: **4-Tier Hybrid Console Memory Architecture** &mdash; Zero-pause console memory model combining per-frame scratch pools, context arenas, explicit pointers, and idle mark-sweep.
-    #
-    # ##### 4. Raylib api (`D_RAYLIB_API`)
-    # - `D_RAYLIB_API::RAYLIB_API`: **Raylib-style PlayStation 2 API** &mdash; Guide to 2D and 3D graphics, DualShock 2 input, and SPU2 audio playback.
-    #
-    # ##### 5. Asset pipeline (`E_ASSET_PIPELINE`)
-    # - `E_ASSET_PIPELINE::ASSET_PIPELINE`: **Asset Pipeline & ISO Disc Generation** &mdash; Importers for 3D meshes (OBJ, glTF, GLB), fonts (TTF, OTF, FNT), textures, audio, and ISO9660 mastering.
-    #
-    # ##### 6. Debugging (`F_DEBUGGING`)
-    # - `F_DEBUGGING::DEBUGGING`: **Debugging with Radare2 & PCSX2** &mdash; Disassembly, SPRAM memory inspection, GDB stub debugging, and symbol exploration.
-    #
-    # ##### 7. Concurrency (`G_CONCURRENCY`)
-    # - `G_CONCURRENCY::CONCURRENCY`: **Cooperative Concurrency & CSP Channels** &mdash; Microsecond coroutines, bounded CSP channels, zero dynamic allocation, and safety on the PS2 Emotion Engine.
-    #
-    # ##### 8. Media pipeline (`H_MEDIA_PIPELINE`)
-    # - `H_MEDIA_PIPELINE::MEDIA_PIPELINE`: **Fluorite Universal Media Pipeline** &mdash; FFmpeg-powered transcoding for PS2 IPU video streaming, SPU2 ADPCM audio, and GS CLUT paletted textures.
-    #
-    # ##### 9. Testing suite (`I_TESTING_SUITE`)
-    # - `I_TESTING_SUITE::TESTING_SUITE`: **PS2 Hardware Testing Suite & Spec DSL** &mdash; Automated PCSX2 testing suite with hardware matchers, SPRAM corruption detection, and crash symbolication.
-    #
-    # ##### 10. Metaprogramming (`J_METAPROGRAMMING`)
-    # - `J_METAPROGRAMMING::METAPROGRAMMING`: **PS2 Metaprogramming, Macros & ECS** &mdash; Compile-time macro expansion, declarative ECS component memory layout, and finite state machines.
-    #
-    # ##### 11. Modular subsystems (`K_MODULAR_SUBSYSTEMS`)
-    # - `K_MODULAR_SUBSYSTEMS::MODULAR_REQUIRES_CATALOG`: **Complete Modular Requires Catalog** &mdash; Exhaustive reference of all modular require paths in Citrine, their features, and memory budgets.
-    # - `K_MODULAR_SUBSYSTEMS::MODULAR_SUBSYSTEMS`: **Modular Subsystems (Physics, UI, Scene, Hardware)** &mdash; Opt-in engine modules strictly loaded via require "citrine/..." for zero overhead in core builds.
-    # - `K_MODULAR_SUBSYSTEMS::CONTEXT_DSL_AND_MEMORY_SHIFTS`: **Require-Based Context DSL & Sequential Loop Shifts** &mdash; Declarative subsystem mounting, modular user code separation, compile-time safety, and zero-fragmentation PS2 memory arenas.
-    # - `K_MODULAR_SUBSYSTEMS::DRAW2D_TEXTURES`: **2D Texture Drawing DSL & PS2 Palette Swapping** &mdash; Comprehensive guide to Citrine's 2D draw_texture DSL, arbitrary rotation, matrix stack integration, and hardware CLUT palette swapping on PlayStation 2.
-    #
-    # ##### 12. Advanced subsystems (`L_ADVANCED_SUBSYSTEMS`)
-    # - `L_ADVANCED_SUBSYSTEMS::ADVANCED_SUBSYSTEMS`: **Advanced Subsystems (Std, Box2D, Hardware, Shaders)** &mdash; Comprehensive standard library, Box2D rigid body physics, USB peripherals, network sockets, and VU1/GS shaders.
-    #
-    def self.topic_02_reading_paths : Nil; end
+      # **Learning Tracks & Reading Paths**: Curated reading order from beginner to advanced.
+      #
+      # #### Structured Learning Tracks
+      #
+      # ##### 1. Getting started (`A_GETTING_STARTED`)
+      # - `A_GETTING_STARTED::GETTING_STARTED`: **Getting Started with Citrine PS2** &mdash; Complete introduction to the Crystal VM and Raylib-style PlayStation 2 toolkit.
+      #
+      # ##### 2. Ps2 hardware (`B_PS2_HARDWARE`)
+      # - `B_PS2_HARDWARE::PS2_HARDWARE`: **PlayStation 2 Hardware Architecture** &mdash; In-depth guide to the Emotion Engine, Scratchpad RAM, and Graphic Synthesizer.
+      #
+      # ##### 3. Virtual machine (`C_VIRTUAL_MACHINE`)
+      # - `C_VIRTUAL_MACHINE::VIRTUAL_MACHINE`: **Citrine Virtual Machine Architecture & Execution Model** &mdash; Register-based 32-bit virtual machine architecture, direct-threaded C runtime, and MIPS R5900 JIT emitter for PlayStation 2.
+      # - `C_VIRTUAL_MACHINE::BYTECODE_OPCODES`: **Complete VM Opcode Reference** &mdash; Exhaustive technical specification of all 43 Citrine VM instruction opcodes, operand encodings, and MIPS translations.
+      # - `C_VIRTUAL_MACHINE::NATIVE_FUNCTION_REFERENCE`: **Citrine Native System Call Reference (NativeId)** &mdash; Complete reference of all 50+ Citrine VM native subsystem calls, parameters, return values, and hardware bindings.
+      # - `C_VIRTUAL_MACHINE::HYBRID_MEMORY_MODEL`: **4-Tier Hybrid Console Memory Architecture** &mdash; Zero-pause console memory model combining per-frame scratch pools, context arenas, explicit pointers, and idle mark-sweep.
+      #
+      # ##### 4. Raylib api (`D_RAYLIB_API`)
+      # - `D_RAYLIB_API::RAYLIB_API`: **Raylib-style PlayStation 2 API** &mdash; Guide to 2D and 3D graphics, DualShock 2 input, and SPU2 audio playback.
+      #
+      # ##### 5. Asset pipeline (`E_ASSET_PIPELINE`)
+      # - `E_ASSET_PIPELINE::ASSET_PIPELINE`: **Asset Pipeline & ISO Disc Generation** &mdash; Importers for 3D meshes (OBJ, glTF, GLB), fonts (TTF, OTF, FNT), textures, audio, and ISO9660 mastering.
+      #
+      # ##### 6. Debugging (`F_DEBUGGING`)
+      # - `F_DEBUGGING::DEBUGGING`: **Debugging with Radare2 & PCSX2** &mdash; Disassembly, SPRAM memory inspection, GDB stub debugging, and symbol exploration.
+      #
+      # ##### 7. Concurrency (`G_CONCURRENCY`)
+      # - `G_CONCURRENCY::CONCURRENCY`: **Cooperative Concurrency & CSP Channels** &mdash; Microsecond coroutines, bounded CSP channels, zero dynamic allocation, and safety on the PS2 Emotion Engine.
+      #
+      # ##### 8. Media pipeline (`H_MEDIA_PIPELINE`)
+      # - `H_MEDIA_PIPELINE::MEDIA_PIPELINE`: **Fluorite Universal Media Pipeline** &mdash; FFmpeg-powered transcoding for PS2 IPU video streaming, SPU2 ADPCM audio, and GS CLUT paletted textures.
+      #
+      # ##### 9. Testing suite (`I_TESTING_SUITE`)
+      # - `I_TESTING_SUITE::TESTING_SUITE`: **PS2 Hardware Testing Suite & Spec DSL** &mdash; Automated PCSX2 testing suite with hardware matchers, SPRAM corruption detection, and crash symbolication.
+      #
+      # ##### 10. Metaprogramming (`J_METAPROGRAMMING`)
+      # - `J_METAPROGRAMMING::METAPROGRAMMING`: **PS2 Metaprogramming, Macros & ECS** &mdash; Compile-time macro expansion, declarative ECS component memory layout, and finite state machines.
+      #
+      # ##### 11. Modular subsystems (`K_MODULAR_SUBSYSTEMS`)
+      # - `K_MODULAR_SUBSYSTEMS::MODULAR_REQUIRES_CATALOG`: **Complete Modular Requires Catalog** &mdash; Exhaustive reference of all modular require paths in Citrine, their features, and memory budgets.
+      # - `K_MODULAR_SUBSYSTEMS::MODULAR_SUBSYSTEMS`: **Modular Subsystems (Physics, UI, Scene, Hardware)** &mdash; Opt-in engine modules strictly loaded via require "citrine/..." for zero overhead in core builds.
+      # - `K_MODULAR_SUBSYSTEMS::CONTEXT_DSL_AND_MEMORY_SHIFTS`: **Require-Based Context DSL & Sequential Loop Shifts** &mdash; Declarative subsystem mounting, modular user code separation, compile-time safety, and zero-fragmentation PS2 memory arenas.
+      # - `K_MODULAR_SUBSYSTEMS::DRAW2D_TEXTURES`: **2D Texture Drawing DSL & PS2 Palette Swapping** &mdash; Comprehensive guide to Citrine's 2D draw_texture DSL, arbitrary rotation, matrix stack integration, and hardware CLUT palette swapping on PlayStation 2.
+      #
+      # ##### 12. Advanced subsystems (`L_ADVANCED_SUBSYSTEMS`)
+      # - `L_ADVANCED_SUBSYSTEMS::ADVANCED_SUBSYSTEMS`: **Advanced Subsystems (Std, Box2D, Hardware, Shaders)** &mdash; Comprehensive standard library, Box2D rigid body physics, USB peripherals, network sockets, and VU1/GS shaders.
+      #
+      def self.topic_02_reading_paths : Nil; end
 
-    # **Master Table of Contents**: Complete hierarchical topic index.
-    #
-    # #### Complete Documentation Index
-    #
-    # ##### `A_GETTING_STARTED`
-    # - `A_GETTING_STARTED::GETTING_STARTED`: **Getting Started with Citrine PS2** &mdash; Complete introduction to the Crystal VM and Raylib-style PlayStation 2 toolkit.
-    #
-    # ##### `B_PS2_HARDWARE`
-    # - `B_PS2_HARDWARE::PS2_HARDWARE`: **PlayStation 2 Hardware Architecture** &mdash; In-depth guide to the Emotion Engine, Scratchpad RAM, and Graphic Synthesizer.
-    #
-    # ##### `C_VIRTUAL_MACHINE`
-    # - `C_VIRTUAL_MACHINE::VIRTUAL_MACHINE`: **Citrine Virtual Machine Architecture & Execution Model** &mdash; Register-based 32-bit virtual machine architecture, direct-threaded C runtime, and MIPS R5900 JIT emitter for PlayStation 2.
-    # - `C_VIRTUAL_MACHINE::BYTECODE_OPCODES`: **Complete VM Opcode Reference** &mdash; Exhaustive technical specification of all 43 Citrine VM instruction opcodes, operand encodings, and MIPS translations.
-    # - `C_VIRTUAL_MACHINE::NATIVE_FUNCTION_REFERENCE`: **Citrine Native System Call Reference (NativeId)** &mdash; Complete reference of all 50+ Citrine VM native subsystem calls, parameters, return values, and hardware bindings.
-    # - `C_VIRTUAL_MACHINE::HYBRID_MEMORY_MODEL`: **4-Tier Hybrid Console Memory Architecture** &mdash; Zero-pause console memory model combining per-frame scratch pools, context arenas, explicit pointers, and idle mark-sweep.
-    #
-    # ##### `D_RAYLIB_API`
-    # - `D_RAYLIB_API::RAYLIB_API`: **Raylib-style PlayStation 2 API** &mdash; Guide to 2D and 3D graphics, DualShock 2 input, and SPU2 audio playback.
-    #
-    # ##### `E_ASSET_PIPELINE`
-    # - `E_ASSET_PIPELINE::ASSET_PIPELINE`: **Asset Pipeline & ISO Disc Generation** &mdash; Importers for 3D meshes (OBJ, glTF, GLB), fonts (TTF, OTF, FNT), textures, audio, and ISO9660 mastering.
-    #
-    # ##### `F_DEBUGGING`
-    # - `F_DEBUGGING::DEBUGGING`: **Debugging with Radare2 & PCSX2** &mdash; Disassembly, SPRAM memory inspection, GDB stub debugging, and symbol exploration.
-    #
-    # ##### `G_CONCURRENCY`
-    # - `G_CONCURRENCY::CONCURRENCY`: **Cooperative Concurrency & CSP Channels** &mdash; Microsecond coroutines, bounded CSP channels, zero dynamic allocation, and safety on the PS2 Emotion Engine.
-    #
-    # ##### `H_MEDIA_PIPELINE`
-    # - `H_MEDIA_PIPELINE::MEDIA_PIPELINE`: **Fluorite Universal Media Pipeline** &mdash; FFmpeg-powered transcoding for PS2 IPU video streaming, SPU2 ADPCM audio, and GS CLUT paletted textures.
-    #
-    # ##### `I_TESTING_SUITE`
-    # - `I_TESTING_SUITE::TESTING_SUITE`: **PS2 Hardware Testing Suite & Spec DSL** &mdash; Automated PCSX2 testing suite with hardware matchers, SPRAM corruption detection, and crash symbolication.
-    #
-    # ##### `J_METAPROGRAMMING`
-    # - `J_METAPROGRAMMING::METAPROGRAMMING`: **PS2 Metaprogramming, Macros & ECS** &mdash; Compile-time macro expansion, declarative ECS component memory layout, and finite state machines.
-    #
-    # ##### `K_MODULAR_SUBSYSTEMS`
-    # - `K_MODULAR_SUBSYSTEMS::MODULAR_REQUIRES_CATALOG`: **Complete Modular Requires Catalog** &mdash; Exhaustive reference of all modular require paths in Citrine, their features, and memory budgets.
-    # - `K_MODULAR_SUBSYSTEMS::MODULAR_SUBSYSTEMS`: **Modular Subsystems (Physics, UI, Scene, Hardware)** &mdash; Opt-in engine modules strictly loaded via require "citrine/..." for zero overhead in core builds.
-    # - `K_MODULAR_SUBSYSTEMS::CONTEXT_DSL_AND_MEMORY_SHIFTS`: **Require-Based Context DSL & Sequential Loop Shifts** &mdash; Declarative subsystem mounting, modular user code separation, compile-time safety, and zero-fragmentation PS2 memory arenas.
-    # - `K_MODULAR_SUBSYSTEMS::DRAW2D_TEXTURES`: **2D Texture Drawing DSL & PS2 Palette Swapping** &mdash; Comprehensive guide to Citrine's 2D draw_texture DSL, arbitrary rotation, matrix stack integration, and hardware CLUT palette swapping on PlayStation 2.
-    #
-    # ##### `L_ADVANCED_SUBSYSTEMS`
-    # - `L_ADVANCED_SUBSYSTEMS::ADVANCED_SUBSYSTEMS`: **Advanced Subsystems (Std, Box2D, Hardware, Shaders)** &mdash; Comprehensive standard library, Box2D rigid body physics, USB peripherals, network sockets, and VU1/GS shaders.
-    #
-    def self.topic_03_table_of_contents : Nil; end
+      # **Master Table of Contents**: Complete hierarchical topic index.
+      #
+      # #### Complete Documentation Index
+      #
+      # ##### `A_GETTING_STARTED`
+      # - `A_GETTING_STARTED::GETTING_STARTED`: **Getting Started with Citrine PS2** &mdash; Complete introduction to the Crystal VM and Raylib-style PlayStation 2 toolkit.
+      #
+      # ##### `B_PS2_HARDWARE`
+      # - `B_PS2_HARDWARE::PS2_HARDWARE`: **PlayStation 2 Hardware Architecture** &mdash; In-depth guide to the Emotion Engine, Scratchpad RAM, and Graphic Synthesizer.
+      #
+      # ##### `C_VIRTUAL_MACHINE`
+      # - `C_VIRTUAL_MACHINE::VIRTUAL_MACHINE`: **Citrine Virtual Machine Architecture & Execution Model** &mdash; Register-based 32-bit virtual machine architecture, direct-threaded C runtime, and MIPS R5900 JIT emitter for PlayStation 2.
+      # - `C_VIRTUAL_MACHINE::BYTECODE_OPCODES`: **Complete VM Opcode Reference** &mdash; Exhaustive technical specification of all 43 Citrine VM instruction opcodes, operand encodings, and MIPS translations.
+      # - `C_VIRTUAL_MACHINE::NATIVE_FUNCTION_REFERENCE`: **Citrine Native System Call Reference (NativeId)** &mdash; Complete reference of all 50+ Citrine VM native subsystem calls, parameters, return values, and hardware bindings.
+      # - `C_VIRTUAL_MACHINE::HYBRID_MEMORY_MODEL`: **4-Tier Hybrid Console Memory Architecture** &mdash; Zero-pause console memory model combining per-frame scratch pools, context arenas, explicit pointers, and idle mark-sweep.
+      #
+      # ##### `D_RAYLIB_API`
+      # - `D_RAYLIB_API::RAYLIB_API`: **Raylib-style PlayStation 2 API** &mdash; Guide to 2D and 3D graphics, DualShock 2 input, and SPU2 audio playback.
+      #
+      # ##### `E_ASSET_PIPELINE`
+      # - `E_ASSET_PIPELINE::ASSET_PIPELINE`: **Asset Pipeline & ISO Disc Generation** &mdash; Importers for 3D meshes (OBJ, glTF, GLB), fonts (TTF, OTF, FNT), textures, audio, and ISO9660 mastering.
+      #
+      # ##### `F_DEBUGGING`
+      # - `F_DEBUGGING::DEBUGGING`: **Debugging with Radare2 & PCSX2** &mdash; Disassembly, SPRAM memory inspection, GDB stub debugging, and symbol exploration.
+      #
+      # ##### `G_CONCURRENCY`
+      # - `G_CONCURRENCY::CONCURRENCY`: **Cooperative Concurrency & CSP Channels** &mdash; Microsecond coroutines, bounded CSP channels, zero dynamic allocation, and safety on the PS2 Emotion Engine.
+      #
+      # ##### `H_MEDIA_PIPELINE`
+      # - `H_MEDIA_PIPELINE::MEDIA_PIPELINE`: **Fluorite Universal Media Pipeline** &mdash; FFmpeg-powered transcoding for PS2 IPU video streaming, SPU2 ADPCM audio, and GS CLUT paletted textures.
+      #
+      # ##### `I_TESTING_SUITE`
+      # - `I_TESTING_SUITE::TESTING_SUITE`: **PS2 Hardware Testing Suite & Spec DSL** &mdash; Automated PCSX2 testing suite with hardware matchers, SPRAM corruption detection, and crash symbolication.
+      #
+      # ##### `J_METAPROGRAMMING`
+      # - `J_METAPROGRAMMING::METAPROGRAMMING`: **PS2 Metaprogramming, Macros & ECS** &mdash; Compile-time macro expansion, declarative ECS component memory layout, and finite state machines.
+      #
+      # ##### `K_MODULAR_SUBSYSTEMS`
+      # - `K_MODULAR_SUBSYSTEMS::MODULAR_REQUIRES_CATALOG`: **Complete Modular Requires Catalog** &mdash; Exhaustive reference of all modular require paths in Citrine, their features, and memory budgets.
+      # - `K_MODULAR_SUBSYSTEMS::MODULAR_SUBSYSTEMS`: **Modular Subsystems (Physics, UI, Scene, Hardware)** &mdash; Opt-in engine modules strictly loaded via require "citrine/..." for zero overhead in core builds.
+      # - `K_MODULAR_SUBSYSTEMS::CONTEXT_DSL_AND_MEMORY_SHIFTS`: **Require-Based Context DSL & Sequential Loop Shifts** &mdash; Declarative subsystem mounting, modular user code separation, compile-time safety, and zero-fragmentation PS2 memory arenas.
+      # - `K_MODULAR_SUBSYSTEMS::DRAW2D_TEXTURES`: **2D Texture Drawing DSL & PS2 Palette Swapping** &mdash; Comprehensive guide to Citrine's 2D draw_texture DSL, arbitrary rotation, matrix stack integration, and hardware CLUT palette swapping on PlayStation 2.
+      #
+      # ##### `L_ADVANCED_SUBSYSTEMS`
+      # - `L_ADVANCED_SUBSYSTEMS::ADVANCED_SUBSYSTEMS`: **Advanced Subsystems (Std, Box2D, Hardware, Shaders)** &mdash; Comprehensive standard library, Box2D rigid body physics, USB peripherals, network sockets, and VU1/GS shaders.
+      #
+      def self.topic_03_table_of_contents : Nil; end
 
-    # :nodoc:
-    def self.quick_start : Nil; topic_01_quick_start; end
-    # :nodoc:
-    def self.reading_paths : Nil; topic_02_reading_paths; end
-    # :nodoc:
-    def self.table_of_contents : Nil; topic_03_table_of_contents; end
+      # :nodoc:
+      def self.quick_start : Nil
+        topic_01_quick_start
+      end
+
+      # :nodoc:
+      def self.reading_paths : Nil
+        topic_02_reading_paths
+      end
+
+      # :nodoc:
+      def self.table_of_contents : Nil
+        topic_03_table_of_contents
+      end
+    end
   end
-end
 
-require "./docs/a_getting_started/getting_started"
-require "./docs/b_ps2_hardware/ps2_hardware"
-require "./docs/c_virtual_machine/virtual_machine"
-require "./docs/c_virtual_machine/bytecode_opcodes"
-require "./docs/c_virtual_machine/native_function_reference"
-require "./docs/c_virtual_machine/hybrid_memory_model"
-require "./docs/d_raylib_api/raylib_api"
-require "./docs/e_asset_pipeline/asset_pipeline"
-require "./docs/f_debugging/debugging"
-require "./docs/g_concurrency/concurrency"
-require "./docs/h_media_pipeline/media_pipeline"
-require "./docs/i_testing_suite/testing_suite"
-require "./docs/j_metaprogramming/metaprogramming"
-require "./docs/k_modular_subsystems/modular_requires_catalog"
-require "./docs/k_modular_subsystems/modular_subsystems"
-require "./docs/k_modular_subsystems/context_dsl_and_memory_shifts"
-require "./docs/k_modular_subsystems/draw2d_textures"
-require "./docs/l_advanced_subsystems/advanced_subsystems"
+  require "./docs/a_getting_started/getting_started"
+  require "./docs/b_ps2_hardware/ps2_hardware"
+  require "./docs/c_virtual_machine/virtual_machine"
+  require "./docs/c_virtual_machine/bytecode_opcodes"
+  require "./docs/c_virtual_machine/native_function_reference"
+  require "./docs/c_virtual_machine/hybrid_memory_model"
+  require "./docs/d_raylib_api/raylib_api"
+  require "./docs/e_asset_pipeline/asset_pipeline"
+  require "./docs/f_debugging/debugging"
+  require "./docs/g_concurrency/concurrency"
+  require "./docs/h_media_pipeline/media_pipeline"
+  require "./docs/i_testing_suite/testing_suite"
+  require "./docs/j_metaprogramming/metaprogramming"
+  require "./docs/k_modular_subsystems/modular_requires_catalog"
+  require "./docs/k_modular_subsystems/modular_subsystems"
+  require "./docs/k_modular_subsystems/context_dsl_and_memory_shifts"
+  require "./docs/k_modular_subsystems/draw2d_textures"
+  require "./docs/l_advanced_subsystems/advanced_subsystems"
 
-alias CitrineDocs = ::Citrine::Docs
+  alias CitrineDocs = ::Citrine::Docs
 {% end %}

@@ -11,7 +11,7 @@ module Citrine
       instructions : Array(Instruction),
       fn : CompiledFunction,
       dest : UInt8,
-      obj_str : String
+      obj_str : String,
     ) : UInt8?
       # Concurrency: yield
       if node.name == "yield" && (obj_str.empty? || obj_str == "Citrine" || obj_str == "Fiber")
@@ -95,7 +95,7 @@ module Citrine
       node : Crystal::Call,
       allocator : RegisterAllocator,
       instructions : Array(Instruction),
-      fn : CompiledFunction
+      fn : CompiledFunction,
     ) : UInt8
       dest = allocator.alloc_temp
       block = node.block

@@ -71,7 +71,6 @@ module Citrine
           end
         end
         Crystal::Expressions.new(expanded_exprs)
-
       when Crystal::ClassDef
         cls_name = node.name.to_s
         type_info = TypeInfo.new(cls_name)
@@ -86,16 +85,13 @@ module Citrine
 
         @current_type = old_type
         node
-
       when Crystal::Def
         if body = node.body
           node.body = expand(body)
         end
         node
-
       when Crystal::MacroFor
         expand_macro_for(node)
-
       when Crystal::Assign
         node.target = expand(node.target)
         node.value = expand(node.value)
@@ -106,12 +102,10 @@ module Citrine
           end
         end
         node
-
       when Crystal::BinaryOp
         node.left = expand(node.left)
         node.right = expand(node.right)
         node
-
       when Crystal::If
         node.cond = expand(node.cond)
         node.then = expand(node.then)
@@ -119,12 +113,10 @@ module Citrine
           node.else = expand(node_else)
         end
         node
-
       when Crystal::While
         node.cond = expand(node.cond)
         node.body = expand(node.body)
         node
-
       when Crystal::Call
         if is_macro_call?(node)
           expanded = expand_call(node)
@@ -157,7 +149,6 @@ module Citrine
 
           node
         end
-
       else
         node
       end
@@ -219,7 +210,7 @@ module Citrine
         "bake_dvd_video",
         "bake_spu2_sound",
         "album_track_count",
-        "disc_files"
+        "disc_files",
       ].includes?(call.name)
 
       is_citrine_media_macro = (call.obj.nil? || ["Citrine", "Citrine::Audio", "Audio"].includes?(call.obj.to_s)) && [
@@ -235,7 +226,7 @@ module Citrine
         "album_track_duration_strings",
         "album_title",
         "album_name",
-        "album_artist"
+        "album_artist",
       ].includes?(call.name)
 
       is_citrine_bake_macro ||
@@ -332,10 +323,10 @@ module Citrine
       if (exp_str.includes?("@type.instance_vars") || exp_str.includes?("instance_vars")) && (t = @current_type)
         t.instance_vars.each do |iv|
           env = {
-            var_name => iv.name,
+            var_name           => iv.name,
             "#{var_name}.name" => iv.name,
             "#{var_name}.type" => iv.type_name,
-            "@type.name" => t.name
+            "@type.name"       => t.name,
           }
           code_str = String.build do |io|
             dump_macro_body(node.body, env, io)
@@ -353,9 +344,9 @@ module Citrine
       elsif (exp_str.includes?("@type.methods") || exp_str.includes?("methods")) && (t = @current_type)
         t.methods.each do |m|
           env = {
-            var_name => m.name,
+            var_name           => m.name,
             "#{var_name}.name" => m.name,
-            "@type.name" => t.name
+            "@type.name"       => t.name,
           }
           code_str = String.build do |io|
             dump_macro_body(node.body, env, io)
@@ -731,10 +722,10 @@ module Citrine
         elsif narg.name == "quality"
           val = narg.value.to_s.sub(/^:/, "")
           case val
-          when "hi", "high", "studio" then bitrate = 192_000
+          when "hi", "high", "studio"      then bitrate = 192_000
           when "mid", "medium", "standard" then bitrate = 96_000
-          when "low", "compact" then bitrate = 64_000
-          when "voice", "speech" then bitrate = 32_000
+          when "low", "compact"            then bitrate = 64_000
+          when "voice", "speech"           then bitrate = 32_000
           end
         end
       end)
@@ -781,10 +772,10 @@ module Citrine
         elsif narg.name == "quality"
           val = narg.value.to_s.sub(/^:/, "")
           case val
-          when "hi", "high", "studio" then bitrate = 192_000
+          when "hi", "high", "studio"      then bitrate = 192_000
           when "mid", "medium", "standard" then bitrate = 96_000
-          when "low", "compact" then bitrate = 64_000
-          when "voice", "speech" then bitrate = 32_000
+          when "low", "compact"            then bitrate = 64_000
+          when "voice", "speech"           then bitrate = 32_000
           end
         end
       end)
@@ -1108,7 +1099,7 @@ module Citrine
               Crystal::NumberLiteral.new(dur_i),
               Crystal::StringLiteral.new(dur_s),
               Crystal::StringLiteral.new(stream_basename),
-              Crystal::StringLiteral.new(optical_str)
+              Crystal::StringLiteral.new(optical_str),
             ] of Crystal::ASTNode
           )
           track_nodes << track_call
@@ -1122,10 +1113,9 @@ module Citrine
         [
           Crystal::StringLiteral.new(album_title),
           Crystal::StringLiteral.new(album_artist),
-          tracks_array
+          tracks_array,
         ] of Crystal::ASTNode
       )
     end
   end
 end
-

@@ -8,7 +8,7 @@ module Citrine
     # child fibers complete before the enclosing scope block returns.
     #
     # Example:
-    # ```crystal
+    # ```
     # Citrine.with_scope do |s|
     #   s.spawn { process_mesh }
     #   s.spawn { load_audio }

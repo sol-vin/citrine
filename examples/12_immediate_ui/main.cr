@@ -9,13 +9,13 @@ Citrine.init_window(640, 448, "Citrine PS2 - Immediate-Mode UI")
 Citrine.set_target_fps(60)
 
 # Pre-allocated color constants (0 heap allocations inside main loop)
-BG_COLOR       = Color.new(20_u8, 24_u8, 35_u8, 255_u8)
-HEADER_COLOR   = Color.new(30_u8, 38_u8, 55_u8, 255_u8)
-TEXT_WHITE     = Color.new(240_u8, 245_u8, 255_u8, 255_u8)
-FOOTER_BG      = Color.new(25_u8, 32_u8, 45_u8, 240_u8)
-STATUS_GOLD    = Color.new(255_u8, 215_u8, 0_u8, 255_u8)
-STATUS_MUTED   = Color.new(170_u8, 180_u8, 200_u8, 255_u8)
-FOCUS_OUTLINE  = Color.new(52_u8, 152_u8, 219_u8, 220_u8)
+BG_COLOR      = Color.new(20_u8, 24_u8, 35_u8, 255_u8)
+HEADER_COLOR  = Color.new(30_u8, 38_u8, 55_u8, 255_u8)
+TEXT_WHITE    = Color.new(240_u8, 245_u8, 255_u8, 255_u8)
+FOOTER_BG     = Color.new(25_u8, 32_u8, 45_u8, 240_u8)
+STATUS_GOLD   = Color.new(255_u8, 215_u8, 0_u8, 255_u8)
+STATUS_MUTED  = Color.new(170_u8, 180_u8, 200_u8, 255_u8)
+FOCUS_OUTLINE = Color.new(52_u8, 152_u8, 219_u8, 220_u8)
 
 sound_vol = 0.8_f32
 rumble_enabled = true

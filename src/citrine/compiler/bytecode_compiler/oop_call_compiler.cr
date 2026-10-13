@@ -11,7 +11,7 @@ module Citrine
       instructions : Array(Instruction),
       fn : CompiledFunction,
       dest : UInt8,
-      obj_str : String
+      obj_str : String,
     ) : UInt8?
       # Class instantiation: Foo.new(...)
       if @classes.has_key?(obj_str) && node.name == "new"

@@ -14,9 +14,8 @@ COLORS = [
   Color::Yellow,
   Color::Green,
   Color::Blue,
-  Color::Purple
+  Color::Purple,
 ]
-
 
 class Entity
   property box_x : Int32
@@ -140,9 +139,9 @@ MAX_ENTITIES.times do |i|
   r = i // cols
   bx = origin_x + c * (box_size + spacing)
   by = origin_y + r * (box_size + spacing)
-  spd = Citrine.rand(1, 4)        # Randomized speeds: 1, 2, 3, or 4 px/frame
-  corner = Citrine.rand(0, 3)     # Randomized starting corner (0=top-left, 1=top-right, 2=bottom-right, 3=bottom-left)
-  color_idx = Citrine.rand(0, 5)  # Randomized initial color
+  spd = Citrine.rand(1, 4)       # Randomized speeds: 1, 2, 3, or 4 px/frame
+  corner = Citrine.rand(0, 3)    # Randomized starting corner (0=top-left, 1=top-right, 2=bottom-right, 3=bottom-left)
+  color_idx = Citrine.rand(0, 5) # Randomized initial color
   entities << Entity.new(bx, by, box_size, spd, corner, color_idx)
 end
 
@@ -154,7 +153,6 @@ entities.each do |e|
     end
   end
 end
-
 
 Citrine.main_loop do
   Citrine.begin_drawing

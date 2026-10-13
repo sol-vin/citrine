@@ -3,13 +3,13 @@ module Citrine
     # MIPS R5900 Register Encodings
     ZERO = 0
     AT   = 1
-    V0   = 2;  V1 = 3
-    A0   = 4;  A1 = 5;  A2 = 6;  A3 = 7
-    T0   = 8;  T1 = 9;  T2 = 10; T3 = 11; T4 = 12; T5 = 13; T6 = 14; T7 = 15
-    S0   = 16; S1 = 17; S2 = 18; S3 = 19; S4 = 20; S5 = 21; S6 = 22; S7 = 23
-    T8   = 24; T9 = 25
-    K0   = 26; K1 = 27
-    GP   = 28; SP = 29; FP = 30; RA = 31
+    V0   = 2; V1 = 3
+    A0 = 4; A1 = 5; A2 = 6; A3 = 7
+    T0 = 8; T1 = 9; T2 = 10; T3 = 11; T4 = 12; T5 = 13; T6 = 14; T7 = 15
+    S0 = 16; S1 = 17; S2 = 18; S3 = 19; S4 = 20; S5 = 21; S6 = 22; S7 = 23
+    T8 = 24; T9 = 25
+    K0 = 26; K1 = 27
+    GP = 28; SP = 29; FP = 30; RA = 31
 
     # Emotion Engine MIPS R5900 Instruction Emitter
     class MipsEmitter
@@ -122,7 +122,6 @@ module Citrine
       def sq(rt : Int32, offset : Int32, base : Int32)
         emit((0x1F_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
       end
-
 
       def lb(rt : Int32, offset : Int32, base : Int32)
         emit((0x20_u32 << 26) | (base.to_u32 << 21) | (rt.to_u32 << 16) | ((offset & 0xFFFF).to_u32))
@@ -307,7 +306,6 @@ module Citrine
                !label_addrs.includes?(delay_vaddr) &&
                !@fixups.any? { |fidx, _, _| fidx == cand_idx } &&
                can_fill_delay_slot?(cand_word, branch_word)
-
               # Relocate cand_word into delay slot (replacing nop at i + 1)
               @words[i + 1] = cand_word
               # Delete cand_word at i - 1
@@ -492,7 +490,7 @@ module Citrine
         if cand_opcode == 0x00
           funct = cand_word & 0x3F
           return false if funct == 0x0C || funct == 0x0D # syscall, break
-          return false if cand_word == 0x0000040F_u32     # sync.p
+          return false if cand_word == 0x0000040F_u32    # sync.p
         end
 
         branch_reads = branch_reads_registers(branch_word)
@@ -534,7 +532,6 @@ module Citrine
           end
         end
       end
-
 
       # --- MIPS Macro DSL & Assembly Idiom Helpers ---
 
@@ -667,4 +664,3 @@ module Citrine
     end
   end
 end
-

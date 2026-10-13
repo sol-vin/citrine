@@ -159,7 +159,7 @@ describe Citrine::Importers::MeshImporter do
     mat = model.materials[0]
     mat.name.should eq("red_glow")
     mat.diffuse_color[0].should eq(255_u8) # Red ~ 1.0 * 255
-    mat.cull_mode.should eq(0_u8) # doubleSided == true -> CullMode::None
+    mat.cull_mode.should eq(0_u8)          # doubleSided == true -> CullMode::None
 
     # 5. Export to CBM2 format and verify header
     cbm2 = model.to_cbm

@@ -82,7 +82,7 @@ module Citrine
 
         puts "\n" + ("=" * 70)
         puts sprintf("Results: %d passed, %d failed in %.2f seconds", passed_count, failed_count, elapsed)
-        puts ("=" * 70)
+        puts("=" * 70)
 
         if failed_count > 0
           exit(1)

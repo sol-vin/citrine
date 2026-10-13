@@ -29,10 +29,10 @@ describe Citrine::Importers::FontImporter do
     ttf_io = IO::Memory.new
     # scalarType: 0x00010000 (OpenType / TrueType 1.0)
     ttf_io.write(Bytes[0x00, 0x01, 0x00, 0x00])
-    ttf_io.write_bytes(1_u16, IO::ByteFormat::BigEndian) # numTables = 1
+    ttf_io.write_bytes(1_u16, IO::ByteFormat::BigEndian)  # numTables = 1
     ttf_io.write_bytes(16_u16, IO::ByteFormat::BigEndian) # searchRange
-    ttf_io.write_bytes(1_u16, IO::ByteFormat::BigEndian) # entrySelector
-    ttf_io.write_bytes(0_u16, IO::ByteFormat::BigEndian) # rangeShift
+    ttf_io.write_bytes(1_u16, IO::ByteFormat::BigEndian)  # entrySelector
+    ttf_io.write_bytes(0_u16, IO::ByteFormat::BigEndian)  # rangeShift
 
     # Table record: tag="head", checkSum=0, offset=28, length=54
     ttf_io.write("head".to_slice)

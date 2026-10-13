@@ -93,7 +93,7 @@ module Citrine
         size_bytes = File.exists?(cbc_file) ? File.size(cbc_file) : 618
 
         spram_bar = render_meter(reg_count, 1024, 25)
-        vram_bar  = render_meter(384, 550, 25) # KB
+        vram_bar = render_meter(384, 550, 25) # KB
 
         puts Opal::Style.new.bold.foreground(:magenta).render("Hardware Budget Gauges (Selected Target):")
         puts "  SPRAM Registers: [#{spram_bar}] #{reg_count} / 1024 Regs (#{((reg_count.to_f / 1024.0) * 100).round(1)}%)"

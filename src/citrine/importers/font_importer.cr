@@ -18,7 +18,7 @@ module Citrine
         @char_code : Int32,
         @u0 : Float32, @v0 : Float32, @u1 : Float32, @v1 : Float32,
         @width : Int32, @height : Int32,
-        @x_offset : Int32, @y_offset : Int32, @x_advance : Int32
+        @x_offset : Int32, @y_offset : Int32, @x_advance : Int32,
       )
       end
 

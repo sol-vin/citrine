@@ -7,10 +7,10 @@ module Citrine
     class ElfWriter
       # ELF Magic & Identity Constants
       ELFMAG        = Bytes[0x7F, 0x45, 0x4C, 0x46] # \x7FELF
-      ELFCLASS32    = 1_u8
-      ELFDATA2LSB   = 1_u8
-      EV_CURRENT    = 1_u8
-      ELFOSABI_SYSV = 0_u8
+      ELFCLASS32    =  1_u8
+      ELFDATA2LSB   =  1_u8
+      EV_CURRENT    =  1_u8
+      ELFOSABI_SYSV =  0_u8
       ET_EXEC       = 2_u16
       EM_MIPS       = 8_u16
 
@@ -18,11 +18,11 @@ module Citrine
       EF_MIPS_R5900 = 0x20924001_u32
 
       # Section Types
-      SHT_NULL      = 0_u32
-      SHT_PROGBITS  = 1_u32
-      SHT_SYMTAB    = 2_u32
-      SHT_STRTAB    = 3_u32
-      SHT_NOBITS    = 8_u32
+      SHT_NULL     = 0_u32
+      SHT_PROGBITS = 1_u32
+      SHT_SYMTAB   = 2_u32
+      SHT_STRTAB   = 3_u32
+      SHT_NOBITS   = 8_u32
 
       # Section Flags
       SHF_WRITE     = 0x1_u32
@@ -30,15 +30,15 @@ module Citrine
       SHF_EXECINSTR = 0x4_u32
 
       # Program Header Types
-      PT_LOAD       = 1_u32
-      PF_R          = 4_u32
-      PF_W          = 2_u32
-      PF_X          = 1_u32
+      PT_LOAD = 1_u32
+      PF_R    = 4_u32
+      PF_W    = 2_u32
+      PF_X    = 1_u32
 
       # Symbol Bind & Types
-      STB_GLOBAL    = 1_u8
-      STT_FUNC      = 2_u8
-      STT_OBJECT    = 1_u8
+      STB_GLOBAL = 1_u8
+      STT_FUNC   = 2_u8
+      STT_OBJECT = 1_u8
 
       record SymbolDef, name : String, address : UInt32, size : UInt32, type : UInt8, binding : UInt8, section_idx : UInt16
 
@@ -51,7 +51,7 @@ module Citrine
         pad_payload : Bytes? = PadRuntimePayload.bytes,
         rodata_vaddr : UInt32 = 0x00500000_u32,
         splash_payload : Bytes? = nil,
-        splash_vaddr : UInt32 = 0x00220000_u32
+        splash_vaddr : UInt32 = 0x00220000_u32,
       ) : Bytes
         # .strtab
         strtab = IO::Memory.new
@@ -110,19 +110,19 @@ module Citrine
         shstrndx = (shnum - 1_u16).to_u16
 
         # Segment and section alignment (4096 bytes = 2 CD-ROM sectors, meeting PS2 CDVD DMA & page alignment)
-        seg_align         = 0x1000_u32
-        offset_text       = 0x1000_u32
-        offset_rodata     = (offset_text + text_data.size.to_u32 + seg_align - 1) & ~(seg_align - 1)
-        raw_pad_offset    = offset_rodata + rodata_data.size.to_u32
-        offset_pad        = (raw_pad_offset + seg_align - 1) & ~(seg_align - 1)
+        seg_align = 0x1000_u32
+        offset_text = 0x1000_u32
+        offset_rodata = (offset_text + text_data.size.to_u32 + seg_align - 1) & ~(seg_align - 1)
+        raw_pad_offset = offset_rodata + rodata_data.size.to_u32
+        offset_pad = (raw_pad_offset + seg_align - 1) & ~(seg_align - 1)
         raw_splash_offset = pad_payload ? (offset_pad + pad_payload.size.to_u32) : raw_pad_offset
-        offset_splash     = (raw_splash_offset + seg_align - 1) & ~(seg_align - 1)
-        raw_data_offset   = splash_payload ? (offset_splash + splash_payload.size.to_u32) : raw_splash_offset
-        offset_data       = (raw_data_offset + seg_align - 1) & ~(seg_align - 1)
-        offset_symtab     = offset_data + data_data.size.to_u32
-        offset_strtab     = offset_symtab + symtab_data.size.to_u32
-        offset_shstrtab   = offset_strtab + strtab_data.size.to_u32
-        shoff             = (offset_shstrtab + shstrtab_data.size.to_u32 + 3) & ~3_u32
+        offset_splash = (raw_splash_offset + seg_align - 1) & ~(seg_align - 1)
+        raw_data_offset = splash_payload ? (offset_splash + splash_payload.size.to_u32) : raw_splash_offset
+        offset_data = (raw_data_offset + seg_align - 1) & ~(seg_align - 1)
+        offset_symtab = offset_data + data_data.size.to_u32
+        offset_strtab = offset_symtab + symtab_data.size.to_u32
+        offset_shstrtab = offset_strtab + strtab_data.size.to_u32
+        shoff = (offset_shstrtab + shstrtab_data.size.to_u32 + 3) & ~3_u32
 
         io = IO::Memory.new
 

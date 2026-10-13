@@ -70,7 +70,7 @@ module Citrine
         duration : Number = 0,
         @duration_s : String = "00:00",
         @stream_file : String = "",
-        @optical_str : String = ""
+        @optical_str : String = "",
       )
         @duration = duration.to_f32
       end
@@ -100,7 +100,7 @@ module Citrine
       def initialize(
         @title : String = "",
         @artist : String = "",
-        @tracks : Array(Track) = [] of Track
+        @tracks : Array(Track) = [] of Track,
       )
       end
 
@@ -186,7 +186,7 @@ module Citrine
       def initialize(
         @album : Album,
         @repeat_mode : RepeatMode = RepeatMode::All,
-        @shuffle : Bool = false
+        @shuffle : Bool = false,
       )
         @current_index = 0
         @is_playing = false
@@ -261,7 +261,7 @@ module Citrine
       def play_at(
         source_x : Number, source_y : Number,
         listener_x : Number, listener_y : Number,
-        max_dist : Number = 300.0
+        max_dist : Number = 300.0,
       ) : Nil
         dx = source_x.to_f32 - listener_x.to_f32
         dy = source_y.to_f32 - listener_y.to_f32
@@ -305,7 +305,7 @@ module Citrine
         @path : String,
         @size_bytes : Int32 = 32_768,
         @policy : Policy = Policy::Cached,
-        @priority : Priority = Priority::Normal
+        @priority : Priority = Priority::Normal,
       )
         @handle = 0_u32
         @is_loaded = false
@@ -349,7 +349,7 @@ module Citrine
         pinned : Bool = false,
         cached : Bool = false,
         transient : Bool = false,
-        priority : Priority = Priority::Normal
+        priority : Priority = Priority::Normal,
       )
         pol = if pinned
                 Policy::Pinned
@@ -456,12 +456,12 @@ module Citrine
 
     private def self.resolve_bus(bus : Symbol | Bus) : Bus
       case bus
-      when Bus then bus
+      when Bus     then bus
       when :master then Bus::Master
-      when :music then Bus::Music
-      when :sfx then Bus::SFX
-      when :voice then Bus::Voice
-      else Bus::Master
+      when :music  then Bus::Music
+      when :sfx    then Bus::SFX
+      when :voice  then Bus::Voice
+      else              Bus::Master
       end
     end
 
@@ -489,7 +489,7 @@ module Citrine
       when Bus::Music  then @@music_volume
       when Bus::SFX    then @@sfx_volume
       when Bus::Voice  then @@voice_volume
-      else @@master_volume
+      else                  @@master_volume
       end
     end
 
@@ -513,7 +513,7 @@ module Citrine
                  when Bus::Music  then @@music_volume
                  when Bus::SFX    then @@sfx_volume
                  when Bus::Voice  then @@voice_volume
-                 else 1.0_f32
+                 else                  1.0_f32
                  end
       clip_gain = (volume > 1.0 ? volume / 255.0 : volume).to_f32.clamp(0.0_f32, 1.0_f32)
       @@master_volume * bus_gain * clip_gain
@@ -559,7 +559,7 @@ module Citrine
                  when Bus::Music  then @@music_volume
                  when Bus::SFX    then @@sfx_volume
                  when Bus::Voice  then @@voice_volume
-                 else 1.0_f32
+                 else                  1.0_f32
                  end
       clip_gain = (volume > 1.0 ? volume / 255.0 : volume).to_f32.clamp(0.0_f32, 1.0_f32)
       eff = (@@master_volume * bus_gain * clip_gain * 255.0_f32).round.to_i
@@ -600,7 +600,7 @@ module Citrine
       path_or_handle : String | UInt32,
       source_x : Number, source_y : Number,
       listener_x : Number, listener_y : Number,
-      max_dist : Number = 300.0
+      max_dist : Number = 300.0,
     ) : Nil
       handle = path_or_handle.is_a?(String) ? Citrine.load_sound(path_or_handle) : path_or_handle
       snd = Sound.new(handle, path_or_handle.is_a?(String) ? path_or_handle : "")
@@ -673,7 +673,7 @@ module Citrine
       volume : Number = 1.0,
       pitch : Number = 1.0,
       pan : Number = 0.0,
-      priority : Priority? = nil
+      priority : Priority? = nil,
     )
       @@sound_clock += 0.016667_f32
       if clip = @@all_clips[name]?
@@ -860,4 +860,3 @@ end
 def load_album(dir : String = "album/") : Citrine::Audio::Album
   Citrine::Audio.load_album(dir)
 end
-

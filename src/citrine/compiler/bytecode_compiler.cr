@@ -263,6 +263,13 @@ module Citrine
       old_self = @current_self_reg
       old_method = @current_method_name
       old_namespace = @current_namespace
+      old_var_types = @var_types.dup
+      @var_types.clear
+      node.args.each do |arg|
+        if r = arg.restriction
+          @var_types[arg.name] = r.to_s
+        end
+      end
       if registered_name.includes?("#")
         parts = registered_name.split("#")
         @current_class = @classes[parts[0]]?
@@ -289,6 +296,7 @@ module Citrine
       @current_self_reg = old_self
       @current_method_name = old_method
       @current_namespace = old_namespace
+      @var_types = old_var_types
 
       fn.num_registers = allocator.max_registers
       fn.instructions = instructions
@@ -298,7 +306,7 @@ module Citrine
       node : Crystal::ASTNode,
       allocator : RegisterAllocator,
       instructions : Array(Instruction),
-      fn : CompiledFunction
+      fn : CompiledFunction,
     ) : UInt8
       record_location(node, instructions.size, fn.name)
 
@@ -324,7 +332,6 @@ module Citrine
           end
         end
         dest
-
       when Crystal::Expressions
         last_reg = 0_u8
         node.expressions.each_with_index do |child, idx|
@@ -336,7 +343,6 @@ module Citrine
           end
         end
         last_reg
-
       when Crystal::Assign
         if node.target.is_a?(Crystal::InstanceVar) && (cls = @current_class) && (self_reg = @current_self_reg)
           if !cls.is_struct && is_struct_expression?(node.value)
@@ -504,12 +510,10 @@ module Citrine
         @source_map.record_register(fn.name, local_reg.to_i32, target_name)
         allocator.free_temp(val_reg)
         local_reg
-
       when Crystal::OpAssign
         call = Crystal::Call.new(node.target, node.op, node.value)
         assign = Crystal::Assign.new(node.target, call)
         compile_node(assign, allocator, instructions, fn)
-
       when Crystal::MultiAssign
         if node.values.size == 1
           val_reg = compile_node(node.values.first, allocator, instructions, fn)
@@ -551,8 +555,6 @@ module Citrine
           instructions << Instruction.encode_load_nil(dest)
           dest
         end
-
-
       when Crystal::Var
         name = node.name
         if reg = allocator.get_local(name)
@@ -563,7 +565,6 @@ module Citrine
           instructions << Instruction.encode_load_nil(reg)
           reg
         end
-
       when Crystal::NumberLiteral
         dest = allocator.alloc_temp
         if node.kind == :i32 || node.kind == :i64 || node.kind == :u32 || node.kind == :u64 || node.value.includes?(".") == false
@@ -585,27 +586,22 @@ module Citrine
           instructions << Instruction.encode_ab_imm(Opcode::LoadConst, dest, const_idx.to_u16)
         end
         dest
-
       when Crystal::StringLiteral
         dest = allocator.alloc_temp
         str_idx = add_string(node.value)
         const_idx = add_constant(ConstValue.new(ConstType::String, int_val: str_idx, str_val: node.value))
         instructions << Instruction.encode_ab_imm(Opcode::LoadConst, dest, const_idx.to_u16)
         dest
-
       when Crystal::StringInterpolation
         compile_string_interpolation(node, allocator, instructions, fn)
-
       when Crystal::BoolLiteral
         dest = allocator.alloc_temp
         instructions << Instruction.encode_load_bool(dest, node.value)
         dest
-
       when Crystal::NilLiteral
         dest = allocator.alloc_temp
         instructions << Instruction.encode_load_nil(dest)
         dest
-
       when Crystal::And
         dest = allocator.alloc_temp
         left_reg = compile_node(node.left, allocator, instructions, fn)
@@ -619,7 +615,6 @@ module Citrine
         allocator.free_temp(left_reg)
         allocator.free_temp(right_reg)
         dest
-
       when Crystal::Or
         dest = allocator.alloc_temp
         left_reg = compile_node(node.left, allocator, instructions, fn)
@@ -633,7 +628,6 @@ module Citrine
         allocator.free_temp(left_reg)
         allocator.free_temp(right_reg)
         dest
-
       when Crystal::Not
         dest = allocator.alloc_temp
         inner_reg = compile_node(node.exp, allocator, instructions, fn)
@@ -645,7 +639,6 @@ module Citrine
         allocator.free_temp(inner_reg)
         allocator.free_temp(false_reg)
         dest
-
       when Crystal::If
         dest = allocator.alloc_temp
         cond_reg = compile_node(node.cond, allocator, instructions, fn)
@@ -676,7 +669,6 @@ module Citrine
 
         allocator.free_temp(cond_reg)
         dest
-
       when Crystal::Unless
         dest = allocator.alloc_temp
         cond_reg = compile_node(node.cond, allocator, instructions, fn)
@@ -707,7 +699,6 @@ module Citrine
 
         allocator.free_temp(cond_reg)
         dest
-
       when Crystal::While
         dest = allocator.alloc_temp
         loop_start = instructions.size
@@ -743,7 +734,6 @@ module Citrine
         allocator.free_temp(cond_reg)
         instructions << Instruction.encode_load_nil(dest)
         dest
-
       when Crystal::Until
         dest = allocator.alloc_temp
         loop_start = instructions.size
@@ -779,7 +769,6 @@ module Citrine
         allocator.free_temp(cond_reg)
         instructions << Instruction.encode_load_nil(dest)
         dest
-
       when Crystal::Break
         dest = allocator.alloc_temp
         j = instructions.size
@@ -789,7 +778,6 @@ module Citrine
         end
         instructions << Instruction.encode_load_nil(dest)
         dest
-
       when Crystal::Next
         dest = allocator.alloc_temp
         j = instructions.size
@@ -799,10 +787,8 @@ module Citrine
         end
         instructions << Instruction.encode_load_nil(dest)
         dest
-
       when Crystal::Call
         compile_call(node, allocator, instructions, fn)
-
       when Crystal::Path
         # Constant reference e.g. Button::Cross, Color::Red, Direction::North
         if node.names.size == 1 && (local_reg = allocator.get_local(node.names.first))
@@ -820,7 +806,6 @@ module Citrine
           instructions << Instruction.encode_ab_imm(Opcode::LoadConst, dest, const_idx.to_u16)
         end
         dest
-
       when Crystal::Return
         ret_val = node.exp
         ret_reg = if ret_val
@@ -832,7 +817,6 @@ module Citrine
                   end
         instructions << Instruction.encode_ab_imm(Opcode::Return, ret_reg, 0_u16)
         ret_reg
-
       when Crystal::InstanceVar
         dest = allocator.alloc_temp
         if (cls = @current_class) && (self_reg = @current_self_reg)
@@ -851,7 +835,6 @@ module Citrine
           instructions << Instruction.encode_load_nil(dest)
         end
         dest
-
       when Crystal::ClassVar
         dest = allocator.alloc_temp
         cvar_name = node.name
@@ -874,7 +857,6 @@ module Citrine
         allocator.free_temp(seq_base)
         allocator.free_temp((seq_base + 1).to_u8)
         dest
-
       when Crystal::Self
         dest = allocator.alloc_temp
         if self_reg = @current_self_reg
@@ -883,7 +865,6 @@ module Citrine
           instructions << Instruction.encode_load_nil(dest)
         end
         dest
-
       when Crystal::ArrayLiteral
         dest = allocator.alloc_temp
         cap = node.elements.size > 0 ? node.elements.size : 4
@@ -905,7 +886,6 @@ module Citrine
           allocator.free_temp((seq_base + 1).to_u8)
         end
         dest
-
       when Crystal::TupleLiteral
         dest = allocator.alloc_temp
         cap = node.elements.size > 0 ? node.elements.size : 4
@@ -927,7 +907,6 @@ module Citrine
           allocator.free_temp((seq_base + 1).to_u8)
         end
         dest
-
       when Crystal::IsA
         dest = allocator.alloc_temp
         obj_reg = compile_node(node.obj, allocator, instructions, fn)
@@ -1003,14 +982,12 @@ module Citrine
         end
         allocator.free_temp(obj_reg)
         dest
-
       when Crystal::Cast
         dest = allocator.alloc_temp
         obj_reg = compile_node(node.obj, allocator, instructions, fn)
         instructions << Instruction.encode_abc(Opcode::Move, dest, obj_reg, 0_u8)
         allocator.free_temp(obj_reg)
         dest
-
       when Crystal::NilableCast
         dest = allocator.alloc_temp
         obj_reg = compile_node(node.obj, allocator, instructions, fn)
@@ -1108,7 +1085,6 @@ module Citrine
         end
         allocator.free_temp(obj_reg)
         dest
-
       when Crystal::RespondsTo
         dest = allocator.alloc_temp
         method_name = node.name.to_s
@@ -1116,13 +1092,13 @@ module Citrine
 
         matching_classes = @classes.values.select do |cls|
           cls.methods.has_key?(method_name) ||
-          cls.ancestor_ids(@classes).any? do |aid|
-            if anc = @classes.values.find { |c| c.class_id == aid }
-              anc.methods.has_key?(method_name)
-            else
-              false
+            cls.ancestor_ids(@classes).any? do |aid|
+              if anc = @classes.values.find { |c| c.class_id == aid }
+                anc.methods.has_key?(method_name)
+              else
+                false
+              end
             end
-          end
         end
 
         if matching_classes.empty?
@@ -1179,7 +1155,6 @@ module Citrine
         end
         allocator.free_temp(obj_reg)
         dest
-
       when Crystal::TypeDeclaration
         target_name = node.var.to_s
         type_str = node.declared_type.to_s
@@ -1193,7 +1168,6 @@ module Citrine
           instructions << Instruction.encode_load_nil(local_reg)
           local_reg
         end
-
       when Crystal::RegexLiteral
         dest = allocator.alloc_temp
         pat_str = node.value.is_a?(Crystal::StringLiteral) ? node.value.as(Crystal::StringLiteral).value : node.value.to_s
@@ -1205,10 +1179,8 @@ module Citrine
         instructions << Instruction.new(instr_val)
         allocator.free_temp(pat_reg)
         dest
-
       when Crystal::Case
         compile_case(node, allocator, instructions, fn)
-
       else
         dest = allocator.alloc_temp
         instructions << Instruction.encode_load_nil(dest)

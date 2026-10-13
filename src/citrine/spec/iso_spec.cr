@@ -95,7 +95,7 @@ module Citrine
 
     def self.run_iso_suite(
       glob_pattern : String = "examples/**/game.iso",
-      timeout : ::Time::Span = 3.seconds
+      timeout : ::Time::Span = 3.seconds,
     ) : Tuple(Int32, Int32)
       iso_files = Dir.glob(glob_pattern)
       if iso_files.empty?

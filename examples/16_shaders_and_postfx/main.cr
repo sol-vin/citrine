@@ -27,19 +27,19 @@ Citrine.set_target_fps(60)
 logo_tex = Citrine.load_texture("logo.cbt")
 
 # Hoisted Static Color Constants (Tier 1 Zero Per-Frame Heap Allocations)
-COLOR_BG          = Color.new(8_u8, 10_u8, 18_u8, 255_u8)
-COLOR_HEADER_BG   = Color.new(16_u8, 20_u8, 34_u8, 255_u8)
-COLOR_FOOTER_BG   = Color.new(14_u8, 18_u8, 30_u8, 245_u8)
-COLOR_TITLE       = Color.new(245_u8, 250_u8, 255_u8, 255_u8)
-COLOR_WHITE       = Color.new(255_u8, 255_u8, 255_u8, 255_u8)
-COLOR_MUTED       = Color.new(155_u8, 180_u8, 220_u8, 255_u8)
-COLOR_CYAN        = Color.new(0_u8, 235_u8, 255_u8, 255_u8)
-COLOR_YELLOW      = Color.new(255_u8, 230_u8, 40_u8, 255_u8)
-COLOR_MAGENTA     = Color.new(255_u8, 25_u8, 150_u8, 255_u8)
-COLOR_GREEN       = Color.new(46_u8, 204_u8, 113_u8, 255_u8)
-COLOR_RED         = Color.new(255_u8, 65_u8, 65_u8, 255_u8)
-COLOR_SCANLINE    = Color.new(0_u8, 0_u8, 0_u8, 55_u8)
-COLOR_BADGE_BG    = Color.new(28_u8, 40_u8, 70_u8, 255_u8)
+COLOR_BG        = Color.new(8_u8, 10_u8, 18_u8, 255_u8)
+COLOR_HEADER_BG = Color.new(16_u8, 20_u8, 34_u8, 255_u8)
+COLOR_FOOTER_BG = Color.new(14_u8, 18_u8, 30_u8, 245_u8)
+COLOR_TITLE     = Color.new(245_u8, 250_u8, 255_u8, 255_u8)
+COLOR_WHITE     = Color.new(255_u8, 255_u8, 255_u8, 255_u8)
+COLOR_MUTED     = Color.new(155_u8, 180_u8, 220_u8, 255_u8)
+COLOR_CYAN      = Color.new(0_u8, 235_u8, 255_u8, 255_u8)
+COLOR_YELLOW    = Color.new(255_u8, 230_u8, 40_u8, 255_u8)
+COLOR_MAGENTA   = Color.new(255_u8, 25_u8, 150_u8, 255_u8)
+COLOR_GREEN     = Color.new(46_u8, 204_u8, 113_u8, 255_u8)
+COLOR_RED       = Color.new(255_u8, 65_u8, 65_u8, 255_u8)
+COLOR_SCANLINE  = Color.new(0_u8, 0_u8, 0_u8, 55_u8)
+COLOR_BADGE_BG  = Color.new(28_u8, 40_u8, 70_u8, 255_u8)
 
 # Background Cyber Grid Colors
 COLOR_BORDER      = Color.new(70_u8, 110_u8, 180_u8, 255_u8)
@@ -51,13 +51,13 @@ COLOR_BG_GRID_DOT = Color.new(85_u8, 135_u8, 225_u8, 255_u8)
 COLOR_ORBIT_RING  = Color.new(55_u8, 85_u8, 140_u8, 255_u8)
 
 # Baseline Mode 0 Mesh Colors
-COLOR_NODE        = Color.new(0_u8, 225_u8, 255_u8, 255_u8)
-COLOR_EDGE_HORIZ  = Color.new(0_u8, 190_u8, 240_u8, 255_u8)
-COLOR_EDGE_VERT   = Color.new(235_u8, 45_u8, 175_u8, 255_u8)
-COLOR_CORE        = Color.new(0_u8, 220_u8, 255_u8, 255_u8)
-COLOR_SAT_A       = Color.new(46_u8, 240_u8, 120_u8, 255_u8)
-COLOR_SAT_B       = Color.new(255_u8, 215_u8, 30_u8, 255_u8)
-COLOR_SURFER      = Color.new(255_u8, 60_u8, 60_u8, 255_u8)
+COLOR_NODE       = Color.new(0_u8, 225_u8, 255_u8, 255_u8)
+COLOR_EDGE_HORIZ = Color.new(0_u8, 190_u8, 240_u8, 255_u8)
+COLOR_EDGE_VERT  = Color.new(235_u8, 45_u8, 175_u8, 255_u8)
+COLOR_CORE       = Color.new(0_u8, 220_u8, 255_u8, 255_u8)
+COLOR_SAT_A      = Color.new(46_u8, 240_u8, 120_u8, 255_u8)
+COLOR_SAT_B      = Color.new(255_u8, 215_u8, 30_u8, 255_u8)
+COLOR_SURFER     = Color.new(255_u8, 60_u8, 60_u8, 255_u8)
 
 # Mode 1: Glitch & Chromatic Aberration Colors
 COLOR_GLITCH_RED  = Color.new(255_u8, 30_u8, 70_u8, 210_u8)
@@ -65,10 +65,10 @@ COLOR_GLITCH_CYAN = Color.new(0_u8, 245_u8, 255_u8, 210_u8)
 COLOR_GLITCH_LINE = Color.new(255_u8, 255_u8, 255_u8, 180_u8)
 
 # Mode 2: Stepped Quantization Colors (Toon / Cel Bands)
-QUANT_0           = Color.new(20_u8, 25_u8, 42_u8, 255_u8)
-QUANT_1           = Color.new(65_u8, 80_u8, 130_u8, 255_u8)
-QUANT_2           = Color.new(130_u8, 165_u8, 225_u8, 255_u8)
-QUANT_3           = Color.new(240_u8, 250_u8, 255_u8, 255_u8)
+QUANT_0 = Color.new(20_u8, 25_u8, 42_u8, 255_u8)
+QUANT_1 = Color.new(65_u8, 80_u8, 130_u8, 255_u8)
+QUANT_2 = Color.new(130_u8, 165_u8, 225_u8, 255_u8)
+QUANT_3 = Color.new(240_u8, 250_u8, 255_u8, 255_u8)
 
 # Mode 3: Hardware Palette Swapping Presets (GS CLUT)
 # Preset 0: Cyber Neon (80s Arcade)
@@ -131,11 +131,11 @@ def int_cos(idx : Int32) : Int32
 end
 
 # Terrain Mesh Configuration (16 x 7 Grid)
-GRID_COLS = 16
-GRID_ROWS = 7
-SPACING_X = 35
-SPACING_Y = 23
-BASE_X    = 58
+GRID_COLS =  16
+GRID_ROWS =   7
+SPACING_X =  35
+SPACING_Y =  23
+BASE_X    =  58
 BASE_Y    = 200
 
 # Helper routine to render undulating terrain mesh
@@ -353,15 +353,15 @@ def draw_ui_hud(shader_mode : Int32, palette_preset : Int32, speed_mode : Int32)
 end
 
 # Interactive Shader State
-shader_mode = 0         # 0: Wave, 1: Glitch, 2: Quantize, 3: Palette, 4: Rainbow, 5: Bloom
-palette_preset = 0      # 0: Neon, 1: Thermal, 2: Amber, 3: GameBoy
-quant_steps = 4         # 4 or 8
-wave_amp = 18           # Wave amplitude in pixels (2..30)
+shader_mode = 0    # 0: Wave, 1: Glitch, 2: Quantize, 3: Palette, 4: Rainbow, 5: Bloom
+palette_preset = 0 # 0: Neon, 1: Thermal, 2: Amber, 3: GameBoy
+quant_steps = 4    # 4 or 8
+wave_amp = 18      # Wave amplitude in pixels (2..30)
 glitch_timer = 0
 scanlines_active = true
-speed_mode = 1          # 0: 0.5x, 1: 1.0x, 2: 2.0x
-tick = 0                # Discrete integer frame tick
-sub_tick = 0            # Physical frame alternator for 0.5x speed
+speed_mode = 1 # 0: 0.5x, 1: 1.0x, 2: 2.0x
+tick = 0       # Discrete integer frame tick
+sub_tick = 0   # Physical frame alternator for 0.5x speed
 
 # Main Simulation & Render Loop (60 FPS on PlayStation 2 GS)
 Citrine.main_loop do

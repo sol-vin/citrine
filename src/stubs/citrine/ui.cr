@@ -125,7 +125,7 @@ module Citrine
                  elsif pct > 0.25_f32
                    Color.new(241_u8, 196_u8, 15_u8, 255_u8) # Yellow
                  else
-                   Color.new(231_u8, 76_u8, 60_u8, 255_u8)  # Red
+                   Color.new(231_u8, 76_u8, 60_u8, 255_u8) # Red
                  end
 
       Citrine.draw_rectangle(x + 1, y + 1, fill_w - 2, h - 2, fill_col)

@@ -15,7 +15,7 @@ module Citrine
           "C:\\Users\\Ian\\scoop\\shims\\r2.exe",
           "C:\\Program Files\\radare2\\bin\\r2.exe",
           "/usr/bin/r2",
-          "/usr/local/bin/r2"
+          "/usr/local/bin/r2",
         ]
 
         candidates.each do |c|

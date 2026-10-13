@@ -36,13 +36,13 @@ module Citrine
         val = val_str.to_u32?(16) || 0_u32
 
         type = case type_num
-               when 0 then CodeType::Write8Bit
-               when 1 then CodeType::Write16Bit
-               when 2 then CodeType::Write32Bit
+               when   0 then CodeType::Write8Bit
+               when   1 then CodeType::Write16Bit
+               when   2 then CodeType::Write32Bit
                when 0xD then CodeType::EqualCheck
                when 0x9 then CodeType::MasterCode
                when 0xF then CodeType::HookHandler
-               else CodeType::Write32Bit
+               else          CodeType::Write32Bit
                end
 
         CheatCode.new(type, target_addr, val)

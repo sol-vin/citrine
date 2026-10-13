@@ -8,11 +8,11 @@ module Citrine
       # Identifies the category of hardware work offloaded to the IOP co-processor.
       enum JobType : UInt8
         # Asynchronous disc reading via SIF DMA.
-        DiscSectorRead       = 1
+        DiscSectorRead = 1
         # Streaming ADPCM audio decode via SPU2.
-        AudioStreamDecode    = 2
+        AudioStreamDecode = 2
         # Memory Card save/load I/O operations.
-        MemoryCardIo         = 3
+        MemoryCardIo = 3
         # Background chunk decompression (gzip/LZ4).
         BackgroundDecompress = 4
       end
@@ -20,13 +20,13 @@ module Citrine
       # Execution status of an offloaded co-processor task.
       enum JobStatus : UInt8
         # Job queued but not yet scheduled.
-        Pending   = 0
+        Pending = 0
         # Job actively executing on the IOP core.
-        Running   = 1
+        Running = 1
         # Job successfully finished.
         Completed = 2
         # Job encountered an I/O error or failure.
-        Failed    = 3
+        Failed = 3
       end
 
       # Tracking receipt returned when dispatching asynchronous work to the IOP.

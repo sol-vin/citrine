@@ -47,7 +47,7 @@ describe "Citrine::Shader & Citrine::Compute DSL" do
         s.output :out_color, "Vec4"
 
         s.main do |pos, norm, uv, col|
-          { pos, col, uv }
+          {pos, col, uv}
         end
       end
 

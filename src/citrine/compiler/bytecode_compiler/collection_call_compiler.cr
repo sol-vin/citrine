@@ -11,7 +11,7 @@ module Citrine
       instructions : Array(Instruction),
       fn : CompiledFunction,
       dest : UInt8,
-      obj_str : String
+      obj_str : String,
     ) : UInt8?
       # times loop: e.g. 10.times do |i| ... end
       if node.name == "times" && node.obj && (block = node.block)

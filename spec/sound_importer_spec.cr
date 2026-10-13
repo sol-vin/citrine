@@ -11,13 +11,13 @@ describe Citrine::Importers::SoundImporter do
 
     # "fmt " chunk
     wav_io.write("fmt ".to_slice)
-    wav_io.write_bytes(16_u32, IO::ByteFormat::LittleEndian) # chunk size
-    wav_io.write_bytes(1_u16, IO::ByteFormat::LittleEndian)  # PCM format
-    wav_io.write_bytes(1_u16, IO::ByteFormat::LittleEndian)  # 1 channel (mono)
-    wav_io.write_bytes(44100_u32, IO::ByteFormat::LittleEndian) # sample rate
+    wav_io.write_bytes(16_u32, IO::ByteFormat::LittleEndian)             # chunk size
+    wav_io.write_bytes(1_u16, IO::ByteFormat::LittleEndian)              # PCM format
+    wav_io.write_bytes(1_u16, IO::ByteFormat::LittleEndian)              # 1 channel (mono)
+    wav_io.write_bytes(44100_u32, IO::ByteFormat::LittleEndian)          # sample rate
     wav_io.write_bytes((44100 * 2).to_u32, IO::ByteFormat::LittleEndian) # byte rate
-    wav_io.write_bytes(2_u16, IO::ByteFormat::LittleEndian)  # block align
-    wav_io.write_bytes(16_u16, IO::ByteFormat::LittleEndian) # bits per sample
+    wav_io.write_bytes(2_u16, IO::ByteFormat::LittleEndian)              # block align
+    wav_io.write_bytes(16_u16, IO::ByteFormat::LittleEndian)             # bits per sample
 
     # "data" chunk
     wav_io.write("data".to_slice)

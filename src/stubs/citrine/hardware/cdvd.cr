@@ -8,7 +8,7 @@ module Citrine
       # Standard ISO-9660 / UDF data sector size in bytes (Mode 1 / 2 Form 1).
       SECTOR_SIZE_STANDARD = 2048
       # Raw optical sector size including subchannel and sync headers in bytes (Mode 2 Form 2 / CD-DA).
-      SECTOR_SIZE_RAW      = 2352
+      SECTOR_SIZE_RAW = 2352
 
       # Converts Logical Block Address (LBA) sector index to absolute byte offset on disc.
       def self.lba_to_bytes(lba_sector : UInt32) : UInt64

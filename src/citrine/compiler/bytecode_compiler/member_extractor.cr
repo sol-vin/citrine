@@ -61,7 +61,6 @@ module Citrine
               @program_defs[fn_name] = new_def
             end
           end
-
         when Crystal::Extend
           mod_name = child.name.to_s
           if mod_info = @modules[mod_name]?
@@ -73,7 +72,6 @@ module Citrine
               @program_defs["#{cls_info.name}::#{m_name}"] = new_def
             end
           end
-
         when Crystal::Def
           if ret = child.return_type
             ret_s = ret.to_s
@@ -121,7 +119,6 @@ module Citrine
             new_def = Crystal::Def.new(fn_name, args, full_body)
             @program_defs[fn_name] = new_def
           end
-
         when Crystal::Call
           if (child.name == "include" || child.name == "extend") && child.args.size > 0
             mod_name = child.args[0].to_s
@@ -186,7 +183,6 @@ module Citrine
             prop_key = "#{cls_info.name}::#{prop_name}"
             @class_prop_offsets[prop_key] ||= @class_prop_offsets.size
           end
-
         when Crystal::Assign
           if child.target.is_a?(Crystal::InstanceVar)
             cls_info.field_index(child.target.to_s)

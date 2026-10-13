@@ -42,7 +42,7 @@ module Citrine
       cbc_bytes : Bytes? = nil,
       input_schedule : Array(VirtualInput) = [] of VirtualInput,
       vag_bytes : Bytes? = nil,
-      vag_tracks : Array(Bytes) = [] of Bytes
+      vag_tracks : Array(Bytes) = [] of Bytes,
     ) : Bytes
       builder = new
       builder.generate(cbc_bytes, input_schedule, vag_bytes, vag_tracks)
@@ -52,7 +52,7 @@ module Citrine
       cbc_bytes : Bytes? = nil,
       input_schedule : Array(VirtualInput) = [] of VirtualInput,
       vag_bytes : Bytes? = nil,
-      vag_tracks : Array(Bytes) = [] of Bytes
+      vag_tracks : Array(Bytes) = [] of Bytes,
     ) : Bytes
       profile = PhaseExtractor.extract(cbc_bytes)
       profile.boot_screen = false unless input_schedule.empty?
@@ -158,7 +158,7 @@ module Citrine
       text_slice = emitter.to_slice
       symbols = [
         SymbolEntry.new("_start", 0x00100000_u32, 16_u32, STT_FUNC, STB_GLOBAL, 1_u16),
-        SymbolEntry.new("main", 0x00100000_u32, text_slice.size.to_u32, STT_FUNC, STB_GLOBAL, 1_u16)
+        SymbolEntry.new("main", 0x00100000_u32, text_slice.size.to_u32, STT_FUNC, STB_GLOBAL, 1_u16),
       ]
       ElfWriter.write(text_slice, Bytes.empty, Bytes.empty, symbols, 0x00100000_u32, nil, rodata_vaddr: RODATA_VADDR)
     end

@@ -76,7 +76,7 @@ module Citrine
     @@is_dispatching : Bool = false
 
     # Declares a new named compute shader kernel:
-    # ```crystal
+    # ```
     # Citrine::Compute.kernel "ParticleSimulation" do |k|
     #   k.buffer :positions, "Vec4", size: 256
     #   k.buffer :velocities, "Vec4", size: 256

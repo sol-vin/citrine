@@ -23,7 +23,7 @@ module Citrine
                when GSColorFormat::PSMCT16 then @width * @height * 2
                when GSColorFormat::PSMT8   then @width * @height
                when GSColorFormat::PSMT4   then (@width * @height) // 2
-               else @width * @height * 4
+               else                             @width * @height * 4
                end
         pal = @palette ? @palette.not_nil!.size : 0
         base + pal

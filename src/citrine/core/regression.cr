@@ -18,24 +18,24 @@ module Citrine
 
       # Hardware and runtime milestones observable during PS2 emulation.
       enum Milestone
-        IsoMounted        # ISO-9660 disc mounted and identified
-        ElfLoaded         # Target ELF loaded into EE physical memory
-        EntryPoint        # EE instruction pointer reached ELF entry point
-        GsCrtcConfigured  # GS display mode & CRTC circuit configured (syscall 0x02)
-        EngineInit        # Citrine engine runtime initialization confirmed
-        TestInit          # Citrine test harness initialized ([CITRINE TEST] INIT)
-        TestClose         # Citrine test harness concluded ([CITRINE TEST] CLOSE)
-        Custom            # Custom user-defined marker reached
+        IsoMounted       # ISO-9660 disc mounted and identified
+        ElfLoaded        # Target ELF loaded into EE physical memory
+        EntryPoint       # EE instruction pointer reached ELF entry point
+        GsCrtcConfigured # GS display mode & CRTC circuit configured (syscall 0x02)
+        EngineInit       # Citrine engine runtime initialization confirmed
+        TestInit         # Citrine test harness initialized ([CITRINE TEST] INIT)
+        TestClose        # Citrine test harness concluded ([CITRINE TEST] CLOSE)
+        Custom           # Custom user-defined marker reached
       end
 
       # High-level outcome of a regression test execution.
       enum ExecutionStatus
-        Passed       # All assertions passed, clean boot, no panics
-        Failed       # One or more assertions failed, or close status was failed
-        TimedOut     # Test execution exceeded configured supervisor deadline
-        Panicked     # Citrine runtime panic or unhandled exception encountered
-        Crashed      # Emulator or EE CPU fault (TLB miss, bus error, bad opcode)
-        Unavailable  # PCSX2 executable not found in host environment
+        Passed      # All assertions passed, clean boot, no panics
+        Failed      # One or more assertions failed, or close status was failed
+        TimedOut    # Test execution exceeded configured supervisor deadline
+        Panicked    # Citrine runtime panic or unhandled exception encountered
+        Crashed     # Emulator or EE CPU fault (TLB miss, bus error, bad opcode)
+        Unavailable # PCSX2 executable not found in host environment
       end
 
       # Recorded occurrence of a runtime milestone with timing.
@@ -105,7 +105,7 @@ module Citrine
           @memory_faults : Array(String) = [] of String,
           @raw_logs : Array(String) = [] of String,
           @screenshot_path : String? = nil,
-          @custom_metadata : Hash(String, String) = Hash(String, String).new
+          @custom_metadata : Hash(String, String) = Hash(String, String).new,
         )
         end
 
@@ -297,7 +297,7 @@ module Citrine
             home.join("Documents", "PCSX2", "pcsx2-qt.exe").to_s,
             "/usr/bin/pcsx2",
             "/usr/bin/pcsx2-qt",
-            "/Applications/PCSX2.app/Contents/MacOS/PCSX2"
+            "/Applications/PCSX2.app/Contents/MacOS/PCSX2",
           ]
 
           candidates.each do |c|
@@ -335,7 +335,7 @@ module Citrine
           timeout : Time::Span = 10.seconds,
           watchdog_interval : Time::Span = 5.seconds,
           watchdog_callback : Proc(Time::Span, Nil)? = nil,
-          early_exit : Bool = true
+          early_exit : Bool = true,
         ) : TestResult
           start_time = Time.instant
           parser = LogStreamParser.new(start_time)
@@ -361,7 +361,7 @@ module Citrine
             "C:\\Program Files\\PCSX2\\logs\\emulog.txt",
             home.join("AppData", "Roaming", "PCSX2", "logs", "emulog.txt").to_s,
             home.join("AppData", "Local", "PCSX2", "logs", "emulog.txt").to_s,
-            File.expand_path("logs/emulog.txt")
+            File.expand_path("logs/emulog.txt"),
           ].compact.uniq
 
           # Delete previous logs so test starts clean
@@ -614,7 +614,7 @@ module Citrine
                            when ExecutionStatus::TimedOut then "⏰ TIMEOUT"
                            when ExecutionStatus::Panicked then "💥 PANIC"
                            when ExecutionStatus::Crashed  then "🔥 CRASH"
-                           else "⚠️ #{res.status}"
+                           else                                "⚠️ #{res.status}"
                            end
             milestone_str = res.milestones.map(&.name).join(", ")
             milestone_str = "None" if milestone_str.empty?
@@ -660,13 +660,13 @@ module Citrine
           io = IO::Memory.new
           io.puts "\n" + ("=" * 72)
           io.puts "           PCSX2 HEADLESS AUTOMATED REGRESSION SUITE RESULTS           "
-          io.puts ("=" * 72)
+          io.puts("=" * 72)
           io.puts sprintf("Suite: %s | Total: %d | Passed: %d | Failed: %d | Time: %.2fs", @name, total_tests, passed_tests, failed_tests, @total_duration.total_seconds)
-          io.puts ("-" * 72)
+          io.puts("-" * 72)
           @results.each do |r|
             io.puts r.summary
           end
-          io.puts ("=" * 72)
+          io.puts("=" * 72)
           io.to_s
         end
       end

@@ -9,7 +9,7 @@ module Citrine
       call_node : Crystal::Call,
       allocator : RegisterAllocator,
       instructions : Array(Instruction),
-      fn : CompiledFunction
+      fn : CompiledFunction,
     ) : UInt8
       ctx_name : String? = nil
       if named = call_node.named_args
@@ -95,7 +95,7 @@ module Citrine
       node : Crystal::Case,
       allocator : RegisterAllocator,
       instructions : Array(Instruction),
-      fn : CompiledFunction
+      fn : CompiledFunction,
     ) : UInt8
       dest = allocator.alloc_temp
       exit_jumps = [] of Int32
@@ -142,7 +142,6 @@ module Citrine
                 body_jump_patches << j
               end
               allocator.free_temp(range_match)
-
             when Crystal::Path, Crystal::Generic, Crystal::Union
               target_types = [] of String
               if c.is_a?(Crystal::Union)
@@ -218,7 +217,6 @@ module Citrine
                 body_jump_patches << j
               end
               allocator.free_temp(type_match)
-
             else
               val_reg = compile_node(c, allocator, instructions, fn)
               eq_reg = allocator.alloc_temp

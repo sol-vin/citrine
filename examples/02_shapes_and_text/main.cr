@@ -48,7 +48,7 @@ palette_idx = 0
 palettes = [
   ShapePalette.new(Color::Red, Color::Yellow, Color::Green),
   ShapePalette.new(Color::Cyan, Color::Magenta, Color::White),
-  ShapePalette.new(Color::Orange, Color::Purple, Color::Blue)
+  ShapePalette.new(Color::Orange, Color::Purple, Color::Blue),
 ]
 
 row = ShapeRow.new(8, 50, 36)

@@ -208,4 +208,3 @@ module Citrine
     end
   end
 end
-

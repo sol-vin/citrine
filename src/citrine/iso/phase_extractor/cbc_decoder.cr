@@ -31,7 +31,7 @@ module Citrine
             @is_inline_assembly : Bool,
             @inline_asm_words : Array(UInt32),
             @has_audio : Bool,
-            @boot_screen : Bool
+            @boot_screen : Bool,
           )
           end
         end

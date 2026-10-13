@@ -89,11 +89,11 @@ module Citrine
       end
 
       FILTER_COEFFS = [
-        { 0.0,          0.0 },
-        { 60.0 / 64.0,  0.0 },
-        { 115.0 / 64.0, -52.0 / 64.0 },
-        { 98.0 / 64.0,  -55.0 / 64.0 },
-        { 122.0 / 64.0, -60.0 / 64.0 }
+        {0.0, 0.0},
+        {60.0 / 64.0, 0.0},
+        {115.0 / 64.0, -52.0 / 64.0},
+        {98.0 / 64.0, -55.0 / 64.0},
+        {122.0 / 64.0, -60.0 / 64.0},
       ]
 
       # Encodes 16-bit PCM into raw PlayStation 2 SPU2 ADPCM blocks
@@ -113,7 +113,7 @@ module Citrine
 
           flags = 0_u8
           if loop_audio
-            flags |= 0x02_u8 # Bit 1: Loop Repeat is REQUIRED on all blocks in SPU2 looping stream!
+            flags |= 0x02_u8             # Bit 1: Loop Repeat is REQUIRED on all blocks in SPU2 looping stream!
             flags |= 0x04_u8 if is_first # Bit 2: Loop Start (0x06 total on first block)
             flags |= 0x01_u8 if is_last  # Bit 0: Loop End (0x03 total on last block)
           elsif is_last

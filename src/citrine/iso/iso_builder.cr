@@ -293,10 +293,10 @@ module Citrine
 
     private def write_pvd(io : IO, total_sectors : UInt32)
       pvd = IO::Memory.new(SECTOR_SIZE)
-      pvd.write_byte(1_u8)               # Type 1 = PVD
-      pvd.write("CD001".to_slice)        # Identifier
-      pvd.write_byte(1_u8)               # Version 1
-      pvd.write_byte(0_u8)               # Unused
+      pvd.write_byte(1_u8)        # Type 1 = PVD
+      pvd.write("CD001".to_slice) # Identifier
+      pvd.write_byte(1_u8)        # Version 1
+      pvd.write_byte(0_u8)        # Unused
 
       # System Identifier (32 bytes space-padded)
       pvd.write("PLAYSTATION".ljust(32, ' ').to_slice)
@@ -304,12 +304,12 @@ module Citrine
       # Volume Identifier (32 bytes space-padded)
       pvd.write("CITRINE_PS2".ljust(32, ' ').to_slice)
 
-      8.times { pvd.write_byte(0_u8) }   # Unused
+      8.times { pvd.write_byte(0_u8) } # Unused
 
       # Volume Space Size (total sectors)
       write_both_endian_u32(pvd, total_sectors)
 
-      32.times { pvd.write_byte(0_u8) }  # Unused
+      32.times { pvd.write_byte(0_u8) } # Unused
 
       # Volume Set Size = 1
       write_both_endian_u16(pvd, 1_u16)
@@ -327,7 +327,7 @@ module Citrine
 
       # Type M Path Table location (Sector 19)
       pvd.write_bytes(19_u32, IO::ByteFormat::BigEndian)
-      pvd.write_bytes(0_u32, IO::ByteFormat::BigEndian)    # Optional M
+      pvd.write_bytes(0_u32, IO::ByteFormat::BigEndian) # Optional M
 
       # Root Directory Record (34 bytes)
       write_directory_record(pvd, "\0", 20_u32, 2048_u32, is_dir: true)
@@ -349,10 +349,10 @@ module Citrine
 
       # Timestamps (17 bytes: YYYYMMDDHHMMSS00 + 0)
       ts = "2026100112000000\0".to_slice
-      pvd.write(ts) # Creation
-      pvd.write(ts) # Modification
+      pvd.write(ts)                            # Creation
+      pvd.write(ts)                            # Modification
       pvd.write("0000000000000000\0".to_slice) # Expiration
-      pvd.write(ts) # Effective
+      pvd.write(ts)                            # Effective
 
       pvd.write_byte(1_u8) # File Structure Version
       pvd.write_byte(0_u8) # Reserved
@@ -367,7 +367,7 @@ module Citrine
 
     private def write_terminator(io : IO)
       term = IO::Memory.new(SECTOR_SIZE)
-      term.write_byte(255_u8)            # 255 = Terminator
+      term.write_byte(255_u8) # 255 = Terminator
       term.write("CD001".to_slice)
       term.write_byte(1_u8)
       while term.pos < SECTOR_SIZE
@@ -441,23 +441,23 @@ module Citrine
       # Record length = 33 + name length + (1 if name length is even)
       rec_len = (33 + name_bytes.size + (name_bytes.size % 2 == 0 ? 1 : 0)).to_u8
 
-      io.write_byte(rec_len)             # Length of Directory Record
-      io.write_byte(0_u8)                # Extended Attribute Record Length
-      write_both_endian_u32(io, sector)  # Location of Extent (sector)
-      write_both_endian_u32(io, size)    # Data Length
-      
+      io.write_byte(rec_len)            # Length of Directory Record
+      io.write_byte(0_u8)               # Extended Attribute Record Length
+      write_both_endian_u32(io, sector) # Location of Extent (sector)
+      write_both_endian_u32(io, size)   # Data Length
+
       # Recording Date and Time: 7 bytes (Years since 1900, Month, Day, Hour, Min, Sec, GMT offset)
       io.write(Bytes[126_u8, 10_u8, 1_u8, 12_u8, 0_u8, 0_u8, 0_u8])
 
       # File Flags: 0x02 = Directory, 0x00 = Regular File
       io.write_byte(is_dir ? 2_u8 : 0_u8)
 
-      io.write_byte(0_u8)                # File Unit Size
-      io.write_byte(0_u8)                # Interleave Gap Size
-      write_both_endian_u16(io, 1_u16)   # Volume Sequence Number
+      io.write_byte(0_u8)              # File Unit Size
+      io.write_byte(0_u8)              # Interleave Gap Size
+      write_both_endian_u16(io, 1_u16) # Volume Sequence Number
 
       io.write_byte(name_bytes.size.to_u8) # Length of File Identifier
-      io.write(name_bytes)               # File Identifier
+      io.write(name_bytes)                 # File Identifier
 
       # Padding byte if name length is even
       if name_bytes.size % 2 == 0

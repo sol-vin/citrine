@@ -205,4 +205,3 @@ describe "Citrine PS2 Examples Runner Suite" do
     result.should_preserve_spram
   end
 end
-

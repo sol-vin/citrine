@@ -9,7 +9,7 @@ module Citrine
       node : Crystal::Call,
       allocator : RegisterAllocator,
       instructions : Array(Instruction),
-      fn : CompiledFunction
+      fn : CompiledFunction,
     ) : UInt8
       dest = allocator.alloc_temp
 
@@ -147,7 +147,7 @@ module Citrine
                     when "<="      then {Opcode::Compare, CompareSubOp::Le.value}
                     when ">"       then {Opcode::Compare, CompareSubOp::Gt.value}
                     when ">="      then {Opcode::Compare, CompareSubOp::Ge.value}
-                    else {Opcode::Add, AddSubOp::AddI32.value}
+                    else                {Opcode::Add, AddSubOp::AddI32.value}
                     end
         instructions << Instruction.encode_rrr(op, subop, dest, left_reg, right_reg)
         allocator.free_temp(left_reg)

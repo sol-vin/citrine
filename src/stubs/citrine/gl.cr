@@ -10,21 +10,21 @@ module Citrine
     # Primitive assembly rasterization modes.
     enum Mode : UInt8
       # Individual points (1 pixel each).
-      Points        = 0
+      Points = 0
       # Independent line segments (2 vertices per line).
-      Lines         = 1
+      Lines = 1
       # Connected line strip.
-      LineStrip     = 2
+      LineStrip = 2
       # Closed line loop.
-      LineLoop      = 3
+      LineLoop = 3
       # Independent triangles (3 vertices per triangle).
-      Triangles     = 4
+      Triangles = 4
       # Connected triangle strip.
       TriangleStrip = 5
       # Connected triangle fan around the initial vertex.
-      TriangleFan   = 6
+      TriangleFan = 6
       # Quadrilaterals (4 vertices per quad, auto-decomposed into 2 triangles).
-      Quads         = 7
+      Quads = 7
     end
 
     # Immediate-mode mode constants mirroring traditional OpenGL.
@@ -356,4 +356,3 @@ module Citrine
     end
   end
 end
-

@@ -24,7 +24,7 @@ puts "Selected ADPCM chunk size: #{chunk_size} bytes (#{target_blocks} blocks, #
 audio_mem = IO::Memory.new(64 + chunk_size)
 audio_mem.write(vag_bytes[0..47])
 16.times { audio_mem.write_byte(0_u8) } # 16 bytes padding -> 64 bytes total header
-audio_mem.write(vag_adpcm[0 ... chunk_size])
+audio_mem.write(vag_adpcm[0...chunk_size])
 
 audio_data = audio_mem.to_slice.dup
 
@@ -33,7 +33,7 @@ audio_data = audio_mem.to_slice.dup
 audio_data[0x40 + 1] = 0x06_u8
 
 # Ensure all intermediate blocks have Bit 1 (0x02) set:
-(1 ... target_blocks - 1).each do |b|
+(1...target_blocks - 1).each do |b|
   audio_data[0x40 + b * 16 + 1] = 0x02_u8
 end
 
@@ -52,13 +52,13 @@ puts "Total file shift: #{shift} bytes (0x#{shift.to_s(16)})"
 
 new_elf_mem = IO::Memory.new(orig_elf.size + shift)
 # 1. Write everything up to 0x1870
-new_elf_mem.write(orig_elf[0 ... orig_data_end])
+new_elf_mem.write(orig_elf[0...orig_data_end])
 # 2. Write padding zeroes up to 0x1990
 pad_size.times { new_elf_mem.write_byte(0_u8) }
 # 3. Write audio data
 new_elf_mem.write(audio_data)
 # 4. Write remaining sections (.mdebug, .shstrtab, .rel.text, .rel.rodata, .symtab, .strtab)
-new_elf_mem.write(orig_elf[orig_data_end .. -1])
+new_elf_mem.write(orig_elf[orig_data_end..-1])
 
 out_bytes = new_elf_mem.to_slice.dup
 puts "New ELF size: #{out_bytes.size} bytes"

@@ -28,5 +28,5 @@ e_shnum.times do |i|
   name = String.new(name_bytes[0, zero])
 
   puts sprintf("[%2d] %-16s type=0x%02X flags=0x%02X addr=0x%08X offset=0x%08X size=0x%06X (%d)",
-               i, name, sh_type, sh_flags, sh_addr, sh_offset, sh_size, sh_size)
+    i, name, sh_type, sh_flags, sh_addr, sh_offset, sh_size, sh_size)
 end

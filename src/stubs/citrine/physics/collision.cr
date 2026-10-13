@@ -58,7 +58,7 @@ module Citrine
         @hit : Bool = false,
         @point : Vector2 = Vector2.new(0.0_f32, 0.0_f32),
         @normal : Vector2 = Vector2.new(0.0_f32, 0.0_f32),
-        @distance : Float32 = 0.0_f32
+        @distance : Float32 = 0.0_f32,
       )
       end
     end
@@ -116,7 +116,7 @@ module Citrine
       start_pos : Vector2,
       radius : Float32,
       velocity : Vector2,
-      rx : Float32, ry : Float32, rw : Float32, rh : Float32
+      rx : Float32, ry : Float32, rw : Float32, rh : Float32,
     ) : RaycastHit2D
       # Expand AABB by circle radius (Minkowski Sum)
       expanded_x = rx - radius

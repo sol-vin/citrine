@@ -19,7 +19,7 @@ struct BoundingBox
     @min_z : Float32 = Float32::MAX,
     @max_x : Float32 = -Float32::MAX,
     @max_y : Float32 = -Float32::MAX,
-    @max_z : Float32 = -Float32::MAX
+    @max_z : Float32 = -Float32::MAX,
   )
   end
 
@@ -211,7 +211,7 @@ module Citrine
       @shininess : Float32 = 0.0_f32,
       @cull_mode : CullMode = CullMode::Back,
       @blend_mode : BlendMode3D = BlendMode3D::Opaque,
-      @wireframe : Bool = false
+      @wireframe : Bool = false,
     )
     end
 
@@ -232,10 +232,10 @@ module Citrine
   # (Position XYZ, Normal XYZ, UV) and 16-bit triangle indices for Emotion Engine DMA.
   class Mesh
     property name : String
-    property vertices : Array(Float32)     # [x, y, z, ...]
-    property normals : Array(Float32)      # [nx, ny, nz, ...]
-    property texcoords : Array(Float32)    # [u, v, ...]
-    property colors : Array(UInt8)         # [r, g, b, a, ...]
+    property vertices : Array(Float32)  # [x, y, z, ...]
+    property normals : Array(Float32)   # [nx, ny, nz, ...]
+    property texcoords : Array(Float32) # [u, v, ...]
+    property colors : Array(UInt8)      # [r, g, b, a, ...]
     property indices : Array(UInt16)
     property bounds : BoundingBox
     property material_index : Int32
@@ -272,20 +272,20 @@ module Citrine
       # 6 faces: +Z (front), -Z (back), +X (right), -X (left), +Y (top), -Y (bottom)
       faces = [
         # Front (+Z)
-        { [ {-w, -h,  l}, { w, -h,  l}, { w,  h,  l}, {-w,  h,  l} ], {0.0_f32, 0.0_f32, 1.0_f32} },
+        {[{-w, -h, l}, {w, -h, l}, {w, h, l}, {-w, h, l}], {0.0_f32, 0.0_f32, 1.0_f32}},
         # Back (-Z)
-        { [ { w, -h, -l}, {-w, -h, -l}, {-w,  h, -l}, { w,  h, -l} ], {0.0_f32, 0.0_f32, -1.0_f32} },
+        {[{w, -h, -l}, {-w, -h, -l}, {-w, h, -l}, {w, h, -l}], {0.0_f32, 0.0_f32, -1.0_f32}},
         # Right (+X)
-        { [ { w, -h,  l}, { w, -h, -l}, { w,  h, -l}, { w,  h,  l} ], {1.0_f32, 0.0_f32, 0.0_f32} },
+        {[{w, -h, l}, {w, -h, -l}, {w, h, -l}, {w, h, l}], {1.0_f32, 0.0_f32, 0.0_f32}},
         # Left (-X)
-        { [ {-w, -h, -l}, {-w, -h,  l}, {-w,  h,  l}, {-w,  h, -l} ], {-1.0_f32, 0.0_f32, 0.0_f32} },
+        {[{-w, -h, -l}, {-w, -h, l}, {-w, h, l}, {-w, h, -l}], {-1.0_f32, 0.0_f32, 0.0_f32}},
         # Top (+Y)
-        { [ {-w,  h,  l}, { w,  h,  l}, { w,  h, -l}, {-w,  h, -l} ], {0.0_f32, 1.0_f32, 0.0_f32} },
+        {[{-w, h, l}, {w, h, l}, {w, h, -l}, {-w, h, -l}], {0.0_f32, 1.0_f32, 0.0_f32}},
         # Bottom (-Y)
-        { [ {-w, -h, -l}, { w, -h, -l}, { w, -h,  l}, {-w, -h,  l} ], {0.0_f32, -1.0_f32, 0.0_f32} },
+        {[{-w, -h, -l}, {w, -h, -l}, {w, -h, l}, {-w, -h, l}], {0.0_f32, -1.0_f32, 0.0_f32}},
       ]
 
-      uvs = [ {0.0_f32, 1.0_f32}, {1.0_f32, 1.0_f32}, {1.0_f32, 0.0_f32}, {0.0_f32, 0.0_f32} ]
+      uvs = [{0.0_f32, 1.0_f32}, {1.0_f32, 1.0_f32}, {1.0_f32, 0.0_f32}, {0.0_f32, 0.0_f32}]
 
       faces.each do |face_verts, normal|
         base_idx = mesh.vertex_count.to_u16
@@ -588,7 +588,7 @@ module Citrine
       @meshes = [] of Mesh,
       @materials = [] of Material,
       @mesh_materials = [] of Int32,
-      @handle : UInt32 = 0_u32
+      @handle : UInt32 = 0_u32,
     )
       @transform = Matrix4.identity
       @bounds = BoundingBox.new
@@ -755,7 +755,7 @@ module Citrine
     rx : Float32, ry : Float32, rz : Float32,
     angle : Float32,
     sx : Float32, sy : Float32, sz : Float32,
-    tint : Color
+    tint : Color,
   )
   end
 
@@ -800,10 +800,10 @@ module Citrine
 end
 
 # Top-level DSL aliases
-Draw3D = Citrine::Draw3D
+Draw3D   = Citrine::Draw3D
 Material = Citrine::Material
-Mesh = Citrine::Mesh
-Model = Citrine::Model
+Mesh     = Citrine::Mesh
+Model    = Citrine::Model
 
 def bake_model(path : String, target : String? = nil, texture_size : Int32 = 128, clut : Int32 = 8) : String
   Citrine.bake_model(path, target, texture_size, clut)

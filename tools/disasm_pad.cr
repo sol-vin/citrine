@@ -13,7 +13,7 @@ def disasm_block(bytes, base, start_off, size)
     imm_raw = (w & 0xffff).to_i32
     simm = imm_raw >= 0x8000 ? imm_raw - 0x10000 : imm_raw
     target = w & 0x3ffffff
-    
+
     extra = ""
     case op
     when 0x00
@@ -25,7 +25,7 @@ def disasm_block(bytes, base, start_off, size)
       when 0x21 then extra = "addu r%d, r%d, r%d" % [rd, rs, rt]
       when 0x24 then extra = "and r%d, r%d, r%d" % [rd, rs, rt]
       when 0x25 then extra = "or r%d, r%d, r%d" % [rd, rs, rt]
-      else extra = "special funct=0x%02x" % funct
+      else           extra = "special funct=0x%02x" % funct
       end
     when 0x02 then extra = "j 0x%08x" % (target << 2)
     when 0x03 then extra = "jal 0x%08x" % (target << 2)
@@ -37,7 +37,7 @@ def disasm_block(bytes, base, start_off, size)
     when 0x23 then extra = "lw r%d, %d(r%d)" % [rt, simm, rs]
     when 0x2b then extra = "sw r%d, %d(r%d)" % [rt, simm, rs]
     end
-    
+
     puts "0x%08x: 0x%08x  %-30s" % [base + pc, w, extra]
   end
 end

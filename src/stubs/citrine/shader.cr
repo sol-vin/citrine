@@ -95,7 +95,7 @@ module Citrine
         @x : Float32 = 0.0_f32,
         @y : Float32 = 0.0_f32,
         @z : Float32 = 0.0_f32,
-        @w : Float32 = 1.0_f32
+        @w : Float32 = 1.0_f32,
       )
       end
 
@@ -151,8 +151,8 @@ module Citrine
       end
 
       def *(v : Vec4) : Vec4
-        tx = @m[0]*v.x + @m[4]*v.y + @m[8]*v.z  + @m[12]*v.w
-        ty = @m[1]*v.x + @m[5]*v.y + @m[9]*v.z  + @m[13]*v.w
+        tx = @m[0]*v.x + @m[4]*v.y + @m[8]*v.z + @m[12]*v.w
+        ty = @m[1]*v.x + @m[5]*v.y + @m[9]*v.z + @m[13]*v.w
         tz = @m[2]*v.x + @m[6]*v.y + @m[10]*v.z + @m[14]*v.w
         tw = @m[3]*v.x + @m[7]*v.y + @m[11]*v.z + @m[15]*v.w
         Vec4.new(tx, ty, tz, tw)
@@ -224,7 +224,7 @@ module Citrine
     @@active_vertex_shaders = Hash(String, VertexShader).new
 
     # Programmable vertex shader builder:
-    # ```crystal
+    # ```
     # Citrine::Shader.vertex "LitWave" do |s|
     #   s.uniform :mvp, "Mat4"
     #   s.uniform :light_dir, "Vec3"
@@ -234,7 +234,7 @@ module Citrine
     #   s.output :out_color, "Vec4"
     #
     #   s.main do |pos, norm, uv, col|
-    #     { pos, col, uv }
+    #     {pos, col, uv}
     #   end
     # end
     # ```

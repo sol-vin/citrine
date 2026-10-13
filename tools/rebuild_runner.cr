@@ -26,4 +26,3 @@ runner.compile_game("examples/03_entity_fibers/main.cr", "examples/03_entity_fib
 runner.build_iso("examples/03_entity_fibers/main.cbc", "examples/03_entity_fibers/game.iso")
 File.copy("examples/03_entity_fibers/game.iso", "examples/03_entity_fibers/main.iso") rescue nil
 puts "Rebuilt examples/03_entity_fibers/game.iso and main.iso."
-

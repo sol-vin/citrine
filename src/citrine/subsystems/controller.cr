@@ -51,7 +51,7 @@ module Citrine
   # High-level controller handle bound to a specific PlayStation 2 controller port.
   #
   # Example:
-  # ```crystal
+  # ```
   # p1 = Citrine.player(0)
   # p2 = Citrine.player(1)
   #
@@ -143,7 +143,7 @@ module Citrine
       @start_frame : UInt32,
       @button_mask : UInt16,
       @duration_frames : UInt16 = 1_u16,
-      @port : UInt8 = 0_u8
+      @port : UInt8 = 0_u8,
     )
     end
 
@@ -157,23 +157,23 @@ module Citrine
     # Returns the standard PlayStation 2 button name for a given bit index.
     def self.button_name(bit_index : Int32) : String
       case bit_index
-      when 0  then "Select"
-      when 1  then "L3"
-      when 2  then "R3"
-      when 3  then "Start"
-      when 4  then "Up"
-      when 5  then "Right"
-      when 6  then "Down"
-      when 7  then "Left"
-      when 8  then "L2"
-      when 9  then "R2"
+      when  0 then "Select"
+      when  1 then "L3"
+      when  2 then "R3"
+      when  3 then "Start"
+      when  4 then "Up"
+      when  5 then "Right"
+      when  6 then "Down"
+      when  7 then "Left"
+      when  8 then "L2"
+      when  9 then "R2"
       when 10 then "L1"
       when 11 then "R1"
       when 12 then "Triangle"
       when 13 then "Circle"
       when 14 then "Cross"
       when 15 then "Square"
-      else "Button(#{bit_index})"
+      else         "Button(#{bit_index})"
       end
     end
   end

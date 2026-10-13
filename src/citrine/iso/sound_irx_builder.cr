@@ -230,7 +230,7 @@ module Citrine
           (base_pitch & 0xFF).to_u8,
           ((base_pitch >> 8) & 0xFF).to_u8,
           0x05_u8,
-          0x24_u8
+          0x24_u8,
         ])
 
         # Multi-mode position-independent sound dispatcher at .text+0x4dc:
@@ -336,7 +336,7 @@ module Citrine
         disp.bne(V0, T1, "chk_vol")
         disp.nop
         disp.addiu(T9, S0, 0x0F0C)
-        disp.ori(A0, ZERO, 0x0200) # SD_VP_PITCH Voice 0
+        disp.ori(A0, ZERO, 0x0200)            # SD_VP_PITCH Voice 0
         disp.ori(A1, ZERO, base_pitch.to_i32) # 1.0x speed pitch
         disp.jalr(T9)
         disp.nop
@@ -634,22 +634,22 @@ module Citrine
 
         # Emit SIF Command Handler (SoundHandler) with FIFO ring buffer at 0x0cd4:
         sh = MipsEmitter.new(0x00000cd4_u32)
-        sh.move(T9, RA)               # Save RA in scratch T9
+        sh.move(T9, RA) # Save RA in scratch T9
         sh.bal("sh_get_base")
         sh.nop
         sh.label("sh_get_base")
-        sh.addiu(T0, RA, -0x0ce0)     # T0 = module_base (bal at 0x0cd8 + 8 = 0x0ce0)
-        sh.move(RA, T9)               # Restore RA
+        sh.addiu(T0, RA, -0x0ce0) # T0 = module_base (bal at 0x0cd8 + 8 = 0x0ce0)
+        sh.move(RA, T9)           # Restore RA
 
-        sh.lw(T1, 12, A0)             # T1 = incoming cmd from packet->opt (offset 12)
-        sh.sw(T1, 0x17d4, T0)         # Also update legacy SoundMode variable
+        sh.lw(T1, 12, A0)     # T1 = incoming cmd from packet->opt (offset 12)
+        sh.sw(T1, 0x17d4, T0) # Also update legacy SoundMode variable
 
         # FIFO at module_base + 0x5a00:
         # 0x5a00: head (0..15)
         # 0x5a04: tail (0..15)
         # 0x5a10: ring_buffer (16 words)
-        sh.lw(T2, 0x5a00, T0)         # T2 = head
-        sh.lw(T3, 0x5a04, T0)         # T3 = tail
+        sh.lw(T2, 0x5a00, T0) # T2 = head
+        sh.lw(T3, 0x5a04, T0) # T3 = tail
 
         # next_head = (head + 1) & 15
         sh.addiu(T4, T2, 1)
@@ -660,16 +660,16 @@ module Citrine
         sh.nop
 
         # Write command: buffer[head] = cmd
-        sh.sll(T5, T2, 2)             # head * 4
+        sh.sll(T5, T2, 2) # head * 4
         sh.addiu(T5, T5, 0x5a10)
-        sh.addu(T5, T0, T5)           # &buffer[head]
+        sh.addu(T5, T0, T5) # &buffer[head]
         sh.sw(T1, 0, T5)
 
         # Advance head: head = next_head
         sh.sw(T4, 0x5a00, T0)
 
         sh.label("sh_done")
-        sh.move(V0, ZERO)             # Return 0 (success)
+        sh.move(V0, ZERO) # Return 0 (success)
         sh.jr(RA)
         sh.nop
         sh.resolve!
@@ -727,13 +727,13 @@ module Citrine
           IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x5a10 + fi * 4, 4])
         end
 
-        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x1900, 4]) # cur_track
-        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x1904, 4]) # cur_bank_idx
-        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x1908, 4]) # next_refill_bank (0=Bank A, 1=Bank B)
-        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x190C, 4]) # play_state
-        IO::ByteFormat::LittleEndian.encode(0x2000_u32, base_elf[text_off + 0x1910, 4]) # cur_vol
+        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x1900, 4])                   # cur_track
+        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x1904, 4])                   # cur_bank_idx
+        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x1908, 4])                   # next_refill_bank (0=Bank A, 1=Bank B)
+        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x190C, 4])                   # play_state
+        IO::ByteFormat::LittleEndian.encode(0x2000_u32, base_elf[text_off + 0x1910, 4])              # cur_vol
         IO::ByteFormat::LittleEndian.encode(track_table.size.to_u32, base_elf[text_off + 0x1914, 4]) # total_tracks
-        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x1918, 4]) # timer_accum_ms
+        IO::ByteFormat::LittleEndian.encode(0_u32, base_elf[text_off + 0x1918, 4])                   # timer_accum_ms
 
         # Initial track pitch at 0x18EC:
         first_pitch = track_table.first?.try(&.pitch_reg) || 0x02AB_u16
@@ -759,7 +759,6 @@ module Citrine
 
         seek_msg = ">>> Seek bank %d\n\0"
         seek_msg.to_slice.copy_to(base_elf[text_off + 0x19C8, seek_msg.bytesize])
-
 
         if audio_data
           # Patch PlaySound: point wavBuffer to 0x6000
@@ -787,7 +786,7 @@ module Citrine
             (base_pitch & 0xFF).to_u8,
             ((base_pitch >> 8) & 0xFF).to_u8,
             0x05_u8,
-            0x24_u8
+            0x24_u8,
           ])
         else
           # Silence original PlaySound (0x170): jr $ra, nop
@@ -832,9 +831,9 @@ module Citrine
         mips.addiu(T9, S0, 0x0f84) # EnableIntr
         mips.ori(A0, ZERO, 0x24)   # DMA channel 4 (SPU2 Core 0)
         mips.jalr(T9); mips.nop
-        mips.ori(A0, ZERO, 0x28)   # DMA channel 7 (SPU2 Core 1)
+        mips.ori(A0, ZERO, 0x28) # DMA channel 7 (SPU2 Core 1)
         mips.jalr(T9); mips.nop
-        mips.ori(A0, ZERO, 9)      # SPU2 Interrupt
+        mips.ori(A0, ZERO, 9) # SPU2 Interrupt
         mips.jalr(T9); mips.nop
 
         # Initialize callee-saved function pointers
@@ -895,62 +894,62 @@ module Citrine
         mips.bnez(T0, "chk_cmd_pause")
         mips.nop
         # Key off Voice 0
-        mips.ori(A0, ZERO, 0x1600)  # SD_S_KOFF (Core 0)
+        mips.ori(A0, ZERO, 0x1600) # SD_S_KOFF (Core 0)
         mips.ori(A1, ZERO, 1)
         mips.jalr(S3); mips.nop
         mips.ori(A0, ZERO, 0x1600)
         mips.move(A1, ZERO)
         mips.jalr(S3); mips.nop
         # Reset state
-        mips.sw(ZERO, 0x1904, S0)   # cur_bank_idx = 0
-        mips.sw(ZERO, 0x1908, S0)   # next_refill_bank = 0
-        mips.sw(ZERO, 0x1918, S0)   # timer_accum_ms = 0
-        mips.sw(ZERO, 0x190c, S0)   # play_state = 0 (stopped)
+        mips.sw(ZERO, 0x1904, S0) # cur_bank_idx = 0
+        mips.sw(ZERO, 0x1908, S0) # next_refill_bank = 0
+        mips.sw(ZERO, 0x1918, S0) # timer_accum_ms = 0
+        mips.sw(ZERO, 0x190c, S0) # play_state = 0 (stopped)
         mips.beq(ZERO, ZERO, "mute_voice0")
         mips.nop
 
         mips.label("chk_cmd_pause")
-        mips.ori(T2, ZERO, 2)       # Pause
+        mips.ori(T2, ZERO, 2) # Pause
         mips.bne(T0, T2, "chk_cmd_resume")
         mips.nop
         mips.ori(T2, ZERO, 2)
-        mips.sw(T2, 0x190c, S0)     # play_state = 2 (paused)
+        mips.sw(T2, 0x190c, S0) # play_state = 2 (paused)
 
         mips.label("mute_voice0")
-        mips.ori(A0, ZERO, 0x0200)  # Core 0 pitch = 0
+        mips.ori(A0, ZERO, 0x0200) # Core 0 pitch = 0
         mips.move(A1, ZERO)
         mips.jalr(S2); mips.nop
-        mips.ori(A0, ZERO, 0x0000)  # Core 0 VOLL = 0
+        mips.ori(A0, ZERO, 0x0000) # Core 0 VOLL = 0
         mips.move(A1, ZERO)
         mips.jalr(S2); mips.nop
-        mips.ori(A0, ZERO, 0x0100)  # Core 0 VOLR = 0
+        mips.ori(A0, ZERO, 0x0100) # Core 0 VOLR = 0
         mips.move(A1, ZERO)
         mips.jalr(S2); mips.nop
         mips.beq(ZERO, ZERO, "process_cmd_loop"); mips.nop
 
         mips.label("chk_cmd_resume")
-        mips.ori(T2, ZERO, 3)       # Resume
+        mips.ori(T2, ZERO, 3) # Resume
         mips.bne(T0, T2, "chk_cmd_play")
         mips.nop
         mips.label("do_resume")
         # Restore Voice 0 volume from S7 (cur_vol at 0x1910)
         mips.lw(S7, 0x1910, S0)
-        mips.ori(A0, ZERO, 0x0000)  # Core 0 VOLL
+        mips.ori(A0, ZERO, 0x0000) # Core 0 VOLL
         mips.move(A1, S7)
         mips.jalr(S2); mips.nop
-        mips.ori(A0, ZERO, 0x0100)  # Core 0 VOLR
+        mips.ori(A0, ZERO, 0x0100) # Core 0 VOLR
         mips.move(A1, S7)
         mips.jalr(S2); mips.nop
         # Restore pitch
-        mips.ori(A0, ZERO, 0x0200)  # Core 0 pitch
-        mips.lw(A1, 0x18EC, S0)     # restore cur_pitch
+        mips.ori(A0, ZERO, 0x0200) # Core 0 pitch
+        mips.lw(A1, 0x18EC, S0)    # restore cur_pitch
         mips.jalr(S2); mips.nop
         mips.ori(T2, ZERO, 1)
-        mips.sw(T2, 0x190c, S0)     # play_state = 1
+        mips.sw(T2, 0x190c, S0) # play_state = 1
         mips.beq(ZERO, ZERO, "process_cmd_loop"); mips.nop
 
         mips.label("chk_cmd_play")
-        mips.ori(T2, ZERO, 1)       # Play
+        mips.ori(T2, ZERO, 1) # Play
         mips.bne(T0, T2, "chk_cmd_seek")
         mips.nop
         mips.lw(T2, 0x190c, S0)
@@ -968,7 +967,7 @@ module Citrine
         mips.ori(T3, ZERO, 2)
         mips.bne(T2, T3, "chk_cmd_cdvd_seek")
         mips.nop
-        mips.andi(A1, T0, 0xFFFF)   # A1 = target_bank
+        mips.andi(A1, T0, 0xFFFF) # A1 = target_bank
         mips.bal("seek_stream_bank")
         mips.nop
         mips.beq(ZERO, ZERO, "process_cmd_loop"); mips.nop
@@ -980,11 +979,11 @@ module Citrine
         mips.bne(T2, T3, "chk_cmd_track")
         mips.nop
         mips.li(T4, 0x00FFFFFF_u32)
-        mips.and_(A0, T0, T4)       # A0 = target LBA
-        mips.addiu(T9, S0, 0x0bf4)  # sceCdSeek (stub at 0x0bf4)
+        mips.and_(A0, T0, T4)      # A0 = target LBA
+        mips.addiu(T9, S0, 0x0bf4) # sceCdSeek (stub at 0x0bf4)
         mips.jalr(T9); mips.nop
         mips.move(A0, ZERO)
-        mips.addiu(T9, S0, 0x0bec)  # sceCdSync(0)
+        mips.addiu(T9, S0, 0x0bec) # sceCdSync(0)
         mips.jalr(T9); mips.nop
         mips.beq(ZERO, ZERO, "process_cmd_loop"); mips.nop
 
@@ -994,7 +993,7 @@ module Citrine
         mips.ori(T3, ZERO, 1)
         mips.bne(T2, T3, "chk_cmd_vol")
         mips.nop
-        mips.andi(A0, T0, 0xFF)     # track index
+        mips.andi(A0, T0, 0xFF) # track index
         mips.bal("start_track")
         mips.nop
         mips.beq(ZERO, ZERO, "process_cmd_loop"); mips.nop
@@ -1005,7 +1004,7 @@ module Citrine
         mips.bne(T2, T3, "process_cmd_loop")
         mips.nop
         mips.andi(T4, T0, 0xFF)
-        mips.sll(S7, T4, 6)         # vol << 6
+        mips.sll(S7, T4, 6) # vol << 6
         mips.sw(S7, 0x1910, S0)
         mips.bal("set_all_volumes")
         mips.nop
@@ -1046,12 +1045,12 @@ module Citrine
         # Voice 0 has entered Bank B, so Bank A is free to refill with next bank!
         mips.lui(A0, 0x0001)
         mips.ori(A0, A0, 0x5000)
-        mips.ori(A1, ZERO, 1)    # loop_start = 1
-        mips.move(A2, ZERO)      # loop_end = 0
+        mips.ori(A1, ZERO, 1) # loop_start = 1
+        mips.move(A2, ZERO)   # loop_end = 0
         mips.bal("read_and_dma_bank")
         mips.nop
         mips.ori(T1, ZERO, 1)
-        mips.sw(T1, 0x1908, S0)  # next_refill_bank = 1 (Bank B is next)
+        mips.sw(T1, 0x1908, S0) # next_refill_bank = 1 (Bank B is next)
         mips.beq(ZERO, ZERO, "stream_loop")
         mips.nop
 
@@ -1060,8 +1059,8 @@ module Citrine
         mips.label("refill_bank_b")
         mips.lui(A0, 0x0001)
         mips.ori(A0, A0, 0x9000)
-        mips.move(A1, ZERO)      # loop_start = 0
-        mips.ori(A2, ZERO, 1)    # loop_end = 1
+        mips.move(A1, ZERO)   # loop_start = 0
+        mips.ori(A2, ZERO, 1) # loop_end = 1
         mips.bal("read_and_dma_bank")
         mips.nop
         mips.sw(ZERO, 0x1908, S0) # next_refill_bank = 0 (Bank A is next)
@@ -1090,20 +1089,20 @@ module Citrine
         mips.lw(T0, 0x1900, S0) # cur_track
         mips.sll(T2, T0, 3)     # cur_track * 8
         mips.addiu(T3, S0, 0x1920)
-        mips.addu(T3, T3, T2)   # &track_table[cur_track]
-        mips.lw(S4, 0, T3)      # start_lba
-        mips.lhu(S5, 4, T3)     # bank_count (16-bit)
+        mips.addu(T3, T3, T2) # &track_table[cur_track]
+        mips.lw(S4, 0, T3)    # start_lba
+        mips.lhu(S5, 4, T3)   # bank_count (16-bit)
 
         mips.lw(T4, 0x1904, S0) # cur_bank_idx
         mips.sltu(T5, T4, S5)
         mips.bnez(T5, "bank_in_range")
         mips.nop
-        mips.move(T4, ZERO)     # wrap to bank 0
+        mips.move(T4, ZERO) # wrap to bank 0
         mips.label("bank_in_range")
 
-        mips.sll(T5, T4, 3)     # cur_bank_idx * 8 sectors
-        mips.addu(A0, S4, T5)   # A0 = sector to read from disc!
-        mips.ori(A1, ZERO, 8)   # A1 = 8 sectors (16 KB)
+        mips.sll(T5, T4, 3)        # cur_bank_idx * 8 sectors
+        mips.addu(A0, S4, T5)      # A0 = sector to read from disc!
+        mips.ori(A1, ZERO, 8)      # A1 = 8 sectors (16 KB)
         mips.addiu(A2, S0, 0x1A00) # A2 = staging_buf (16 KB at S0 + 0x1A00)
         mips.addiu(A3, S0, 0x0c04) # A3 = &mode (sceCdRMode struct at 0x0c04)
         mips.addiu(T9, S0, 0x0be4) # sceCdRead (stub at 0x0be4)
@@ -1120,7 +1119,7 @@ module Citrine
         mips.beqz(T1, "skip_refill_print")
         mips.nop
         mips.addiu(A0, S0, 0x1990)
-        mips.move(A2, S1)        # spu_dest (0x15000 or 0x19000)
+        mips.move(A2, S1)          # spu_dest (0x15000 or 0x19000)
         mips.addiu(T9, S0, 0x1030) # printf
         mips.jalr(T9); mips.nop
         mips.label("skip_refill_print")
@@ -1130,15 +1129,15 @@ module Citrine
         mips.ori(T7, ZERO, 0x02)   # default: Repeat
         mips.beqz(S2, "no_flag_start")
         mips.nop
-        mips.ori(T7, ZERO, 0x06)   # Loop Start + Repeat
+        mips.ori(T7, ZERO, 0x06) # Loop Start + Repeat
         mips.label("no_flag_start")
         mips.sb(T7, 1, T6)
 
-        mips.addiu(T8, T6, 16368)  # last block in 16KB bank
-        mips.ori(T7, ZERO, 0x02)   # default: Repeat
+        mips.addiu(T8, T6, 16368) # last block in 16KB bank
+        mips.ori(T7, ZERO, 0x02)  # default: Repeat
         mips.beqz(S3, "no_flag_end")
         mips.nop
-        mips.ori(T7, ZERO, 0x03)   # Loop End + Repeat
+        mips.ori(T7, ZERO, 0x03) # Loop End + Repeat
         mips.label("no_flag_end")
         mips.sb(T7, 1, T8)
 
@@ -1187,7 +1186,7 @@ module Citrine
         mips.addiu(SP, SP, -64)
         mips.sw(RA, 60, SP)
         mips.sw(S6, 24, SP)
-        mips.move(S6, A0) # track_idx
+        mips.move(S6, A0)       # track_idx
         mips.lw(T0, 0x1914, S0) # total_tracks
         mips.sltu(T1, S6, T0)
         mips.bnez(T1, "track_idx_in_bounds")
@@ -1205,10 +1204,10 @@ module Citrine
         mips.sw(S6, 0x1900, S0)
 
         # Set Voice 0 Pitch & dynamic frame timing:
-        mips.sll(T2, S6, 3)     # S6 * 8
+        mips.sll(T2, S6, 3) # S6 * 8
         mips.addiu(T3, S0, 0x1920)
-        mips.addu(T3, T3, T2)   # &track_table[S6]
-        mips.lhu(A1, 6, T3)     # pitch_reg
+        mips.addu(T3, T3, T2) # &track_table[S6]
+        mips.lhu(A1, 6, T3)   # pitch_reg
         mips.bnez(A1, "pitch_val_ok")
         mips.nop
         mips.ori(A1, ZERO, 0x02AB)
@@ -1243,8 +1242,8 @@ module Citrine
         mips.lw(T0, 0x1900, S0) # cur_track
         mips.sll(T2, T0, 3)     # cur_track * 8
         mips.addiu(T3, S0, 0x1920)
-        mips.addu(T3, T3, T2)   # &track_table[cur_track]
-        mips.lhu(T4, 4, T3)     # bank_count
+        mips.addu(T3, T3, T2) # &track_table[cur_track]
+        mips.lhu(T4, 4, T3)   # bank_count
         mips.sltu(T5, S6, T4)
         mips.bnez(T5, "seek_bank_in_bounds")
         mips.nop
@@ -1291,9 +1290,9 @@ module Citrine
 
         # Set Voice 0 SSA and LSA to 0x15000 on Core 0 ONLY
         mips.lui(A1, 0x0001); mips.ori(A1, A1, 0x5000)
-        mips.ori(A0, ZERO, 0x2040)  # Core 0 SD_VA_SSA
+        mips.ori(A0, ZERO, 0x2040) # Core 0 SD_VA_SSA
         mips.jalr(S4); mips.nop
-        mips.ori(A0, ZERO, 0x2060)  # Core 0 SD_VA_LSA
+        mips.ori(A0, ZERO, 0x2060) # Core 0 SD_VA_LSA
         mips.jalr(S4); mips.nop
 
         # Set Voice 0 Pitch = cur_pitch on Core 0 ONLY
@@ -1310,7 +1309,7 @@ module Citrine
         mips.sw(ZERO, 0x1908, S0) # next_refill_bank = 0 (Bank A is first)
         mips.sw(ZERO, 0x1918, S0) # timer_accum_ms = 0
         mips.ori(T0, ZERO, 1)
-        mips.sw(T0, 0x190C, S0)   # play_state = 1
+        mips.sw(T0, 0x190C, S0) # play_state = 1
 
         # Key on Voice 0 on Core 0 ONLY:
         mips.ori(A0, ZERO, 0x1500) # SD_S_KON (Core 0)
@@ -1329,7 +1328,7 @@ module Citrine
 
         # Route Core 0 Voice 0 to both Left and Right stereo channels at volume S7:
         mips.ori(A0, ZERO, 0x0000); mips.move(A1, S7); mips.jalr(S2); mips.nop # Core 0 Voice 0 VOLL
-        mips.ori(A0, ZERO, 0x0100); mips.jalr(S2); mips.nop # Core 0 Voice 0 VOLR
+        mips.ori(A0, ZERO, 0x0100); mips.jalr(S2); mips.nop                    # Core 0 Voice 0 VOLR
 
         mips.lw(RA, 0, SP)
         mips.addiu(SP, SP, 16)

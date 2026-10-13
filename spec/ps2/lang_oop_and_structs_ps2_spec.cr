@@ -302,4 +302,3 @@ describe "Citrine PS2 Dynamic Language Parity: OOP, Structs & Typing" do
     result.should_have_output("[CITRINE TEST] OOP#composition_and_delegation: PASS")
   end
 end
-

@@ -14,12 +14,12 @@ describe Citrine::Importers::ImageImporter do
 
     # DIB header (BITMAPINFOHEADER: 40 bytes)
     bmp_io.write_bytes(40_u32, IO::ByteFormat::LittleEndian)
-    bmp_io.write_bytes(2_i32, IO::ByteFormat::LittleEndian)   # width
-    bmp_io.write_bytes(2_i32, IO::ByteFormat::LittleEndian)   # height
-    bmp_io.write_bytes(1_u16, IO::ByteFormat::LittleEndian)   # planes
-    bmp_io.write_bytes(24_u16, IO::ByteFormat::LittleEndian)  # bpp
-    bmp_io.write_bytes(0_u32, IO::ByteFormat::LittleEndian)   # compression
-    bmp_io.write_bytes(12_u32, IO::ByteFormat::LittleEndian)  # image size
+    bmp_io.write_bytes(2_i32, IO::ByteFormat::LittleEndian)  # width
+    bmp_io.write_bytes(2_i32, IO::ByteFormat::LittleEndian)  # height
+    bmp_io.write_bytes(1_u16, IO::ByteFormat::LittleEndian)  # planes
+    bmp_io.write_bytes(24_u16, IO::ByteFormat::LittleEndian) # bpp
+    bmp_io.write_bytes(0_u32, IO::ByteFormat::LittleEndian)  # compression
+    bmp_io.write_bytes(12_u32, IO::ByteFormat::LittleEndian) # image size
     bmp_io.write_bytes(2835_i32, IO::ByteFormat::LittleEndian)
     bmp_io.write_bytes(2835_i32, IO::ByteFormat::LittleEndian)
     bmp_io.write_bytes(0_u32, IO::ByteFormat::LittleEndian)

@@ -42,7 +42,7 @@ module Citrine
           home.join("AppData", "Local", "Programs", "PCSX2", "pcsx2-qtx64.exe").to_s,
           home.join("Documents", "PCSX2", "pcsx2-qt.exe").to_s,
           home.join("Documents", "PCSX2", "pcsx2-qtx64.exe").to_s,
-          home.join("Documents", "PCSX2", "pcsx2.exe").to_s
+          home.join("Documents", "PCSX2", "pcsx2.exe").to_s,
         ]
 
         candidates.each do |c|
@@ -64,7 +64,7 @@ module Citrine
           "C:\\Users\\Ian\\Documents\\PCSX2\\logs\\emulog.txt",
           home.join("AppData", "Roaming", "PCSX2", "logs", "emulog.txt").to_s,
           home.join("AppData", "Local", "PCSX2", "logs", "emulog.txt").to_s,
-          File.expand_path("logs/emulog.txt")
+          File.expand_path("logs/emulog.txt"),
         ]
 
         candidates.each do |c|
@@ -86,7 +86,7 @@ module Citrine
           "C:\\Program Files\\PCSX2\\inis\\PCSX2.ini",
           "C:\\Users\\Ian\\Documents\\PCSX2\\inis\\PCSX2.ini",
           home.join("AppData", "Roaming", "PCSX2", "inis", "PCSX2.ini").to_s,
-          File.expand_path("inis/PCSX2.ini")
+          File.expand_path("inis/PCSX2.ini"),
         ]
 
         candidates.each do |c|
@@ -138,7 +138,6 @@ module Citrine
           end
           modified = true
         end
-
 
         unless content.includes?("[Filenames]") && content.includes?("BIOS =")
           if content.includes?("[Filenames]")
@@ -203,7 +202,7 @@ module Citrine
           "C:\\Program Files\\PCSX2\\logs\\emulog.txt",
           home.join("AppData", "Roaming", "PCSX2", "logs", "emulog.txt").to_s,
           home.join("AppData", "Local", "PCSX2", "logs", "emulog.txt").to_s,
-          File.expand_path("logs/emulog.txt")
+          File.expand_path("logs/emulog.txt"),
         ].compact.uniq
 
         log_candidates.each do |cand|
@@ -429,17 +428,17 @@ module Citrine
         Dir.mkdir_p(File.dirname(abs_output))
 
         {% if flag?(:windows) %}
-        # Check PCSX2 snaps directory
-        home = Path.home
-        snap_dirs = [
-          home.join("Documents", "PCSX2", "snaps").to_s,
-          "C:\\Program Files\\PCSX2\\snaps",
-          "C:\\Users\\Ian\\Documents\\PCSX2\\snaps"
-        ]
-        active_snap_dir = snap_dirs.find { |d| Dir.exists?(d) } || snap_dirs.first
-        before_snaps = Dir.glob(File.join(active_snap_dir, "*.png").gsub('\\', '/')) rescue [] of String
+          # Check PCSX2 snaps directory
+          home = Path.home
+          snap_dirs = [
+            home.join("Documents", "PCSX2", "snaps").to_s,
+            "C:\\Program Files\\PCSX2\\snaps",
+            "C:\\Users\\Ian\\Documents\\PCSX2\\snaps",
+          ]
+          active_snap_dir = snap_dirs.find { |d| Dir.exists?(d) } || snap_dirs.first
+          before_snaps = Dir.glob(File.join(active_snap_dir, "*.png").gsub('\\', '/')) rescue [] of String
 
-        script = <<-POWERSHELL
+          script = <<-POWERSHELL
         $ErrorActionPreference = 'SilentlyContinue'
         $env:LIB = ""
         Add-Type -AssemblyName System.Drawing
@@ -482,17 +481,17 @@ module Citrine
         }
         POWERSHELL
 
-        Process.run("powershell", ["-NoProfile", "-Command", "$outputPath = '#{abs_output.gsub('\'', "''")}'; " + script], env: {"LIB" => ""}) rescue nil
+          Process.run("powershell", ["-NoProfile", "-Command", "$outputPath = '#{abs_output.gsub('\'', "''")}'; " + script], env: {"LIB" => ""}) rescue nil
 
-        # If F8 produced a native GS framebuffer snapshot in snaps/, use that high-res file!
-        8.times do
-          after_snaps = (Dir.glob(File.join(active_snap_dir, "*.png").gsub('\\', '/')) rescue [] of String) - before_snaps
-          if newest = after_snaps.last?
-            FileUtils.cp(newest, abs_output) rescue nil
-            break
+          # If F8 produced a native GS framebuffer snapshot in snaps/, use that high-res file!
+          8.times do
+            after_snaps = (Dir.glob(File.join(active_snap_dir, "*.png").gsub('\\', '/')) rescue [] of String) - before_snaps
+            if newest = after_snaps.last?
+              FileUtils.cp(newest, abs_output) rescue nil
+              break
+            end
+            sleep 0.25.seconds
           end
-          sleep 0.25.seconds
-        end
         {% end %}
 
         File.exists?(abs_output) && File.size(abs_output) > 0

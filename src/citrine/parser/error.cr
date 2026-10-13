@@ -8,7 +8,7 @@ module Citrine
       message : String,
       @filename : String? = nil,
       @line_number : Int32? = nil,
-      @column_number : Int32? = nil
+      @column_number : Int32? = nil,
     )
       loc = ""
       if fn = @filename

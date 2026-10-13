@@ -15,7 +15,7 @@ describe "Citrine MIPS R5900 Emitter Suite" do
     emitter = Citrine::MIPS::MipsEmitter.new(0x00100000_u32)
     emitter.ori(Citrine::MIPS::T0, Citrine::MIPS::ZERO, 5) # cand (writes T0)
     emitter.j("target")                                    # branch (reads none)
-    emitter.nop                                           # delay slot nop
+    emitter.nop                                            # delay slot nop
     emitter.label("target")
     emitter.nop
 
@@ -39,7 +39,7 @@ describe "Citrine MIPS R5900 Emitter Suite" do
     emitter = Citrine::MIPS::MipsEmitter.new(0x00100000_u32)
     emitter.addiu(Citrine::MIPS::T1, Citrine::MIPS::ZERO, 1) # writes T1
     emitter.bnez(Citrine::MIPS::T1, "target")                # reads T1!
-    emitter.nop                                             # delay slot nop
+    emitter.nop                                              # delay slot nop
     emitter.label("target")
     emitter.nop
 

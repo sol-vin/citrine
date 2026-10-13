@@ -17,23 +17,17 @@ module Citrine
           when DrawCommand::Type::Clear
             c = cmd.color != 0_u32 ? cmd.color : 0xFF000000_u32
             buf.fill(c)
-
           when DrawCommand::Type::Rect
             draw_rect(buf, width, height, cmd.x1, cmd.y1, cmd.x2, cmd.y2, cmd.color)
-
           when DrawCommand::Type::Circle
             draw_circle(buf, width, height, cmd.x1, cmd.y1, cmd.radius, cmd.color)
-
           when DrawCommand::Type::Line
             draw_line(buf, width, height, cmd.x1, cmd.y1, cmd.x2, cmd.y2, cmd.color)
-
           when DrawCommand::Type::Triangle
             draw_triangle(buf, width, height, cmd.x1, cmd.y1, cmd.x2, cmd.y2, cmd.x3, cmd.y3, cmd.color)
-
           when DrawCommand::Type::Quad
             draw_triangle(buf, width, height, cmd.x1, cmd.y1, cmd.x2, cmd.y2, cmd.x3, cmd.y3, cmd.color)
             draw_triangle(buf, width, height, cmd.x1, cmd.y1, cmd.x3, cmd.y3, cmd.x4, cmd.y4, cmd.color)
-
           when DrawCommand::Type::Text
             draw_text(buf, width, height, cmd.text, cmd.x1, cmd.y1, cmd.x2, cmd.color)
           end
@@ -52,7 +46,7 @@ module Citrine
 
       private def self.set_pixel(buf : Slice(UInt32), w : Int32, h : Int32, x : Int32, y : Int32, color : UInt32)
         return if x < 0 || x >= w || y < 0 || y >= h
-        
+
         # Color format: 0xAABBGGRR or 0xAARRGGBB depending on source. Standardize:
         a = ((color >> 24) & 0xFF).to_u32
         if a == 0 && color != 0

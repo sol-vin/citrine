@@ -133,7 +133,7 @@ module Citrine
         panics : Array(String),
         heap_reports : Array(String),
         scratch_rewinds : Int32,
-        total_lines : Int32
+        total_lines : Int32,
       )
         sep = "=" * 76
         puts "\n" + sep
@@ -141,12 +141,12 @@ module Citrine
         puts sep
         puts "Target ISO:           #{iso_path}"
         puts "Log Lines Captured:   #{total_lines}"
-        
+
         canary_str = if gdb_canary
-          canary_valid ? "VALID (0x#{gdb_canary.to_s(16).upcase} via GDB)" : "CORRUPTED (0x#{gdb_canary.to_s(16).upcase})"
-        else
-          canary_valid ? "VALID (0xDEADBEEF)" : "CORRUPTED"
-        end
+                       canary_valid ? "VALID (0x#{gdb_canary.to_s(16).upcase} via GDB)" : "CORRUPTED (0x#{gdb_canary.to_s(16).upcase})"
+                     else
+                       canary_valid ? "VALID (0xDEADBEEF)" : "CORRUPTED"
+                     end
         puts "SPRAM Stack Canary:   #{canary_str}"
 
         puts "Scratch Pool Status:  #{scratch_rewinds > 0 ? "ACTIVE (#{scratch_rewinds} V-Blank rewinds)" : "NOMINAL"}"
@@ -216,7 +216,6 @@ module Citrine
           iso_path = resolved.gsub(/\.cr$/, ".iso")
           IsoBuilder.build(iso_path, cbc_bytes)
           return {iso_path, source_map}
-
         elsif resolved.ends_with?(".cbc")
           cbc_bytes = File.read(resolved).to_slice
           sym_path = resolved.gsub(/\.cbc$/, ".cbcsym")
@@ -227,7 +226,6 @@ module Citrine
           iso_path = resolved.gsub(/\.cbc$/, ".iso")
           IsoBuilder.build(iso_path, cbc_bytes)
           return {iso_path, source_map}
-
         else
           sym_path = resolved.gsub(/\.iso$/, ".cbcsym")
           if File.exists?(sym_path)

@@ -90,7 +90,6 @@ end
 
 alias Rectangle = Rect
 
-
 # 3D mathematical vector with single-precision floating point coordinates.
 struct Vector3
   # X coordinate.
@@ -154,14 +153,14 @@ struct Color
   end
 
   # Standard predefined colors.
-  White   = Color.new(255, 255, 255, 255)
-  Black   = Color.new(0, 0, 0, 255)
-  Red     = Color.new(255, 0, 0, 255)
-  Green   = Color.new(0, 255, 0, 255)
-  Blue    = Color.new(0, 0, 255, 255)
-  Yellow  = Color.new(255, 255, 0, 255)
-  Cyan    = Color.new(0, 255, 255, 255)
-  Magenta = Color.new(255, 0, 255, 255)
+  White     = Color.new(255, 255, 255, 255)
+  Black     = Color.new(0, 0, 0, 255)
+  Red       = Color.new(255, 0, 0, 255)
+  Green     = Color.new(0, 255, 0, 255)
+  Blue      = Color.new(0, 0, 255, 255)
+  Yellow    = Color.new(255, 255, 0, 255)
+  Cyan      = Color.new(0, 255, 255, 255)
+  Magenta   = Color.new(255, 0, 255, 255)
   Gray      = Color.new(128, 128, 128, 255)
   DarkGray  = Color.new(80, 80, 80, 255)
   LightGray = Color.new(200, 200, 200, 255)
@@ -172,37 +171,37 @@ end
 # Physical DualShock 2 controller button enumeration on PlayStation 2.
 enum Button : UInt8
   # DualShock Select button.
-  Select   =  0
+  Select = 0
   # Left analog stick click.
-  L3       =  1
+  L3 = 1
   # Right analog stick click.
-  R3       =  2
+  R3 = 2
   # DualShock Start button.
-  Start    =  3
+  Start = 3
   # D-Pad Up button.
-  Up       =  4
+  Up = 4
   # D-Pad Right button.
-  Right    =  5
+  Right = 5
   # D-Pad Down button.
-  Down     =  6
+  Down = 6
   # D-Pad Left button.
-  Left     =  7
+  Left = 7
   # Left lower trigger button (L2).
-  L2       =  8
+  L2 = 8
   # Right lower trigger button (R2).
-  R2       =  9
+  R2 = 9
   # Left upper shoulder button (L1).
-  L1       = 10
+  L1 = 10
   # Right upper shoulder button (R1).
-  R1       = 11
+  R1 = 11
   # Geometric Triangle button.
   Triangle = 12
   # Geometric Circle button.
-  Circle   = 13
+  Circle = 13
   # Geometric Cross (X) button.
-  Cross    = 14
+  Cross = 14
   # Geometric Square button.
-  Square   = 15
+  Square = 15
 end
 
 require "../citrine/subsystems/controller"
@@ -277,7 +276,7 @@ struct Texture
     flip_y : Bool = false,
     src : Rect? = nil,
     dest : Rect? = nil,
-    palette : Palette | UInt32? = nil
+    palette : Palette | UInt32? = nil,
   )
     Citrine::Draw2D.draw_texture(
       self, x, y,
@@ -332,7 +331,7 @@ struct Sprite
     tint : Color = Color::White,
     flip_x : Bool = false,
     flip_y : Bool = false,
-    palette : Palette | UInt32? = nil
+    palette : Palette | UInt32? = nil,
   )
     @texture.draw(
       x, y,
@@ -350,7 +349,6 @@ struct Sprite
     )
   end
 end
-
 
 # Prints diagnostic string `msg` to EE SIO / SIF console.
 def debug_puts(msg : String)
@@ -546,7 +544,6 @@ module Citrine
     Citrine::Draw2D.text(text, x, y, size: size, color: color, rotation: rotation, origin: Vector2.new(ox, oy))
   end
 
-
   # Draws a 2D solid filled rectangle with upper-left corner at `(x, y)` and size `(width, height)`.
   def self.draw_rectangle(x : Number, y : Number, width : Number, height : Number, color : Color)
   end
@@ -630,7 +627,7 @@ module Citrine
     dx : Number, dy : Number, dw : Number, dh : Number,
     rotation : Number, ox : Number, oy : Number,
     tint : Color = Color::White,
-    flip_flags : UInt8 = 0_u8
+    flip_flags : UInt8 = 0_u8,
   )
   end
 
@@ -652,7 +649,6 @@ module Citrine
   def self.unload_texture(texture : Texture | UInt32)
   end
 
-
   # =========================================================================
   # DualShock 2 Controller Subsystem
   # =========================================================================
@@ -664,7 +660,7 @@ module Citrine
   # - `button`: DualShock 2 physical button (e.g. `Button::Cross`).
   #
   # Example:
-  # ```crystal
+  # ```
   # if Citrine.button_down?(0, Button::Right)
   #   player_x += 5
   # end
@@ -682,7 +678,7 @@ module Citrine
   # - `button`: DualShock 2 physical button (e.g. `Button::Cross`).
   #
   # Example:
-  # ```crystal
+  # ```
   # if Citrine.button_pressed?(0, Button::Cross)
   #   jump
   # end
@@ -727,7 +723,7 @@ module Citrine
   # Returns a high-level `Controller` handle bound to the specified player / controller port.
   #
   # Example:
-  # ```crystal
+  # ```
   # p1 = Citrine.player(0)
   # p2 = Citrine.player(1)
   #
@@ -1358,10 +1354,9 @@ module Citrine
   end
 end
 
-
 # Top-level context declaration block DSL:
 #
-# ```crystal
+# ```
 # context(:game) do
 #   require "citrine/draw3d"
 #   require "./player"
@@ -1381,4 +1376,3 @@ end
 def boot_screen(enabled : Bool = true)
   Citrine.boot_screen(enabled)
 end
-

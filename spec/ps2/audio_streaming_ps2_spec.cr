@@ -21,7 +21,7 @@ describe "Citrine PS2 Audio Streaming Suite" do
     IO::ByteFormat::LittleEndian.decode(UInt32, elf[table_pos, 4]).should eq 1739_u32      # track 1 lba
     IO::ByteFormat::LittleEndian.decode(UInt32, elf[table_pos + 4, 4]).should eq 102_u32   # track 1 banks
     IO::ByteFormat::LittleEndian.decode(UInt32, elf[table_pos + 8, 4]).should eq 2555_u32  # track 2 lba
-    IO::ByteFormat::LittleEndian.decode(UInt32, elf[table_pos + 12, 4]).should eq 162_u32 # track 2 banks
+    IO::ByteFormat::LittleEndian.decode(UInt32, elf[table_pos + 12, 4]).should eq 162_u32  # track 2 banks
 
     # Verify thbase DelayThread import at text_off + 0x10a0
     thbase_pos = text_off + 0x10a0

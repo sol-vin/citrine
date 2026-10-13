@@ -6,7 +6,7 @@
 # buttons and controller ports (Port 0 / Player 1 vs Port 1 / Player 2).
 #
 # ### Example Usage:
-# ```crystal
+# ```
 # require "citrine"
 # require "citrine/inputmap"
 #
@@ -129,7 +129,7 @@ module Citrine
     # Computes an axis value (-1.0 to 1.0) between a negative action and a positive action.
     #
     # Example:
-    # ```crystal
+    # ```
     # move_x = Citrine::InputMap.get_axis("move_left", "move_right")
     # ```
     def self.get_axis(negative_action : String | Symbol | Int32, positive_action : String | Symbol | Int32) : Float32
@@ -183,7 +183,7 @@ end
 # Declarative Macro DSL for defining an input map and generating a type-safe `Actions` enum.
 #
 # ### Example:
-# ```crystal
+# ```
 # input_map do
 #   action :jump, Button::Cross, port: 0
 #   action :attack, Button::Square, port: 0
@@ -203,32 +203,32 @@ end
 # Pre-declared Actions enum populated by input map declarations.
 enum Actions
   # Default action slot
-  None = 0
-  SpawnOne = 1
-  SpawnTen = 2
-  Reset = 3
-  Jump = 4
-  Attack = 5
-  Fire = 6
-  Pause = 7
-  P2Jump = 8
-  P2Attack = 9
-  P2Fire = 10
-  CycleColor = 11
-  CyclePrev = 12
-  ToggleHud = 13
-  MoveLeft = 14
-  MoveRight = 15
-  SpeedUp = 16
-  SlowDown = 17
-  OrbitLeft = 18
-  OrbitRight = 19
-  BurstJobs = 20
-  PlayPause = 21
-  BlastCrates = 22
-  ToggleBloom = 23
+  None            =  0
+  SpawnOne        =  1
+  SpawnTen        =  2
+  Reset           =  3
+  Jump            =  4
+  Attack          =  5
+  Fire            =  6
+  Pause           =  7
+  P2Jump          =  8
+  P2Attack        =  9
+  P2Fire          = 10
+  CycleColor      = 11
+  CyclePrev       = 12
+  ToggleHud       = 13
+  MoveLeft        = 14
+  MoveRight       = 15
+  SpeedUp         = 16
+  SlowDown        = 17
+  OrbitLeft       = 18
+  OrbitRight      = 19
+  BurstJobs       = 20
+  PlayPause       = 21
+  BlastCrates     = 22
+  ToggleBloom     = 23
   ToggleScanlines = 24
-  AmpUp = 25
-  AmpDown = 26
-  BurstParticles = 27
+  AmpUp           = 25
+  AmpDown         = 26
+  BurstParticles  = 27
 end

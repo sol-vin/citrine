@@ -84,7 +84,7 @@ module Citrine
   # Spawns an asynchronous computation on a worker fiber, returning a Future handle.
   #
   # Example:
-  # ```crystal
+  # ```
   # future = Citrine.async do
   #   calculate_complex_mesh_normals
   # end

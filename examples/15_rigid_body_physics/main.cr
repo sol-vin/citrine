@@ -19,16 +19,16 @@ Citrine.init_window(640, 448, "Citrine PS2 - Rigid Body Physics (Box2D)")
 Citrine.set_target_fps(60)
 
 # Pre-allocated color constants (0 heap allocations in main loop)
-BG_COLOR       = Color.new(15_u8, 18_u8, 26_u8, 255_u8)
-HEADER_BG      = Color.new(24_u8, 28_u8, 40_u8, 255_u8)
-HEADER_TEXT    = Color.new(245_u8, 245_u8, 255_u8, 255_u8)
-WALL_COLOR     = Color.new(44_u8, 62_u8, 80_u8, 255_u8)
-CRATE1_COLOR   = Color.new(230_u8, 126_u8, 34_u8, 255_u8)
-CRATE2_COLOR   = Color.new(241_u8, 196_u8, 15_u8, 255_u8)
-CRATE3_COLOR   = Color.new(231_u8, 76_u8, 60_u8, 255_u8)
-RAY_COLOR      = Color.new(52_u8, 152_u8, 219_u8, 180_u8)
-HIT_COLOR      = Color.new(46_u8, 204_u8, 113_u8, 255_u8)
-FOOTER_BG      = Color.new(22_u8, 26_u8, 38_u8, 240_u8)
+BG_COLOR     = Color.new(15_u8, 18_u8, 26_u8, 255_u8)
+HEADER_BG    = Color.new(24_u8, 28_u8, 40_u8, 255_u8)
+HEADER_TEXT  = Color.new(245_u8, 245_u8, 255_u8, 255_u8)
+WALL_COLOR   = Color.new(44_u8, 62_u8, 80_u8, 255_u8)
+CRATE1_COLOR = Color.new(230_u8, 126_u8, 34_u8, 255_u8)
+CRATE2_COLOR = Color.new(241_u8, 196_u8, 15_u8, 255_u8)
+CRATE3_COLOR = Color.new(231_u8, 76_u8, 60_u8, 255_u8)
+RAY_COLOR    = Color.new(52_u8, 152_u8, 219_u8, 180_u8)
+HIT_COLOR    = Color.new(46_u8, 204_u8, 113_u8, 255_u8)
+FOOTER_BG    = Color.new(22_u8, 26_u8, 38_u8, 240_u8)
 
 # 1. Initialize Physics World
 world = Citrine::Physics::PhysicsWorld2D.new(Vector2.new(0.0_f32, 380.0_f32))
@@ -104,8 +104,8 @@ IMPULSE_LEFT    = Vector2.new(-12.0_f32, 0.0_f32)
 IMPULSE_RIGHT   = Vector2.new(12.0_f32, 0.0_f32)
 
 ray_origin = Vector2.new(320.0_f32, 50.0_f32)
-ray_dir    = Vector2.new(0.0_f32, 1.0_f32)
-ray        = Citrine::Collision::Ray2D.new(ray_origin, ray_dir, 350.0_f32)
+ray_dir = Vector2.new(0.0_f32, 1.0_f32)
+ray = Citrine::Collision::Ray2D.new(ray_origin, ray_dir, 350.0_f32)
 
 gravity_inverted = false
 
@@ -192,14 +192,12 @@ Citrine.main_loop do
   c3_y = (crate3.position.y > 0.0_f32 && crate3.position.y < 448.0_f32) ? (crate3.position.y - crate3.height * 0.5_f32).to_i32 : 290
   Citrine.draw_rectangle(c3_x, c3_y, 42, 42, CRATE3_COLOR)
 
-
   # Draw Raycast Beam
   ray_end_y = (hit1.hit && hit1.point.y > 50.0_f32 && hit1.point.y < 388.0_f32) ? hit1.point.y : 388.0_f32
   Citrine.draw_line(320, 50, 320, ray_end_y.to_i32, RAY_COLOR)
   if hit1.hit && hit1.point.x > 0.0_f32 && hit1.point.x < 640.0_f32
     Citrine.draw_circle(hit1.point.x.to_i32, hit1.point.y.to_i32, 4, HIT_COLOR)
   end
-
 
   # Footer Telemetry & Controls
   Citrine.draw_rectangle(20, 400, 600, 36, FOOTER_BG)

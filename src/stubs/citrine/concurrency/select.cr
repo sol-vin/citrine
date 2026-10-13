@@ -112,7 +112,7 @@ module Citrine
   # High-level Go/Crystal-style `select` primitive for multi-channel synchronization.
   #
   # Example:
-  # ```crystal
+  # ```
   # Citrine.select do |s|
   #   s.receive(ch1) { |val| puts "Received from ch1: #{val}" }
   #   s.receive(ch2) { |val| puts "Received from ch2: #{val}" }

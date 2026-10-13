@@ -12,7 +12,7 @@ describe Citrine::BytecodeOptimizer do
       Citrine::Instruction.encode_r_imm(Citrine::Opcode::LoadImm, Citrine::LoadImmSubOp::Int16.value, 0_u8, 10_u16),
       Citrine::Instruction.encode_r_imm(Citrine::Opcode::LoadImm, Citrine::LoadImmSubOp::Int16.value, 1_u8, 20_u16),
       Citrine::Instruction.encode_rrr(Citrine::Opcode::Add, Citrine::AddSubOp::AddI32.value, 2_u8, 0_u8, 1_u8),
-      Citrine::Instruction.encode_r_imm(Citrine::Opcode::Return, Citrine::ReturnSubOp::Val.value, 2_u8, 0_u16)
+      Citrine::Instruction.encode_r_imm(Citrine::Opcode::Return, Citrine::ReturnSubOp::Val.value, 2_u8, 0_u16),
     ]
 
     opt = optimizer.optimize(insts)
@@ -37,7 +37,7 @@ describe Citrine::BytecodeOptimizer do
       Citrine::Instruction.encode_r_imm(Citrine::Opcode::LoadImm, Citrine::LoadImmSubOp::Int16.value, 3_u8, 1_u16),
       Citrine::Instruction.encode_rrr(Citrine::Opcode::Mul, Citrine::MulSubOp::MulLo.value, 4_u8, 0_u8, 3_u8),
       Citrine::Instruction.encode_r_imm(Citrine::Opcode::LoadImm, Citrine::LoadImmSubOp::Int16.value, 5_u8, 0_u16),
-      Citrine::Instruction.encode_rrr(Citrine::Opcode::Mul, Citrine::MulSubOp::MulLo.value, 6_u8, 0_u8, 5_u8)
+      Citrine::Instruction.encode_rrr(Citrine::Opcode::Mul, Citrine::MulSubOp::MulLo.value, 6_u8, 0_u8, 5_u8),
     ]
 
     opt = optimizer.optimize(insts)
@@ -65,7 +65,7 @@ describe Citrine::BytecodeOptimizer do
       Citrine::Instruction.encode_r_imm(Citrine::Opcode::LoadImm, Citrine::LoadImmSubOp::Int16.value, 0_u8, 42_u16),
       Citrine::Instruction.encode_r_imm(Citrine::Opcode::Return, Citrine::ReturnSubOp::Val.value, 0_u8, 0_u16),
       Citrine::Instruction.encode_r_imm(Citrine::Opcode::LoadImm, Citrine::LoadImmSubOp::Int16.value, 1_u8, 99_u16),
-      Citrine::Instruction.encode_r_imm(Citrine::Opcode::Return, Citrine::ReturnSubOp::Val.value, 1_u8, 0_u16)
+      Citrine::Instruction.encode_r_imm(Citrine::Opcode::Return, Citrine::ReturnSubOp::Val.value, 1_u8, 0_u16),
     ]
 
     opt = optimizer.optimize(insts)
@@ -82,7 +82,7 @@ describe Citrine::BytecodeOptimizer do
     insts = [
       Citrine::Instruction.encode_r_imm(Citrine::Opcode::LoadImm, Citrine::LoadImmSubOp::Int16.value, 0_u8, 100_u16),
       Citrine::Instruction.encode_rrr(Citrine::Opcode::Move, Citrine::MoveSubOp::Move32.value, 0_u8, 0_u8, 0_u8),
-      Citrine::Instruction.encode_r_imm(Citrine::Opcode::Return, Citrine::ReturnSubOp::Val.value, 0_u8, 0_u16)
+      Citrine::Instruction.encode_r_imm(Citrine::Opcode::Return, Citrine::ReturnSubOp::Val.value, 0_u8, 0_u16),
     ]
 
     opt = optimizer.optimize(insts)
@@ -101,7 +101,7 @@ describe Citrine::BytecodeOptimizer do
       Citrine::Instruction.encode_rrr(Citrine::Opcode::Compare, Citrine::CompareSubOp::Eq.value, 2_u8, 0_u8, 1_u8),
       Citrine::Instruction.encode_branch_rel(Citrine::Opcode::BranchZ, Citrine::BranchZSubOp::Truthy.value, 2_u8, 4_i16),
       Citrine::Instruction.encode_r_imm(Citrine::Opcode::LoadImm, Citrine::LoadImmSubOp::Int16.value, 3_u8, 10_u16),
-      Citrine::Instruction.encode_r_imm(Citrine::Opcode::Return, Citrine::ReturnSubOp::Val.value, 3_u8, 0_u16)
+      Citrine::Instruction.encode_r_imm(Citrine::Opcode::Return, Citrine::ReturnSubOp::Val.value, 3_u8, 0_u16),
     ]
 
     opt = optimizer.optimize(insts)
@@ -123,7 +123,7 @@ describe Citrine::BytecodeOptimizer do
     insts = [
       Citrine::Instruction.encode_r_imm(Citrine::Opcode::LoadImm, Citrine::LoadImmSubOp::Int16.value, 1_u8, 1_u16),
       Citrine::Instruction.encode_rrr(Citrine::Opcode::Sub, Citrine::SubSubOp::SubI32.value, 0_u8, 0_u8, 1_u8),
-      Citrine::Instruction.encode_branch_rel(Citrine::Opcode::BranchZ, Citrine::BranchZSubOp::Nonzero.value, 0_u8, -5_i16)
+      Citrine::Instruction.encode_branch_rel(Citrine::Opcode::BranchZ, Citrine::BranchZSubOp::Nonzero.value, 0_u8, -5_i16),
     ]
 
     opt = optimizer.optimize(insts)
@@ -139,7 +139,7 @@ describe Citrine::BytecodeOptimizer do
     # R3 = R3 + R2 (dst = dst + prod)
     insts = [
       Citrine::Instruction.encode_rrr(Citrine::Opcode::Mul, Citrine::MulSubOp::MulLo.value, 2_u8, 0_u8, 1_u8),
-      Citrine::Instruction.encode_rrr(Citrine::Opcode::Add, Citrine::AddSubOp::AddI32.value, 3_u8, 3_u8, 2_u8)
+      Citrine::Instruction.encode_rrr(Citrine::Opcode::Add, Citrine::AddSubOp::AddI32.value, 3_u8, 3_u8, 2_u8),
     ]
 
     opt = optimizer.optimize(insts)
@@ -159,7 +159,7 @@ describe Citrine::BytecodeOptimizer do
     # R3 = R3 - R2 (dst = dst - prod)
     insts = [
       Citrine::Instruction.encode_rrr(Citrine::Opcode::Mul, Citrine::MulSubOp::MulLo.value, 2_u8, 0_u8, 1_u8),
-      Citrine::Instruction.encode_rrr(Citrine::Opcode::Sub, Citrine::SubSubOp::SubI32.value, 3_u8, 3_u8, 2_u8)
+      Citrine::Instruction.encode_rrr(Citrine::Opcode::Sub, Citrine::SubSubOp::SubI32.value, 3_u8, 3_u8, 2_u8),
     ]
 
     opt = optimizer.optimize(insts)
@@ -178,7 +178,7 @@ describe Citrine::BytecodeOptimizer do
     # Float MADD: R2 = R0 * R1, R3 = R3 + R2
     insts_madd = [
       Citrine::Instruction.encode_rrr(Citrine::Opcode::FloatAlu, Citrine::FloatAluSubOp::Fmul.value, 2_u8, 0_u8, 1_u8),
-      Citrine::Instruction.encode_rrr(Citrine::Opcode::FloatAlu, Citrine::FloatAluSubOp::Fadd.value, 3_u8, 3_u8, 2_u8)
+      Citrine::Instruction.encode_rrr(Citrine::Opcode::FloatAlu, Citrine::FloatAluSubOp::Fadd.value, 3_u8, 3_u8, 2_u8),
     ]
 
     opt_madd = optimizer.optimize(insts_madd)
@@ -192,7 +192,7 @@ describe Citrine::BytecodeOptimizer do
     # Float MSUB: R2 = R0 * R1, R3 = R3 - R2
     insts_msub = [
       Citrine::Instruction.encode_rrr(Citrine::Opcode::FloatAlu, Citrine::FloatAluSubOp::Fmul.value, 2_u8, 0_u8, 1_u8),
-      Citrine::Instruction.encode_rrr(Citrine::Opcode::FloatAlu, Citrine::FloatAluSubOp::Fsub.value, 3_u8, 3_u8, 2_u8)
+      Citrine::Instruction.encode_rrr(Citrine::Opcode::FloatAlu, Citrine::FloatAluSubOp::Fsub.value, 3_u8, 3_u8, 2_u8),
     ]
 
     opt_msub = optimizer.optimize(insts_msub)
@@ -208,7 +208,7 @@ describe Citrine::BytecodeOptimizer do
 
     insts = [
       Citrine::Instruction.encode_rrr(Citrine::Opcode::Vec2Math, Citrine::Vec2MathSubOp::Mul.value, 2_u8, 0_u8, 1_u8),
-      Citrine::Instruction.encode_rrr(Citrine::Opcode::FloatAlu, Citrine::FloatAluSubOp::Fadd.value, 3_u8, 3_u8, 2_u8)
+      Citrine::Instruction.encode_rrr(Citrine::Opcode::FloatAlu, Citrine::FloatAluSubOp::Fadd.value, 3_u8, 3_u8, 2_u8),
     ]
 
     opt = optimizer.optimize(insts)
@@ -233,7 +233,7 @@ describe Citrine::BytecodeOptimizer do
       Citrine::Instruction.encode_rrr(Citrine::Opcode::Bitwise, Citrine::BitwiseSubOp::And.value, 2_u8, 0_u8, 1_u8),
       Citrine::Instruction.encode_r_imm(Citrine::Opcode::LoadImm, Citrine::LoadImmSubOp::Int16.value, 3_u8, 4_u16),
       Citrine::Instruction.encode_rrr(Citrine::Opcode::Shift, Citrine::ShiftSubOp::Srl.value, 4_u8, 0_u8, 3_u8),
-      Citrine::Instruction.encode_rrr(Citrine::Opcode::Bitwise, Citrine::BitwiseSubOp::Xor.value, 5_u8, 0_u8, 0_u8)
+      Citrine::Instruction.encode_rrr(Citrine::Opcode::Bitwise, Citrine::BitwiseSubOp::Xor.value, 5_u8, 0_u8, 0_u8),
     ]
 
     opt = optimizer.optimize(insts)
@@ -254,7 +254,7 @@ describe Citrine::BytecodeOptimizer do
     insts = [
       Citrine::Instruction.encode_r_imm(Citrine::Opcode::LoadImm, Citrine::LoadImmSubOp::Int16.value, 0_u8, 10_u16),
       Citrine::Instruction.encode_jump_rel24(0_i32), # Jump +0 (i.e. to pc = idx + 1 + 0 = next instruction)
-      Citrine::Instruction.encode_r_imm(Citrine::Opcode::LoadImm, Citrine::LoadImmSubOp::Int16.value, 1_u8, 20_u16)
+      Citrine::Instruction.encode_r_imm(Citrine::Opcode::LoadImm, Citrine::LoadImmSubOp::Int16.value, 1_u8, 20_u16),
     ]
 
     opt = optimizer.optimize(insts)

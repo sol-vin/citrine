@@ -14,69 +14,69 @@ module Citrine
   # - Concurrency: FiberOp (0x1A), ChannelOp (0x1B), CallNative (0x14)
   enum Opcode : UInt8
     # 0x00: System control, VM termination, hardware barriers, debug hooks
-    Sys         = 0x00
+    Sys = 0x00
     # 0x01: Register copy, wide SIMD transfer, and conditional moves
-    Move        = 0x01
+    Move = 0x01
     # 0x02: Load pre-compiled constant from .cbc constant pool at index imm16
-    LoadConst   = 0x02
+    LoadConst = 0x02
     # 0x03: Immediate literal load into register
-    LoadImm     = 0x03
+    LoadImm = 0x03
     # 0x04: Memory read: R[dst] = Memory[R[base] + R[offset]]
-    LoadMem     = 0x04
+    LoadMem = 0x04
     # 0x05: Memory write: Memory[R[base] + R[offset]] = R[src]
-    StoreMem    = 0x05
+    StoreMem = 0x05
     # 0x06: 32-bit integer arithmetic and fast-path string concatenation
-    Add         = 0x06
+    Add = 0x06
     # 0x07: 32-bit integer subtraction and two's complement negation
-    Sub         = 0x07
+    Sub = 0x07
     # 0x08: Integer multiplication with LO/HI hardware register harvesting
-    Mul         = 0x08
+    Mul = 0x08
     # 0x09: Guarded division and modulo
-    DivMod      = 0x09
+    DivMod = 0x09
     # 0x0A: Bitwise logical operations
-    Bitwise     = 0x0A
+    Bitwise = 0x0A
     # 0x0B: Variable and immediate bit shifts, rotations, and leading-zero detection
-    Shift       = 0x0B
+    Shift = 0x0B
     # 0x0C: Relational condition evaluation; writes boolean result (1 or 0) to R[dst]
-    Compare     = 0x0C
+    Compare = 0x0C
     # 0x0D: Fast unary register inspection and polymorphic type checking
-    Test        = 0x0D
+    Test = 0x0D
     # 0x0E: Single-precision IEEE-754 floating point arithmetic via Emotion Engine COP1
-    FloatAlu    = 0x0E
+    FloatAlu = 0x0E
     # 0x0F: Unconditional relative branches, function pointers, and switch-statement jump tables
-    Jump        = 0x0F
+    Jump = 0x0F
     # 0x10: Single-register conditional branch with signed 16-bit offset
-    BranchZ     = 0x10
+    BranchZ = 0x10
     # 0x11: Fused comparison and branch (BEQ, BNE, BLT, BLE, BGT, BGE)
-    BranchCmp   = 0x11
+    BranchCmp = 0x11
     # 0x12: Function invocation, dynamic dispatch, and zero-stack-growth tail calls
-    Call        = 0x12
+    Call = 0x12
     # 0x13: Returns execution to caller, restoring SPRAM frame register pointers
-    Return      = 0x13
+    Return = 0x13
     # 0x14: High-speed native service trampoline partitioned into 8 hardware domains
-    CallNative  = 0x14
+    CallNative = 0x14
     # 0x15: 2D vector geometry construction and component-wise vector algebra
-    Vec2Math    = 0x15
+    Vec2Math = 0x15
     # 0x16: 2D vector component access, mutation, magnitude, and linear interpolation
-    Vec2Prop    = 0x16
+    Vec2Prop = 0x16
     # 0x17: PS2 Graphics Synthesizer pixel formats and vertex color blending
-    ColorOp     = 0x17
+    ColorOp = 0x17
     # 0x18: Emotion Engine 128-bit Multimedia Extensions (MMI)
-    SimdMmi     = 0x18
+    SimdMmi = 0x18
     # 0x19: Polymorphic dynamic/static array indexing and object instance property access
-    Collection  = 0x19
+    Collection = 0x19
     # 0x1A: Lightweight coroutine lifecycle and cooperative multitasking scheduler
-    FiberOp     = 0x1A
+    FiberOp = 0x1A
     # 0x1B: Communicating Sequential Processes (CSP) message-passing channels
-    ChannelOp   = 0x1B
+    ChannelOp = 0x1B
     # 0x1C: Direct PS2 hardware DMA channel control and GS framebuffer management
-    Ps2Hw       = 0x1C
+    Ps2Hw = 0x1C
     # 0x1D: Low-level privileged coprocessor access, VU0 microcode, and CPU performance audit
-    InlineAsm   = 0x1D
+    InlineAsm = 0x1D
     # 0x1E: Fused loop decrement/increment and branch accelerator
-    LoopDecBr   = 0x1E
+    LoopDecBr = 0x1E
     # 0x1F: Fused Multiply-Accumulate and 2D vector dot product accelerator
-    FusedMadd   = 0x1F
+    FusedMadd = 0x1F
   end
 
   # Legacy Distinct Opcode Specifiers for Compiler (0x20..0x3F)
@@ -158,22 +158,22 @@ module Citrine
   end
 
   enum MemSubOp : UInt8
-    LB       = 0
-    LBU      = 1
-    LH       = 2
-    LHU      = 3
-    LW       = 4
-    LWC1     = 5
-    LD       = 6
-    LQ       = 7
-    SB       = 0
-    SH       = 1
-    SW       = 2
-    SWC1     = 3
-    SD       = 4
-    SQ       = 5
-    SwSpram  = 6
-    SqSpram  = 7
+    LB      = 0
+    LBU     = 1
+    LH      = 2
+    LHU     = 3
+    LW      = 4
+    LWC1    = 5
+    LD      = 6
+    LQ      = 7
+    SB      = 0
+    SH      = 1
+    SW      = 2
+    SWC1    = 3
+    SD      = 4
+    SQ      = 5
+    SwSpram = 6
+    SqSpram = 7
   end
 
   enum AddSubOp : UInt8
@@ -712,9 +712,9 @@ module Citrine
         5
       when Opcode::LoadImm
         case subop
-        when LoadImmSubOp::Nil.value then 2
+        when LoadImmSubOp::Nil.value  then 2
         when LoadImmSubOp::Bool.value then 3
-        else 4
+        else                               4
         end
       when Opcode::Add
         10
@@ -727,15 +727,15 @@ module Citrine
       when Opcode::Bitwise
         case subop
         when BitwiseSubOp::And.value then 16
-        when BitwiseSubOp::Or.value then 17
+        when BitwiseSubOp::Or.value  then 17
         when BitwiseSubOp::Xor.value then 18
         when BitwiseSubOp::Nor.value then 28
-        else 16
+        else                              16
         end
       when Opcode::Shift
         case subop
         when ShiftSubOp::Sll.value then 19
-        else 27
+        else                            27
         end
       when Opcode::Compare
         case subop
@@ -745,7 +745,7 @@ module Citrine
         when CompareSubOp::Le.value then 33
         when CompareSubOp::Gt.value then 34
         when CompareSubOp::Ge.value then 35
-        else 30
+        else                             30
         end
       when Opcode::Jump
         40
@@ -771,7 +771,7 @@ module Citrine
         when Vec2PropSubOp::GetY.value then 22
         when Vec2PropSubOp::SetX.value then 23
         when Vec2PropSubOp::SetY.value then 24
-        else 21
+        else                                21
         end
       when Opcode::ColorOp
         26

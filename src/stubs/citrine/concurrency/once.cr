@@ -7,7 +7,7 @@ module Citrine
   # even when invoked simultaneously by multiple concurrent fibers.
   #
   # Example:
-  # ```crystal
+  # ```
   # once = Citrine::Once.new
   # once.do do
   #   init_heavy_hardware_resource

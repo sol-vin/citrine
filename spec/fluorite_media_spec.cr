@@ -58,7 +58,7 @@ describe "Citrine Media Pipeline (Fluorite & FFmpeg)" do
     psmt8_tex = Citrine::Importers::ImageImporter.to_psmt8(rgba_tex)
     psmt8_vram = psmt8_tex.vram_size_bytes
 
-    rgba_vram.should eq(64 * 64 * 4) # 16,384 bytes
+    rgba_vram.should eq(64 * 64 * 4)     # 16,384 bytes
     psmt8_vram.should eq(64 * 64 + 1024) # 4,096 + 1024 = 5,120 bytes
     psmt8_vram.should be < rgba_vram
   end

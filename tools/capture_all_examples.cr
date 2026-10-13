@@ -38,22 +38,22 @@ success_count = 0
 
 EXAMPLES.each_with_index do |(name, path, artifact_file), idx|
   print "[#{idx + 1}/#{EXAMPLES.size}] #{name} (#{path})... "
-  
+
   tc = Citrine::Spec::Ps2TestCase.new("snap_#{name}")
   tc.target(path)
-  
+
   # 1. Compile CBC Bytecode
   bytes, sm = tc.compile
-  
+
   # 2. Extract GS Draw Commands and Render Framebuffer PNG
   builder = Citrine::ElfBuilder.new
   phases, msgs, loop_start, animated = builder.parse_cbc(bytes)
-  
+
   target_artifact = File.join(ARTIFACT_DIR, artifact_file)
   if phase = phases.first?
     Citrine::GS::FramebufferRenderer.save_png(phase.commands, target_artifact)
   end
-  
+
   # 3. Boot in PCSX2 to verify hardware execution & SPRAM
   result = tc.boot_pcsx2(timeout: 2.seconds)
   if result.panic_detected

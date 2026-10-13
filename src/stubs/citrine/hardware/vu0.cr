@@ -72,7 +72,7 @@ module Citrine
             {t0 - delta, 0.0_f32}.max,
             {t1 - delta, 0.0_f32}.max,
             {t2 - delta, 0.0_f32}.max,
-            {t3 - delta, 0.0_f32}.max
+            {t3 - delta, 0.0_f32}.max,
           }
         end
 

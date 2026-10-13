@@ -11,7 +11,7 @@ module Citrine
       instructions : Array(Instruction),
       fn : CompiledFunction,
       dest : UInt8,
-      obj_str : String
+      obj_str : String,
     ) : UInt8?
       # Controller handles: Citrine.player(port) or Citrine.pad(port)
       if (obj_str == "Citrine" || obj_str.empty?) && (node.name == "player" || node.name == "pad")
@@ -62,10 +62,10 @@ module Citrine
           seq_base = allocator.alloc_contiguous(1)
           instructions << Instruction.encode_abc(Opcode::Move, seq_base, act_reg, 0_u8)
           native_id = case node.name
-                      when "is_pressed?", "is_action_just_pressed" then NativeId::ActionPressed
-                      when "is_down?", "is_action_pressed"         then NativeId::ActionDown
+                      when "is_pressed?", "is_action_just_pressed"   then NativeId::ActionPressed
+                      when "is_down?", "is_action_pressed"           then NativeId::ActionDown
                       when "is_released?", "is_action_just_released" then NativeId::ActionReleased
-                      else                                         nil
+                      else                                                nil
                       end
           if native_id
             instr_val = Instruction.call_native_raw(dest, seq_base, native_id)

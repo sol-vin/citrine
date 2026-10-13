@@ -138,7 +138,6 @@ Citrine.main_loop do
   Citrine.draw_rectangle(px + 4, py + 4, 30, 30, Color::Black)
   Citrine.draw_rectangle(px + 8, py + 8, 22, 22, player_color)
 
-
   # Attack Burst Effect
   if player_ai_state == STATE_ATTACKING
     Citrine.draw_circle(px + 19, py + 19, 32.0_f32, Color::Yellow)

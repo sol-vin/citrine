@@ -170,135 +170,131 @@ module Citrine
     private def map_native_call(name : String, is_gl : Bool = false) : NativeId?
       if is_gl
         case name
-        when "begin" then return NativeId::GLBegin
-        when "end" then return NativeId::GLEnd
+        when "begin"                          then return NativeId::GLBegin
+        when "end"                            then return NativeId::GLEnd
         when "vertex", "vertex3f", "vertex2f" then return NativeId::GLVertex
-        when "color", "color4f", "color3f" then return NativeId::GLColor
-        when "tex_coord" then return NativeId::GLTexCoord
-        when "push_matrix" then return NativeId::GLPushMatrix
-        when "pop_matrix" then return NativeId::GLPopMatrix
-        when "translate" then return NativeId::GLTranslate
-        when "rotate" then return NativeId::GLRotate
-        when "scale" then return NativeId::GLScale
-        when "load_identity" then return NativeId::GLLoadIdentity
+        when "color", "color4f", "color3f"    then return NativeId::GLColor
+        when "tex_coord"                      then return NativeId::GLTexCoord
+        when "push_matrix"                    then return NativeId::GLPushMatrix
+        when "pop_matrix"                     then return NativeId::GLPopMatrix
+        when "translate"                      then return NativeId::GLTranslate
+        when "rotate"                         then return NativeId::GLRotate
+        when "scale"                          then return NativeId::GLScale
+        when "load_identity"                  then return NativeId::GLLoadIdentity
         end
       end
 
       case name
-
-      when "init_window" then NativeId::InitWindow
-      when "close_window" then NativeId::CloseWindow
-      when "window_open?" then NativeId::WindowOpen
-      when "set_target_fps" then NativeId::SetTargetFPS
-      when "get_fps" then NativeId::GetFPS
-      when "get_delta_time" then NativeId::GetDeltaTime
-      when "begin_drawing" then NativeId::BeginDrawing
-      when "end_drawing" then NativeId::EndDrawing
-      when "clear_background" then NativeId::ClearBackground
-      when "draw_rectangle" then NativeId::DrawRectangle
-      when "draw_circle" then NativeId::DrawCircle
-      when "draw_line" then NativeId::DrawLine
-      when "draw_triangle" then NativeId::DrawTriangle
-      when "draw_quad" then NativeId::DrawQuad
-      when "draw_rectangle_rotated" then NativeId::DrawRectangleRotated
-      when "draw_rounded_rectangle" then NativeId::DrawRoundedRectangle
-      when "draw_text_rotated" then NativeId::DrawTextRotated
-      when "gl_begin" then NativeId::GLBegin
-      when "gl_end" then NativeId::GLEnd
-      when "gl_vertex" then NativeId::GLVertex
-      when "gl_color" then NativeId::GLColor
-      when "gl_tex_coord" then NativeId::GLTexCoord
-      when "gl_push_matrix" then NativeId::GLPushMatrix
-      when "gl_pop_matrix" then NativeId::GLPopMatrix
-      when "gl_translate" then NativeId::GLTranslate
-      when "gl_rotate" then NativeId::GLRotate
-      when "gl_scale" then NativeId::GLScale
-      when "gl_load_identity" then NativeId::GLLoadIdentity
-      when "draw_text" then NativeId::DrawText
-      when "load_texture" then NativeId::LoadTexture
-      when "draw_texture", "texture" then NativeId::DrawTexture
-      when "draw_texture_rec" then NativeId::DrawTextureRec
-      when "draw_texture_pro" then NativeId::DrawTexturePro
-      when "load_palette" then NativeId::LoadPalette
-      when "set_palette" then NativeId::SetPalette
-
-
-      when "begin_mode_3d" then NativeId::BeginMode3D
-      when "end_mode_3d" then NativeId::EndMode3D
-      when "draw_cube" then NativeId::DrawCube
-      when "draw_cube_wires" then NativeId::DrawCubeWires
-      when "draw_grid" then NativeId::DrawGrid
-      when "draw_mesh" then NativeId::DrawMesh
-      when "load_model", "load_model_handle" then NativeId::LoadModel
-      when "draw_model", "draw_model_native" then NativeId::DrawModel
-      when "draw_model_ex", "draw_model_ex_native" then NativeId::DrawModelEx
-      when "unload_model" then NativeId::UnloadModel
-      when "draw_triangle_3d", "draw_triangle_3d_native" then NativeId::DrawTriangle3D
-      when "draw_billboard", "draw_billboard_native" then NativeId::DrawBillboard
-      when "button_down?" then NativeId::ButtonDown
-      when "button_pressed?" then NativeId::ButtonPressed
-      when "button_released?" then NativeId::ButtonReleased
-      when "get_analog" then NativeId::GetAnalog
-      when "set_rumble" then NativeId::SetRumble
-      when "action_pressed?", "is_pressed?", "is_action_just_pressed" then NativeId::ActionPressed
-      when "action_down?", "is_down?", "is_action_pressed" then NativeId::ActionDown
-      when "action_released?", "is_released?", "is_action_just_released" then NativeId::ActionReleased
-      when "add_action" then NativeId::ActionRegister
-      when "load_sound" then NativeId::LoadSound
-      when "play_sound" then NativeId::PlaySound
-      when "stop_sound" then NativeId::StopSound
-      when "unload_sound" then NativeId::AudioUnloadSound
-      when "free_memory", "get_free_memory" then NativeId::AudioGetFreeMemory
-      when "compute_dispatch", "dispatch" then NativeId::ComputeDispatch
-      when "compute_sync", "sync" then NativeId::ComputeSync
-      when "debug_overlay=" then NativeId::SetDebugOverlay
-      when "log", "puts", "print", "println", "printf" then NativeId::Log
-      when "debug_puts", "debug_log" then NativeId::DebugLog
-      when "sleep" then NativeId::Sleep
-      when "fiber_id" then NativeId::FiberId
-      when "fiber_alive?" then NativeId::FiberAlive
-      when "channel_new" then NativeId::ChannelNew
-      when "channel_send" then NativeId::ChannelSend
-      when "channel_receive" then NativeId::ChannelReceive
-      when "channel_try_receive" then NativeId::ChannelTryReceive
-      when "channel_count" then NativeId::ChannelCount
-      when "channel_capacity" then NativeId::ChannelCapacity
-      when "load_video" then NativeId::LoadVideo
-      when "play_video" then NativeId::PlayVideo
-      when "draw_video_frame" then NativeId::DrawVideoFrame
-      when "video_finished?" then NativeId::VideoFinished
-      when "pause_video" then NativeId::PauseVideo
-      when "stop_video" then NativeId::StopVideo
-      when "panic" then NativeId::Panic
-      when "batch_transform_points", "vu0_batch_transform" then NativeId::VU0BatchTransform
-      when "batch_dot_product", "vu0_batch_dot" then NativeId::VU0BatchDot
-      when "play_cdda_track", "play_cdda", "play_stream", "play_music" then NativeId::AudioPlayCDDA
-      when "stop_cdda", "stop_stream", "stop_music" then NativeId::AudioStopCDDA
-      when "pause_stream", "pause_music" then NativeId::AudioPauseStream
-      when "resume_stream", "resume_music" then NativeId::AudioResumeStream
-      when "cdda_status", "get_cdda_status", "stream_status", "music_status", "music_playing?" then NativeId::AudioGetCDDAStatus
+      when "init_window"                                                                                                  then NativeId::InitWindow
+      when "close_window"                                                                                                 then NativeId::CloseWindow
+      when "window_open?"                                                                                                 then NativeId::WindowOpen
+      when "set_target_fps"                                                                                               then NativeId::SetTargetFPS
+      when "get_fps"                                                                                                      then NativeId::GetFPS
+      when "get_delta_time"                                                                                               then NativeId::GetDeltaTime
+      when "begin_drawing"                                                                                                then NativeId::BeginDrawing
+      when "end_drawing"                                                                                                  then NativeId::EndDrawing
+      when "clear_background"                                                                                             then NativeId::ClearBackground
+      when "draw_rectangle"                                                                                               then NativeId::DrawRectangle
+      when "draw_circle"                                                                                                  then NativeId::DrawCircle
+      when "draw_line"                                                                                                    then NativeId::DrawLine
+      when "draw_triangle"                                                                                                then NativeId::DrawTriangle
+      when "draw_quad"                                                                                                    then NativeId::DrawQuad
+      when "draw_rectangle_rotated"                                                                                       then NativeId::DrawRectangleRotated
+      when "draw_rounded_rectangle"                                                                                       then NativeId::DrawRoundedRectangle
+      when "draw_text_rotated"                                                                                            then NativeId::DrawTextRotated
+      when "gl_begin"                                                                                                     then NativeId::GLBegin
+      when "gl_end"                                                                                                       then NativeId::GLEnd
+      when "gl_vertex"                                                                                                    then NativeId::GLVertex
+      when "gl_color"                                                                                                     then NativeId::GLColor
+      when "gl_tex_coord"                                                                                                 then NativeId::GLTexCoord
+      when "gl_push_matrix"                                                                                               then NativeId::GLPushMatrix
+      when "gl_pop_matrix"                                                                                                then NativeId::GLPopMatrix
+      when "gl_translate"                                                                                                 then NativeId::GLTranslate
+      when "gl_rotate"                                                                                                    then NativeId::GLRotate
+      when "gl_scale"                                                                                                     then NativeId::GLScale
+      when "gl_load_identity"                                                                                             then NativeId::GLLoadIdentity
+      when "draw_text"                                                                                                    then NativeId::DrawText
+      when "load_texture"                                                                                                 then NativeId::LoadTexture
+      when "draw_texture", "texture"                                                                                      then NativeId::DrawTexture
+      when "draw_texture_rec"                                                                                             then NativeId::DrawTextureRec
+      when "draw_texture_pro"                                                                                             then NativeId::DrawTexturePro
+      when "load_palette"                                                                                                 then NativeId::LoadPalette
+      when "set_palette"                                                                                                  then NativeId::SetPalette
+      when "begin_mode_3d"                                                                                                then NativeId::BeginMode3D
+      when "end_mode_3d"                                                                                                  then NativeId::EndMode3D
+      when "draw_cube"                                                                                                    then NativeId::DrawCube
+      when "draw_cube_wires"                                                                                              then NativeId::DrawCubeWires
+      when "draw_grid"                                                                                                    then NativeId::DrawGrid
+      when "draw_mesh"                                                                                                    then NativeId::DrawMesh
+      when "load_model", "load_model_handle"                                                                              then NativeId::LoadModel
+      when "draw_model", "draw_model_native"                                                                              then NativeId::DrawModel
+      when "draw_model_ex", "draw_model_ex_native"                                                                        then NativeId::DrawModelEx
+      when "unload_model"                                                                                                 then NativeId::UnloadModel
+      when "draw_triangle_3d", "draw_triangle_3d_native"                                                                  then NativeId::DrawTriangle3D
+      when "draw_billboard", "draw_billboard_native"                                                                      then NativeId::DrawBillboard
+      when "button_down?"                                                                                                 then NativeId::ButtonDown
+      when "button_pressed?"                                                                                              then NativeId::ButtonPressed
+      when "button_released?"                                                                                             then NativeId::ButtonReleased
+      when "get_analog"                                                                                                   then NativeId::GetAnalog
+      when "set_rumble"                                                                                                   then NativeId::SetRumble
+      when "action_pressed?", "is_pressed?", "is_action_just_pressed"                                                     then NativeId::ActionPressed
+      when "action_down?", "is_down?", "is_action_pressed"                                                                then NativeId::ActionDown
+      when "action_released?", "is_released?", "is_action_just_released"                                                  then NativeId::ActionReleased
+      when "add_action"                                                                                                   then NativeId::ActionRegister
+      when "load_sound"                                                                                                   then NativeId::LoadSound
+      when "play_sound"                                                                                                   then NativeId::PlaySound
+      when "stop_sound"                                                                                                   then NativeId::StopSound
+      when "unload_sound"                                                                                                 then NativeId::AudioUnloadSound
+      when "free_memory", "get_free_memory"                                                                               then NativeId::AudioGetFreeMemory
+      when "compute_dispatch", "dispatch"                                                                                 then NativeId::ComputeDispatch
+      when "compute_sync", "sync"                                                                                         then NativeId::ComputeSync
+      when "debug_overlay="                                                                                               then NativeId::SetDebugOverlay
+      when "log", "puts", "print", "println", "printf"                                                                    then NativeId::Log
+      when "debug_puts", "debug_log"                                                                                      then NativeId::DebugLog
+      when "sleep"                                                                                                        then NativeId::Sleep
+      when "fiber_id"                                                                                                     then NativeId::FiberId
+      when "fiber_alive?"                                                                                                 then NativeId::FiberAlive
+      when "channel_new"                                                                                                  then NativeId::ChannelNew
+      when "channel_send"                                                                                                 then NativeId::ChannelSend
+      when "channel_receive"                                                                                              then NativeId::ChannelReceive
+      when "channel_try_receive"                                                                                          then NativeId::ChannelTryReceive
+      when "channel_count"                                                                                                then NativeId::ChannelCount
+      when "channel_capacity"                                                                                             then NativeId::ChannelCapacity
+      when "load_video"                                                                                                   then NativeId::LoadVideo
+      when "play_video"                                                                                                   then NativeId::PlayVideo
+      when "draw_video_frame"                                                                                             then NativeId::DrawVideoFrame
+      when "video_finished?"                                                                                              then NativeId::VideoFinished
+      when "pause_video"                                                                                                  then NativeId::PauseVideo
+      when "stop_video"                                                                                                   then NativeId::StopVideo
+      when "panic"                                                                                                        then NativeId::Panic
+      when "batch_transform_points", "vu0_batch_transform"                                                                then NativeId::VU0BatchTransform
+      when "batch_dot_product", "vu0_batch_dot"                                                                           then NativeId::VU0BatchDot
+      when "play_cdda_track", "play_cdda", "play_stream", "play_music"                                                    then NativeId::AudioPlayCDDA
+      when "stop_cdda", "stop_stream", "stop_music"                                                                       then NativeId::AudioStopCDDA
+      when "pause_stream", "pause_music"                                                                                  then NativeId::AudioPauseStream
+      when "resume_stream", "resume_music"                                                                                then NativeId::AudioResumeStream
+      when "cdda_status", "get_cdda_status", "stream_status", "music_status", "music_playing?"                            then NativeId::AudioGetCDDAStatus
       when "set_volume", "set_audio_volume", "set_cdda_volume", "set_stream_volume", "set_music_volume", "master_volume=" then NativeId::AudioSetVolume
-      when "seek_stream", "stream_seek", "seek_music" then NativeId::AudioSeekStream
-      when "cpu_cycles", "cycles", "get_cycles", "cpu_cycle_count" then NativeId::CpuCycleCount
-      when "cdvd_seek_entropy", "seek_entropy" then NativeId::CdvdSeekEntropy
-      else nil
+      when "seek_stream", "stream_seek", "seek_music"                                                                     then NativeId::AudioSeekStream
+      when "cpu_cycles", "cycles", "get_cycles", "cpu_cycle_count"                                                        then NativeId::CpuCycleCount
+      when "cdvd_seek_entropy", "seek_entropy"                                                                            then NativeId::CdvdSeekEntropy
+      else                                                                                                                     nil
       end
     end
-
 
     private def resolve_type_id(type_name : String) : UInt32?
       clean = type_name.split("(").first.strip
       clean = clean[2..-1] if clean.starts_with?("::")
       case clean
-      when "Nil" then TypeKind::Nil.value
-      when "Bool" then TypeKind::Bool.value
+      when "Nil"                                                                    then TypeKind::Nil.value
+      when "Bool"                                                                   then TypeKind::Bool.value
       when "Int", "Int32", "Int64", "UInt8", "UInt16", "UInt32", "UInt64", "Number" then TypeKind::Int32.value
-      when "Float", "Float32", "Float64" then TypeKind::Float32.value
-      when "String" then TypeKind::String.value
-      when "Array" then TypeKind::Array.value
-      when "StaticArray" then TypeKind::StaticArray.value
-      when "Pointer" then TypeKind::Pointer.value
-      when "Box" then TypeKind::Box.value
+      when "Float", "Float32", "Float64"                                            then TypeKind::Float32.value
+      when "String"                                                                 then TypeKind::String.value
+      when "Array"                                                                  then TypeKind::Array.value
+      when "StaticArray"                                                            then TypeKind::StaticArray.value
+      when "Pointer"                                                                then TypeKind::Pointer.value
+      when "Box"                                                                    then TypeKind::Box.value
       else
         if cls = @classes[clean]?
           cls.class_id
@@ -384,48 +380,48 @@ module Citrine
         end
       end
       case str
-      when "GL::POINTS", "GLMode::Points", "Citrine::GL::POINTS", "Citrine::GL::Mode::Points" then ConstValue.new(ConstType::Int32, int_val: 0)
-      when "GL::LINES", "GLMode::Lines", "Citrine::GL::LINES", "Citrine::GL::Mode::Lines" then ConstValue.new(ConstType::Int32, int_val: 1)
-      when "GL::LINE_STRIP", "GLMode::LineStrip", "Citrine::GL::LINE_STRIP", "Citrine::GL::Mode::LineStrip" then ConstValue.new(ConstType::Int32, int_val: 2)
-      when "GL::LINE_LOOP", "GLMode::LineLoop", "Citrine::GL::LINE_LOOP", "Citrine::GL::Mode::LineLoop" then ConstValue.new(ConstType::Int32, int_val: 3)
-      when "GL::TRIANGLES", "GLMode::Triangles", "Citrine::GL::TRIANGLES", "Citrine::GL::Mode::Triangles" then ConstValue.new(ConstType::Int32, int_val: 4)
+      when "GL::POINTS", "GLMode::Points", "Citrine::GL::POINTS", "Citrine::GL::Mode::Points"                               then ConstValue.new(ConstType::Int32, int_val: 0)
+      when "GL::LINES", "GLMode::Lines", "Citrine::GL::LINES", "Citrine::GL::Mode::Lines"                                   then ConstValue.new(ConstType::Int32, int_val: 1)
+      when "GL::LINE_STRIP", "GLMode::LineStrip", "Citrine::GL::LINE_STRIP", "Citrine::GL::Mode::LineStrip"                 then ConstValue.new(ConstType::Int32, int_val: 2)
+      when "GL::LINE_LOOP", "GLMode::LineLoop", "Citrine::GL::LINE_LOOP", "Citrine::GL::Mode::LineLoop"                     then ConstValue.new(ConstType::Int32, int_val: 3)
+      when "GL::TRIANGLES", "GLMode::Triangles", "Citrine::GL::TRIANGLES", "Citrine::GL::Mode::Triangles"                   then ConstValue.new(ConstType::Int32, int_val: 4)
       when "GL::TRIANGLE_STRIP", "GLMode::TriangleStrip", "Citrine::GL::TRIANGLE_STRIP", "Citrine::GL::Mode::TriangleStrip" then ConstValue.new(ConstType::Int32, int_val: 5)
-      when "GL::TRIANGLE_FAN", "GLMode::TriangleFan", "Citrine::GL::TRIANGLE_FAN", "Citrine::GL::Mode::TriangleFan" then ConstValue.new(ConstType::Int32, int_val: 6)
-      when "GL::QUADS", "GLMode::Quads", "Citrine::GL::QUADS", "Citrine::GL::Mode::Quads" then ConstValue.new(ConstType::Int32, int_val: 7)
-      when "Button::Cross", "Citrine::Button::Cross" then ConstValue.new(ConstType::Int32, int_val: Button::Cross.value.to_i32)
-      when "Button::Circle", "Citrine::Button::Circle" then ConstValue.new(ConstType::Int32, int_val: Button::Circle.value.to_i32)
-      when "Button::Square", "Citrine::Button::Square" then ConstValue.new(ConstType::Int32, int_val: Button::Square.value.to_i32)
-      when "Button::Triangle", "Citrine::Button::Triangle" then ConstValue.new(ConstType::Int32, int_val: Button::Triangle.value.to_i32)
-      when "Button::Up", "Citrine::Button::Up" then ConstValue.new(ConstType::Int32, int_val: Button::Up.value.to_i32)
-      when "Button::Down", "Citrine::Button::Down" then ConstValue.new(ConstType::Int32, int_val: Button::Down.value.to_i32)
-      when "Button::Left", "Citrine::Button::Left" then ConstValue.new(ConstType::Int32, int_val: Button::Left.value.to_i32)
-      when "Button::Right", "Citrine::Button::Right" then ConstValue.new(ConstType::Int32, int_val: Button::Right.value.to_i32)
-      when "Button::L1", "Citrine::Button::L1" then ConstValue.new(ConstType::Int32, int_val: Button::L1.value.to_i32)
-      when "Button::R1", "Citrine::Button::R1" then ConstValue.new(ConstType::Int32, int_val: Button::R1.value.to_i32)
-      when "Button::L2", "Citrine::Button::L2" then ConstValue.new(ConstType::Int32, int_val: Button::L2.value.to_i32)
-      when "Button::R2", "Citrine::Button::R2" then ConstValue.new(ConstType::Int32, int_val: Button::R2.value.to_i32)
-      when "Button::L3", "Citrine::Button::L3" then ConstValue.new(ConstType::Int32, int_val: Button::L3.value.to_i32)
-      when "Button::R3", "Citrine::Button::R3" then ConstValue.new(ConstType::Int32, int_val: Button::R3.value.to_i32)
-      when "Button::Start", "Citrine::Button::Start" then ConstValue.new(ConstType::Int32, int_val: Button::Start.value.to_i32)
-      when "Button::Select", "Citrine::Button::Select" then ConstValue.new(ConstType::Int32, int_val: Button::Select.value.to_i32)
-      when "Port::Port1", "Port::Player1", "Citrine::Port::Port1", "Citrine::Port::Player1" then ConstValue.new(ConstType::Int32, int_val: 0)
-      when "Port::Port2", "Port::Player2", "Citrine::Port::Port2", "Citrine::Port::Player2" then ConstValue.new(ConstType::Int32, int_val: 1)
-      when "PI", "Math::PI", "Citrine::Math::PI" then ConstValue.new(ConstType::Float32, float_val: 3.14159265_f32)
-      when "TAU", "Math::TAU", "Citrine::Math::TAU" then ConstValue.new(ConstType::Float32, float_val: 6.28318531_f32)
-      when "E", "Math::E", "Citrine::Math::E" then ConstValue.new(ConstType::Float32, float_val: 2.71828183_f32)
-      when "Color::White", "Citrine::Color::White" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(255_u8, 255_u8, 255_u8, 255_u8).to_u32)
-      when "Color::Black", "Citrine::Color::Black" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(0_u8, 0_u8, 0_u8, 255_u8).to_u32)
-      when "Color::Red", "Citrine::Color::Red" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(255_u8, 0_u8, 0_u8, 255_u8).to_u32)
-      when "Color::Green", "Citrine::Color::Green" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(0_u8, 255_u8, 0_u8, 255_u8).to_u32)
-      when "Color::Blue", "Citrine::Color::Blue" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(0_u8, 0_u8, 255_u8, 255_u8).to_u32)
-      when "Color::Yellow", "Citrine::Color::Yellow" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(255_u8, 255_u8, 0_u8, 255_u8).to_u32)
-      when "Color::Cyan", "Citrine::Color::Cyan" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(0_u8, 255_u8, 255_u8, 255_u8).to_u32)
-      when "Color::Magenta", "Citrine::Color::Magenta" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(255_u8, 0_u8, 255_u8, 255_u8).to_u32)
-      when "Color::Gray", "Citrine::Color::Gray" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(128_u8, 128_u8, 128_u8, 255_u8).to_u32)
-      when "Color::DarkGray", "Citrine::Color::DarkGray" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(80_u8, 80_u8, 80_u8, 255_u8).to_u32)
-      when "Color::LightGray", "Citrine::Color::LightGray" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(200_u8, 200_u8, 200_u8, 255_u8).to_u32)
-      when "Color::Orange", "Citrine::Color::Orange" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(255_u8, 165_u8, 0_u8, 255_u8).to_u32)
-      when "Color::Purple", "Citrine::Color::Purple" then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(128_u8, 0_u8, 128_u8, 255_u8).to_u32)
+      when "GL::TRIANGLE_FAN", "GLMode::TriangleFan", "Citrine::GL::TRIANGLE_FAN", "Citrine::GL::Mode::TriangleFan"         then ConstValue.new(ConstType::Int32, int_val: 6)
+      when "GL::QUADS", "GLMode::Quads", "Citrine::GL::QUADS", "Citrine::GL::Mode::Quads"                                   then ConstValue.new(ConstType::Int32, int_val: 7)
+      when "Button::Cross", "Citrine::Button::Cross"                                                                        then ConstValue.new(ConstType::Int32, int_val: Button::Cross.value.to_i32)
+      when "Button::Circle", "Citrine::Button::Circle"                                                                      then ConstValue.new(ConstType::Int32, int_val: Button::Circle.value.to_i32)
+      when "Button::Square", "Citrine::Button::Square"                                                                      then ConstValue.new(ConstType::Int32, int_val: Button::Square.value.to_i32)
+      when "Button::Triangle", "Citrine::Button::Triangle"                                                                  then ConstValue.new(ConstType::Int32, int_val: Button::Triangle.value.to_i32)
+      when "Button::Up", "Citrine::Button::Up"                                                                              then ConstValue.new(ConstType::Int32, int_val: Button::Up.value.to_i32)
+      when "Button::Down", "Citrine::Button::Down"                                                                          then ConstValue.new(ConstType::Int32, int_val: Button::Down.value.to_i32)
+      when "Button::Left", "Citrine::Button::Left"                                                                          then ConstValue.new(ConstType::Int32, int_val: Button::Left.value.to_i32)
+      when "Button::Right", "Citrine::Button::Right"                                                                        then ConstValue.new(ConstType::Int32, int_val: Button::Right.value.to_i32)
+      when "Button::L1", "Citrine::Button::L1"                                                                              then ConstValue.new(ConstType::Int32, int_val: Button::L1.value.to_i32)
+      when "Button::R1", "Citrine::Button::R1"                                                                              then ConstValue.new(ConstType::Int32, int_val: Button::R1.value.to_i32)
+      when "Button::L2", "Citrine::Button::L2"                                                                              then ConstValue.new(ConstType::Int32, int_val: Button::L2.value.to_i32)
+      when "Button::R2", "Citrine::Button::R2"                                                                              then ConstValue.new(ConstType::Int32, int_val: Button::R2.value.to_i32)
+      when "Button::L3", "Citrine::Button::L3"                                                                              then ConstValue.new(ConstType::Int32, int_val: Button::L3.value.to_i32)
+      when "Button::R3", "Citrine::Button::R3"                                                                              then ConstValue.new(ConstType::Int32, int_val: Button::R3.value.to_i32)
+      when "Button::Start", "Citrine::Button::Start"                                                                        then ConstValue.new(ConstType::Int32, int_val: Button::Start.value.to_i32)
+      when "Button::Select", "Citrine::Button::Select"                                                                      then ConstValue.new(ConstType::Int32, int_val: Button::Select.value.to_i32)
+      when "Port::Port1", "Port::Player1", "Citrine::Port::Port1", "Citrine::Port::Player1"                                 then ConstValue.new(ConstType::Int32, int_val: 0)
+      when "Port::Port2", "Port::Player2", "Citrine::Port::Port2", "Citrine::Port::Player2"                                 then ConstValue.new(ConstType::Int32, int_val: 1)
+      when "PI", "Math::PI", "Citrine::Math::PI"                                                                            then ConstValue.new(ConstType::Float32, float_val: 3.14159265_f32)
+      when "TAU", "Math::TAU", "Citrine::Math::TAU"                                                                         then ConstValue.new(ConstType::Float32, float_val: 6.28318531_f32)
+      when "E", "Math::E", "Citrine::Math::E"                                                                               then ConstValue.new(ConstType::Float32, float_val: 2.71828183_f32)
+      when "Color::White", "Citrine::Color::White"                                                                          then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(255_u8, 255_u8, 255_u8, 255_u8).to_u32)
+      when "Color::Black", "Citrine::Color::Black"                                                                          then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(0_u8, 0_u8, 0_u8, 255_u8).to_u32)
+      when "Color::Red", "Citrine::Color::Red"                                                                              then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(255_u8, 0_u8, 0_u8, 255_u8).to_u32)
+      when "Color::Green", "Citrine::Color::Green"                                                                          then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(0_u8, 255_u8, 0_u8, 255_u8).to_u32)
+      when "Color::Blue", "Citrine::Color::Blue"                                                                            then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(0_u8, 0_u8, 255_u8, 255_u8).to_u32)
+      when "Color::Yellow", "Citrine::Color::Yellow"                                                                        then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(255_u8, 255_u8, 0_u8, 255_u8).to_u32)
+      when "Color::Cyan", "Citrine::Color::Cyan"                                                                            then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(0_u8, 255_u8, 255_u8, 255_u8).to_u32)
+      when "Color::Magenta", "Citrine::Color::Magenta"                                                                      then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(255_u8, 0_u8, 255_u8, 255_u8).to_u32)
+      when "Color::Gray", "Citrine::Color::Gray"                                                                            then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(128_u8, 128_u8, 128_u8, 255_u8).to_u32)
+      when "Color::DarkGray", "Citrine::Color::DarkGray"                                                                    then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(80_u8, 80_u8, 80_u8, 255_u8).to_u32)
+      when "Color::LightGray", "Citrine::Color::LightGray"                                                                  then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(200_u8, 200_u8, 200_u8, 255_u8).to_u32)
+      when "Color::Orange", "Citrine::Color::Orange"                                                                        then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(255_u8, 165_u8, 0_u8, 255_u8).to_u32)
+      when "Color::Purple", "Citrine::Color::Purple"                                                                        then ConstValue.new(ConstType::Color, uint_val: ColorVal.new(128_u8, 0_u8, 128_u8, 255_u8).to_u32)
       else
         if t_id = resolve_type_id(str)
           return ConstValue.new(ConstType::Int32, int_val: t_id.to_i32)

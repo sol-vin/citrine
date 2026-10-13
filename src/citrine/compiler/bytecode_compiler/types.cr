@@ -37,7 +37,7 @@ module Citrine
       @uint_val : UInt32 = 0_u32,
       @float_val : Float32 = 0.0_f32,
       @float_val2 : Float32 = 0.0_f32,
-      @str_val : String = ""
+      @str_val : String = "",
     )
     end
   end

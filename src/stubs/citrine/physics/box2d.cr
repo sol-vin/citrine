@@ -54,7 +54,7 @@ module Citrine
         @width : Float32 = 32.0_f32,
         @height : Float32 = 32.0_f32,
         @mass : Float32 = 1.0_f32,
-        @body_type : BodyType = BodyType::Dynamic
+        @body_type : BodyType = BodyType::Dynamic,
       )
         @velocity = Vector2.new(0.0_f32, 0.0_f32)
         @force = Vector2.new(0.0_f32, 0.0_f32)
@@ -221,8 +221,7 @@ module Citrine
               py = (b1.height + b2.height) * 0.5_f32 - dy.abs
 
               if px > 0.0_f32 && py > 0.0_f32
-                normal = px < py ? Vector2.new(dx < 0.0_f32 ? -1.0_f32 : 1.0_f32, 0.0_f32) :
-                                   Vector2.new(0.0_f32, dy < 0.0_f32 ? -1.0_f32 : 1.0_f32)
+                normal = px < py ? Vector2.new(dx < 0.0_f32 ? -1.0_f32 : 1.0_f32, 0.0_f32) : Vector2.new(0.0_f32, dy < 0.0_f32 ? -1.0_f32 : 1.0_f32)
                 pen = px < py ? px : py
                 manifolds << ContactManifold.new(b1, b2, normal, pen)
               end

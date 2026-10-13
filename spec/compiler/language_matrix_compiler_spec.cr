@@ -21,7 +21,7 @@ describe "Citrine Tier 1: Crystal Language Matrix & Compiler Specification Suite
     bytes.size.should be > 20
     String.new(bytes[0, 4]).should eq("CBC2")
     fn = compiler.functions.find { |f| f.name == "compute_math" }.not_nil!
-    
+
     # Must emit Add, Sub, Mul, DivMod, Bitwise, Shift
     opcodes = fn.instructions.map(&.opcode).to_set
     opcodes.should contain(Citrine::Opcode::Add)
@@ -243,7 +243,7 @@ describe "Citrine Tier 1: Crystal Language Matrix & Compiler Specification Suite
     compiler.classes.has_key?("BossMonster").should be_true
     boss = compiler.classes["BossMonster"]
     boss.superclass_name.should eq("Monster")
-    
+
     # Hierarchy check
     ancestors = boss.ancestor_ids(compiler.classes)
     ancestors.size.should be >= 3

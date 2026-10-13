@@ -7,7 +7,7 @@ module Citrine
       @@buttons_prev : Array(UInt32) = [0_u32, 0_u32]
       @@analog : Array(Array(UInt8)) = [
         [128_u8, 128_u8, 128_u8, 128_u8],
-        [128_u8, 128_u8, 128_u8, 128_u8]
+        [128_u8, 128_u8, 128_u8, 128_u8],
       ]
       @@rumble_small : Array(UInt8) = [0_u8, 0_u8]
       @@rumble_large : Array(UInt8) = [0_u8, 0_u8]
@@ -18,7 +18,7 @@ module Citrine
         @@buttons_prev = [0_u32, 0_u32]
         @@analog = [
           [128_u8, 128_u8, 128_u8, 128_u8],
-          [128_u8, 128_u8, 128_u8, 128_u8]
+          [128_u8, 128_u8, 128_u8, 128_u8],
         ]
         @@rumble_small = [0_u8, 0_u8]
         @@rumble_large = [0_u8, 0_u8]

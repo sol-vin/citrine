@@ -6,7 +6,7 @@ module Citrine
   # Provides SPRAM-safe canary auditing to detect memory corruption or buffer overflows.
   #
   # Example:
-  # ```crystal
+  # ```
   # wg = Citrine::WaitGroup.new
   # 4.times do
   #   wg.add(1)

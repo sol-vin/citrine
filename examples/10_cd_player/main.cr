@@ -30,7 +30,6 @@ total_tracks = album.size
 album_header = album.header
 album_title = album.title
 
-
 Citrine.init_window(640, 448, "#{album.artist} - #{album.title} (Citrine PS2 Stream Player)")
 Citrine.set_target_fps(60)
 
@@ -221,7 +220,7 @@ Citrine.main_loop do
                when 2 then "STOPPED"
                when 3 then "FAST FORWARD >>"
                when 4 then "REWIND <<"
-               else "STANDBY"
+               else        "STANDBY"
                end
 
   status_col = case status_mode
@@ -230,7 +229,7 @@ Citrine.main_loop do
                when 2 then Color::Red
                when 3 then Color::Cyan
                when 4 then Color::Orange
-               else Color::White
+               else        Color::White
                end
 
   # Zero-allocation time formatting using static digit table
@@ -363,7 +362,6 @@ Citrine.main_loop do
   end
 
   Citrine.end_drawing
-
 end
 
 Citrine.close_window

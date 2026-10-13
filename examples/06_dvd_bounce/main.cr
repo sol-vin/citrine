@@ -33,7 +33,7 @@ colors = [
   Color::Yellow,
   Color::Magenta,
   Color::Green,
-  Color::Orange
+  Color::Orange,
 ]
 
 Citrine.main_loop do

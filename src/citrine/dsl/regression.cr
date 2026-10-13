@@ -11,11 +11,11 @@ require "../iso/iso_builder"
 module Citrine
   module DSL
     module Regression
-      alias Milestone         = Citrine::Core::Regression::Milestone
-      alias ExecutionStatus   = Citrine::Core::Regression::ExecutionStatus
-      alias TestResult        = Citrine::Core::Regression::TestResult
-      alias SuiteReport       = Citrine::Core::Regression::SuiteReport
-      alias LogStreamParser   = Citrine::Core::Regression::LogStreamParser
+      alias Milestone = Citrine::Core::Regression::Milestone
+      alias ExecutionStatus = Citrine::Core::Regression::ExecutionStatus
+      alias TestResult = Citrine::Core::Regression::TestResult
+      alias SuiteReport = Citrine::Core::Regression::SuiteReport
+      alias LogStreamParser = Citrine::Core::Regression::LogStreamParser
       alias HeadlessProcessManager = Citrine::Core::Regression::HeadlessProcessManager
 
       # =========================================================================
@@ -355,7 +355,7 @@ module Citrine
         # Executes all registered tests headlessly in PCSX2 under active watchdog supervision.
         def run(
           reporter : Proc(String, Nil)? = nil,
-          watchdog_callback : Proc(Time::Span, Nil)? = nil
+          watchdog_callback : Proc(Time::Span, Nil)? = nil,
         ) : SuiteReport
           manager = HeadlessProcessManager.new
           results = [] of TestResult

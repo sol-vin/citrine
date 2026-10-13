@@ -28,7 +28,7 @@ require "./citrine/docs"
 # - Citrine GL (OpenGL 1.1-style immediate mode pipeline)
 #
 # ## Getting Started Example
-# ```crystal
+# ```
 # require "citrine"
 #
 # Citrine.init_window(640, 448, "My Citrine Game")
@@ -48,7 +48,7 @@ require "./citrine/docs"
 # ```
 #
 # ## DualShock 2 Controller Input Example
-# ```crystal
+# ```
 # require "citrine"
 #
 # Citrine.init_window(640, 448, "Pad Input")
@@ -75,7 +75,7 @@ require "./citrine/docs"
 # ```
 #
 # ## 4-Tier Memory Management & Context Arenas Example
-# ```crystal
+# ```
 # require "citrine"
 #
 # # Tier 2 Context Arena: all memory allocated inside is wiped on exit in O(1)

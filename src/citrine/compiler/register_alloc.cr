@@ -1,7 +1,7 @@
 module Citrine
   class RegisterAllocator
-    MAX_SPRAM_REGISTERS = 1024
-    WARN_FRAME_REGISTERS = 128
+    MAX_SPRAM_REGISTERS  = 1024
+    WARN_FRAME_REGISTERS =  128
 
     getter local_map : Hash(String, UInt8)
     getter max_registers : UInt8

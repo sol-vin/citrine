@@ -11,7 +11,7 @@ module Citrine
       instructions : Array(Instruction),
       fn : CompiledFunction,
       dest : UInt8,
-      obj_str : String
+      obj_str : String,
     ) : UInt8?
       # Enum.new(val) constructor
       if node.name == "new" && @enums.has_key?(obj_str) && node.args.size > 0
@@ -100,10 +100,10 @@ module Citrine
       # String helper methods: strip, downcase, upcase
       if ["strip", "downcase", "upcase"].includes?(node.name) && node.obj && node.args.empty?
         s_op = case node.name
-               when "strip" then NativeId::StringStrip
+               when "strip"    then NativeId::StringStrip
                when "downcase" then NativeId::StringDowncase
-               when "upcase" then NativeId::StringUpcase
-               else NativeId::StringStrip
+               when "upcase"   then NativeId::StringUpcase
+               else                 NativeId::StringStrip
                end
         str_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
         seq_base = allocator.alloc_contiguous(1)
@@ -119,10 +119,10 @@ module Citrine
       if ["starts_with?", "ends_with?", "includes?", "split"].includes?(node.name) && node.obj
         s_op = case node.name
                when "starts_with?" then NativeId::StringStartsWith
-               when "ends_with?" then NativeId::StringEndsWith
-               when "includes?" then NativeId::StringIncludes
-               when "split" then NativeId::StringSplit
-               else NativeId::StringIncludes
+               when "ends_with?"   then NativeId::StringEndsWith
+               when "includes?"    then NativeId::StringIncludes
+               when "split"        then NativeId::StringSplit
+               else                     NativeId::StringIncludes
                end
         str_reg = compile_node(node.obj.not_nil!, allocator, instructions, fn)
         arg_reg = if node.args.size > 0

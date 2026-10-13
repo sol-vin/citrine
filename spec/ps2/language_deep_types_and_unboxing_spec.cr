@@ -297,7 +297,6 @@ describe "Citrine PS2 Dynamic Language Parity: Deep Types, Boxing & Polymorphism
     result.should_have_output("[CITRINE TEST] DeepTypes#polymorphic_method_dispatch: PASS")
   end
 
-
   it "verifies nil checks, union types, and nilable casting on PS2" do
     tc = Citrine::Spec::Ps2TestCase.new("types_nil_union_checks_test")
     tc.source(<<-CR

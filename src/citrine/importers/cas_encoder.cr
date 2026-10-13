@@ -12,7 +12,7 @@ module Citrine
         @bitrate : Int32 = 96_000,
         @channels : Int32 = 1,
         @loop_audio : Bool = true,
-        @chunk_sectors : UInt16 = 8_u16 # 8 sectors * 2048 bytes = 16,384 bytes (16 KB)
+        @chunk_sectors : UInt16 = 8_u16, # 8 sectors * 2048 bytes = 16,384 bytes (16 KB)
       )
       end
 
@@ -65,7 +65,7 @@ module Citrine
         @chunk_sectors : UInt16,
         @total_samples : UInt32,
         @total_blocks : UInt32,
-        @duration_ms : UInt32
+        @duration_ms : UInt32,
       )
       end
 

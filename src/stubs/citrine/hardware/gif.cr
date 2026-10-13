@@ -37,7 +37,7 @@ module Citrine
           @pre : Bool = false,
           @prim : UInt32 = 0_u32,
           @flg : Format = Format::PACKED,
-          @nreg : UInt32 = 1_u32
+          @nreg : UInt32 = 1_u32,
         )
           if @nloop > MAX_NLOOP
             raise ArgumentError.new("GIFTag NLOOP (#{@nloop}) exceeds 15-bit hardware maximum (#{MAX_NLOOP})")

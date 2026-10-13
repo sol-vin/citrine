@@ -95,7 +95,7 @@ module Citrine
         gs_x2 = ((x2.to_i64 << 4) & 0xFFFF_i64).to_u64
         gs_y2 = ((y2.to_i64 << 4) & 0xFFFF_i64).to_u64
         io.write_bytes((gs_y2 << 16) | gs_x2, IO::ByteFormat::LittleEndian)
-        io.write_bytes(5_u64, IO::ByteFormat::LittleEndian)    # XYZ2 (0x05)
+        io.write_bytes(5_u64, IO::ByteFormat::LittleEndian) # XYZ2 (0x05)
       end
 
       private def self.paeth(a : Int32, b : Int32, c : Int32) : Int32

@@ -82,7 +82,7 @@ module Citrine
         # Initialize fiber state early so Citrine_StepFibers is safe
         emitter.sw(ZERO, 0x88, T0) # fiber_count = 0 (0x70000088)
         emitter.li(T1, -1)
-        emitter.sw(T1, 0x84, T0)   # current_fiber_idx = -1 (0x70000084)
+        emitter.sw(T1, 0x84, T0) # current_fiber_idx = -1 (0x70000084)
 
         # Neutral analog sticks: RX=128, RY=128, LX=128, LY=128 (0x80808080) at 0x70000020
         emitter.lui(T1, 0x8080)
@@ -228,7 +228,7 @@ module Citrine
 
           # 2. Poll DualShock 2 controllers
           emitter.lui(T0, 0x7000)
-          emitter.sw(ZERO, 16, T0)     # clear current buttons before poll
+          emitter.sw(ZERO, 16, T0) # clear current buttons before poll
           emitter.sw(ZERO, 36, T0)
           emitter.li(T9, PadRuntimePayload::POLL_ENTRY)
           emitter.jalr(T9)
@@ -238,18 +238,18 @@ module Citrine
           # Sample: COP0 Count ^ Pad Buttons ^ Timer 1 H-Blank ^ GS CSR
           emitter.emit((0x10_u32 << 26) | (2_u32 << 16) | (9_u32 << 11)) # mfc0 V0, Count
           emitter.lui(T0, 0x7000)
-          emitter.lw(T1, 16, T0)       # Pad 0 current buttons (0x70000010)
+          emitter.lw(T1, 16, T0) # Pad 0 current buttons (0x70000010)
           emitter.xor_(V0, V0, T1)
           emitter.lui(T2, 0x1000)
-          emitter.lw(T3, 0x0800, T2)   # Timer 1 H-Blank (0x10000800)
+          emitter.lw(T3, 0x0800, T2) # Timer 1 H-Blank (0x10000800)
           emitter.xor_(V0, V0, T3)
           emitter.lui(T2, 0x1200)
-          emitter.lw(T3, 0x1000, T2)   # GS CSR (0x12001000)
+          emitter.lw(T3, 0x1000, T2) # GS CSR (0x12001000)
           emitter.xor_(V0, V0, T3)
-          emitter.lw(T4, 0xE0, T0)     # entropy pool at 0x700000E0
+          emitter.lw(T4, 0xE0, T0) # entropy pool at 0x700000E0
           emitter.xor_(T4, T4, V0)
           emitter.lui(T5, 0x9E37)
-          emitter.ori(T5, T5, 0x79B9)  # Golden ratio multiplier
+          emitter.ori(T5, T5, 0x79B9) # Golden ratio multiplier
           emitter.multu(T4, T5)
           emitter.mflo(T4)
           emitter.sw(T4, 0xE0, T0)
@@ -259,18 +259,18 @@ module Citrine
             emitter.andi(T1, S0, 0x1F)
             emitter.bnez(T1, "splash_skip_seek")
             emitter.nop
-            emitter.sll(A0, S0, 10)      # LBA target
+            emitter.sll(A0, S0, 10) # LBA target
             emitter.call("Citrine_CdvdSeekEntropy")
             emitter.label("splash_skip_seek")
           end
 
           # 5. Controller Skip Check: Start button (bit 3) after at least 1s (60 frames)
           emitter.ori(T2, ZERO, 60)
-          emitter.sltu(T2, S0, T2)     # S0 < 60? (at least 60 frames / 1.0s elapsed)
+          emitter.sltu(T2, S0, T2) # S0 < 60? (at least 60 frames / 1.0s elapsed)
           emitter.beqz(T2, "splash_no_skip")
           emitter.nop
           emitter.lui(T0, 0x7000)
-          emitter.lw(T1, 16, T0)       # Pad 0 current buttons (0x70000010)
+          emitter.lw(T1, 16, T0) # Pad 0 current buttons (0x70000010)
           emitter.ori(T2, ZERO, 0xFFFF)
           emitter.beq(T1, T2, "splash_no_skip") # ignore disconnected/floating pad
           emitter.nop
@@ -284,7 +284,7 @@ module Citrine
           emitter.lui(T0, 0x7000)
           emitter.lw(T4, 0xE0, T0)
           emitter.xor_(T4, T4, V0)
-          emitter.xor_(T4, T4, T1)     # also mix button edge bitmask
+          emitter.xor_(T4, T4, T1) # also mix button edge bitmask
           emitter.lui(T5, 0x9E37)
           emitter.ori(T5, T5, 0x79B9)
           emitter.multu(T4, T5)
@@ -321,10 +321,10 @@ module Citrine
           emitter.emit((0x10_u32 << 26) | (2_u32 << 16) | (9_u32 << 11)) # mfc0 V0, Count
           emitter.lui(T0, 0x7000)
           emitter.lui(T2, 0x1000)
-          emitter.lw(T3, 0x0800, T2)   # Timer 1 H-Blank
+          emitter.lw(T3, 0x0800, T2) # Timer 1 H-Blank
           emitter.xor_(V0, V0, T3)
           emitter.lui(T2, 0x1200)
-          emitter.lw(T3, 0x1000, T2)   # GS CSR
+          emitter.lw(T3, 0x1000, T2) # GS CSR
           emitter.xor_(V0, V0, T3)
           emitter.lw(T4, 0xE0, T0)
           emitter.xor_(T4, T4, V0)
@@ -356,18 +356,18 @@ module Citrine
             emitter.lui(T0, 0x7000)
             emitter.sw(ZERO, 0x88, T0) # fiber_count = 0
             emitter.li(T1, -1)
-            emitter.sw(T1, 0x84, T0)   # current_fiber_idx = -1
+            emitter.sw(T1, 0x84, T0) # current_fiber_idx = -1
 
             # Clear pad state buffers before entering __main__
             emitter.lui(T0, 0x7000)
-            emitter.sw(ZERO, 16, T0)  # 0x70000010
-            emitter.sw(ZERO, 20, T0)  # 0x70000014
-            emitter.sw(ZERO, 24, T0)  # 0x70000018
-            emitter.sw(ZERO, 28, T0)  # 0x7000001C
-            emitter.sw(ZERO, 36, T0)  # 0x70000024
-            emitter.sw(ZERO, 40, T0)  # 0x70000028
-            emitter.sw(ZERO, 44, T0)  # 0x7000002C
-            emitter.sw(ZERO, 48, T0)  # 0x70000030
+            emitter.sw(ZERO, 16, T0) # 0x70000010
+            emitter.sw(ZERO, 20, T0) # 0x70000014
+            emitter.sw(ZERO, 24, T0) # 0x70000018
+            emitter.sw(ZERO, 28, T0) # 0x7000001C
+            emitter.sw(ZERO, 36, T0) # 0x70000024
+            emitter.sw(ZERO, 40, T0) # 0x70000028
+            emitter.sw(ZERO, 44, T0) # 0x7000002C
+            emitter.sw(ZERO, 48, T0) # 0x70000030
 
             # Call __main__!
             emitter.jump("after_dbg_main")

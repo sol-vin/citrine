@@ -281,7 +281,7 @@ module Citrine
           @tte : Bool = false,
           @tie : Bool = false,
           @start : Bool = true,
-          @tag_bits : UInt16 = 0_u16
+          @tag_bits : UInt16 = 0_u16,
         )
         end
 
@@ -332,7 +332,7 @@ module Citrine
           @irq : Bool = false,
           @pce : UInt8 = 0_u8,
           @spr : Bool = false,
-          @opt_hi : UInt64 = 0_u64
+          @opt_hi : UInt64 = 0_u64,
         )
           if (@addr & 0xF_u32) != 0_u32
             raise ArgumentError.new("DMATag address (0x#{@addr.to_s(16)}) must be 16-byte (128-bit) aligned")
@@ -378,7 +378,7 @@ module Citrine
           @prim : UInt16 = 0_u16,
           @flg : GifFormat = GifFormat::Packed,
           @nreg : UInt8 = 1_u8,
-          @regs : UInt64 = GifReg::AD.value.to_u64
+          @regs : UInt64 = GifReg::AD.value.to_u64,
         )
           if @nloop > MAX_NLOOP
             raise ArgumentError.new("GIFTag NLOOP (#{@nloop}) exceeds 15-bit hardware maximum (#{MAX_NLOOP})")
@@ -484,7 +484,7 @@ module Citrine
           antialias : Bool = false,
           use_uv : Bool = false,
           context : Int = 0,
-          fix : Bool = false
+          fix : Bool = false,
         ) : UInt64
           val = prim.value.to_u64 & 0x7_u64
           val |= (1_u64 << 3) if gouraud
@@ -575,7 +575,7 @@ module Citrine
           date : Bool = false,
           datm : UInt8 = 0_u8,
           zte : Bool = true,
-          ztst : UInt8 = 1_u8
+          ztst : UInt8 = 1_u8,
         ) : UInt64
           val = ate ? 1_u64 : 0_u64
           val |= ((atst.to_u64 & 0x7_u64) << 1)
@@ -606,7 +606,7 @@ module Citrine
           tfx : UInt8 = 0_u8,
           cbp : UInt32 = 0_u32,
           cpsm : PixelFormat = PixelFormat::PSMCT32,
-          csm : UInt8 = 0_u8
+          csm : UInt8 = 0_u8,
         ) : UInt64
           val = (tbp0.to_u64 & 0x3FFF_u64)
           val |= ((tbw.to_u64 & 0x3F_u64) << 14)
@@ -628,7 +628,7 @@ module Citrine
           spsm : PixelFormat = PixelFormat::PSMCT32,
           dbp : UInt32 = 0_u32,
           dbw : UInt32 = 1_u32,
-          dpsm : PixelFormat = PixelFormat::PSMCT32
+          dpsm : PixelFormat = PixelFormat::PSMCT32,
         ) : UInt64
           val = (sbp.to_u64 & 0x3FFF_u64)
           val |= ((sbw.to_u64 & 0x3F_u64) << 16)
@@ -822,7 +822,7 @@ module Citrine
           prim : UInt16 = 0_u16,
           flg : GifFormat = GifFormat::Packed,
           nreg : UInt8 = 1_u8,
-          regs : UInt64 = GifReg::AD.value.to_u64
+          regs : UInt64 = GifReg::AD.value.to_u64,
         ) : Int32
           if @active_gif_tag_idx >= 0
             close_gif_tag!
@@ -877,7 +877,7 @@ module Citrine
           irq : Bool = false,
           pce : UInt8 = 0_u8,
           spr : Bool = false,
-          opt_hi : UInt64 = 0_u64
+          opt_hi : UInt64 = 0_u64,
         ) : Int32
           if @active_gif_tag_idx >= 0
             close_gif_tag!

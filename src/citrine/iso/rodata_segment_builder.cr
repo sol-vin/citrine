@@ -86,7 +86,7 @@ module Citrine
         @frame_digit_offsets = [] of UInt32,
         @frame_digit_positions = [] of UInt32,
         @frame_text_scale = 1,
-        @time_text_scale = 1
+        @time_text_scale = 1,
       )
       end
     end
@@ -274,25 +274,25 @@ module Citrine
 
           pt_mem = IO::Memory.new
           phase_infos.each_with_index do |info, i|
-            pt_mem.write_bytes(phase_addrs[i], IO::ByteFormat::LittleEndian)         # +0: madr
-            pt_mem.write_bytes(phase_qwcs[i].to_u32, IO::ByteFormat::LittleEndian)   # +4: qwc
-            4.times { pt_mem.write_bytes(0_u32, IO::ByteFormat::LittleEndian) }      # +8..+20: reserved
-            pt_mem.write_bytes(info.min_tens_offset, IO::ByteFormat::LittleEndian)   # +20: min_tens_offset
-            pt_mem.write_bytes(info.min_ones_offset, IO::ByteFormat::LittleEndian)   # +24: min_ones_offset
-            pt_mem.write_bytes(info.sec_tens_offset, IO::ByteFormat::LittleEndian)   # +28: sec_tens_offset
-            pt_mem.write_bytes(info.sec_ones_offset, IO::ByteFormat::LittleEndian)   # +32: sec_ones_offset
-            pt_mem.write_bytes(info.min_tens_pos, IO::ByteFormat::LittleEndian)      # +36: min_tens_pos
-            pt_mem.write_bytes(info.min_ones_pos, IO::ByteFormat::LittleEndian)      # +40: min_ones_pos
-            pt_mem.write_bytes(info.sec_tens_pos, IO::ByteFormat::LittleEndian)      # +44: sec_tens_pos
-            pt_mem.write_bytes(info.sec_ones_pos, IO::ByteFormat::LittleEndian)      # +48: sec_ones_pos
-            9.times { pt_mem.write_bytes(0_u32, IO::ByteFormat::LittleEndian) }      # +52..+84: reserved
-            pt_mem.write_bytes(info.dur_frames, IO::ByteFormat::LittleEndian)         # +88: dur_frames
+            pt_mem.write_bytes(phase_addrs[i], IO::ByteFormat::LittleEndian)       # +0: madr
+            pt_mem.write_bytes(phase_qwcs[i].to_u32, IO::ByteFormat::LittleEndian) # +4: qwc
+            4.times { pt_mem.write_bytes(0_u32, IO::ByteFormat::LittleEndian) }    # +8..+20: reserved
+            pt_mem.write_bytes(info.min_tens_offset, IO::ByteFormat::LittleEndian) # +20: min_tens_offset
+            pt_mem.write_bytes(info.min_ones_offset, IO::ByteFormat::LittleEndian) # +24: min_ones_offset
+            pt_mem.write_bytes(info.sec_tens_offset, IO::ByteFormat::LittleEndian) # +28: sec_tens_offset
+            pt_mem.write_bytes(info.sec_ones_offset, IO::ByteFormat::LittleEndian) # +32: sec_ones_offset
+            pt_mem.write_bytes(info.min_tens_pos, IO::ByteFormat::LittleEndian)    # +36: min_tens_pos
+            pt_mem.write_bytes(info.min_ones_pos, IO::ByteFormat::LittleEndian)    # +40: min_ones_pos
+            pt_mem.write_bytes(info.sec_tens_pos, IO::ByteFormat::LittleEndian)    # +44: sec_tens_pos
+            pt_mem.write_bytes(info.sec_ones_pos, IO::ByteFormat::LittleEndian)    # +48: sec_ones_pos
+            9.times { pt_mem.write_bytes(0_u32, IO::ByteFormat::LittleEndian) }    # +52..+84: reserved
+            pt_mem.write_bytes(info.dur_frames, IO::ByteFormat::LittleEndian)      # +88: dur_frames
             flags = 0_u32
             flags |= 8_u32 if info.time_text_present
             flags |= 16_u32 if info.frame_text_present
-            flags |= (info.time_text_scale.to_u32 & 0xFF_u32) << 8 # scale packed in bits 8..15
-            pt_mem.write_bytes(flags, IO::ByteFormat::LittleEndian)                     # +92: flags
-            9.times { pt_mem.write_bytes(0_u32, IO::ByteFormat::LittleEndian) }          # +96..+124: padding to 128 bytes
+            flags |= (info.time_text_scale.to_u32 & 0xFF_u32) << 8              # scale packed in bits 8..15
+            pt_mem.write_bytes(flags, IO::ByteFormat::LittleEndian)             # +92: flags
+            9.times { pt_mem.write_bytes(0_u32, IO::ByteFormat::LittleEndian) } # +96..+124: padding to 128 bytes
           end
           pt_slice = pt_mem.to_slice
           out_mem.write(pt_slice)
@@ -409,7 +409,7 @@ module Citrine
             pad = (16 - (out_mem.size % 16)) % 16
             pad.times { out_mem.write_byte(0_u8) }
             texture_table_addr = RODATA_VADDR + out_mem.size.to_u32
-            out_mem.write_bytes(32_u32, IO::ByteFormat::LittleEndian) # grid_res
+            out_mem.write_bytes(32_u32, IO::ByteFormat::LittleEndian)            # grid_res
             out_mem.write_bytes(spans.size.to_u32, IO::ByteFormat::LittleEndian) # span_count
             spans.each do |s|
               out_mem.write_byte(s.gx1)

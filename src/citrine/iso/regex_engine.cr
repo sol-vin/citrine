@@ -124,7 +124,7 @@ module Citrine
         when 'd' then c.ascii_number?
         when 'w' then c.ascii_alphanumeric? || c == '_'
         when 's' then c.ascii_whitespace?
-        else c == token[1]
+        else          c == token[1]
         end
       elsif token.starts_with?('[') && token.ends_with?(']') && token.size >= 3
         inner = token[1...-1]

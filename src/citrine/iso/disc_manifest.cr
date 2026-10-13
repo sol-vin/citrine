@@ -18,7 +18,7 @@ module Citrine
         @target_name : String,
         @track_type : TrackType = TrackType::Data,
         @track_number : Int32? = nil,
-        @metadata : Hash(String, String) = {} of String => String
+        @metadata : Hash(String, String) = {} of String => String,
       )
       end
     end
@@ -56,10 +56,10 @@ module Citrine
       def add_texture(source : String, target : String? = nil, width : Int32 = 128, height : Int32 = 128, clut : Int32 = 8) : DiscAsset
         tname = target || File.basename(source).sub(/\.(png|jpg|jpeg|bmp)$/i, ".cbt")
         meta = {
-          "width" => width.to_s,
+          "width"  => width.to_s,
           "height" => height.to_s,
-          "clut" => clut.to_s,
-          "kind" => "texture"
+          "clut"   => clut.to_s,
+          "kind"   => "texture",
         }
         asset = DiscAsset.new(source, tname, TrackType::Data, metadata: meta)
         @assets << asset
@@ -70,7 +70,7 @@ module Citrine
         tname = File.basename(source)
         t_num = track_num || (next_cd_track_number)
         meta = {
-          "kind" => "cdda_track"
+          "kind" => "cdda_track",
         }
         asset = DiscAsset.new(source, tname, TrackType::CdAudio, track_number: t_num, metadata: meta)
         @assets << asset
@@ -80,7 +80,7 @@ module Citrine
       def add_dvd_video(source : String, target : String? = nil) : DiscAsset
         tname = target || File.basename(source).sub(/\.(mp4|avi|mov|mkv)$/i, ".m2v")
         meta = {
-          "kind" => "dvd_video"
+          "kind" => "dvd_video",
         }
         asset = DiscAsset.new(source, tname, TrackType::DvdVideo, metadata: meta)
         @assets << asset
@@ -90,7 +90,7 @@ module Citrine
       def add_spu2_sound(source : String, target : String? = nil) : DiscAsset
         tname = target || File.basename(source).sub(/\.(wav|ogg|mp3|flac)$/i, ".vag")
         meta = {
-          "kind" => "spu2_sound"
+          "kind" => "spu2_sound",
         }
         asset = DiscAsset.new(source, tname, TrackType::Data, metadata: meta)
         @assets << asset

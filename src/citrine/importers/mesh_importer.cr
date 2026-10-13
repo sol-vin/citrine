@@ -13,7 +13,7 @@ module Citrine
 
       def initialize(
         @min_x = Float32::MAX, @min_y = Float32::MAX, @min_z = Float32::MAX,
-        @max_x = -Float32::MAX, @max_y = -Float32::MAX, @max_z = -Float32::MAX
+        @max_x = -Float32::MAX, @max_y = -Float32::MAX, @max_z = -Float32::MAX,
       )
       end
 
@@ -44,8 +44,8 @@ module Citrine
       property name : String
       property texture_path : String
       property diffuse_color : StaticArray(UInt8, 4)
-      property cull_mode : UInt8   # 0: None, 1: Back, 2: Front
-      property blend_mode : UInt8  # 0: Opaque, 1: Alpha, 2: Additive
+      property cull_mode : UInt8  # 0: None, 1: Back, 2: Front
+      property blend_mode : UInt8 # 0: Opaque, 1: Alpha, 2: Additive
       property embedded_image_bytes : Bytes?
       property embedded_image_mime : String?
 
@@ -56,7 +56,7 @@ module Citrine
         @cull_mode : UInt8 = 1_u8,
         @blend_mode : UInt8 = 0_u8,
         @embedded_image_bytes : Bytes? = nil,
-        @embedded_image_mime : String? = nil
+        @embedded_image_mime : String? = nil,
       )
       end
     end
@@ -64,10 +64,10 @@ module Citrine
     # Mesh geometry containing vertex streams and index buffer
     class Mesh
       property name : String
-      property vertices : Array(Float32)     # [x, y, z, ...]
-      property normals : Array(Float32)      # [nx, ny, nz, ...]
-      property texcoords : Array(Float32)    # [u, v, ...]
-      property colors : Array(UInt8)         # [r, g, b, a, ...]
+      property vertices : Array(Float32)  # [x, y, z, ...]
+      property normals : Array(Float32)   # [nx, ny, nz, ...]
+      property texcoords : Array(Float32) # [u, v, ...]
+      property colors : Array(UInt8)      # [r, g, b, a, ...]
       property indices : Array(UInt16)
       property bounds : BoundingBox
       property material_index : Int32
@@ -458,7 +458,7 @@ module Citrine
                      when "VEC2"   then 2
                      when "VEC3"   then 3
                      when "VEC4"   then 4
-                     else 1
+                     else               1
                      end
 
         stride = bv["byteStride"]?.try(&.as_i?) || (components * sizeof(Float32))

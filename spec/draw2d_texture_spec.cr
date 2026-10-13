@@ -237,13 +237,10 @@ describe "Citrine::Draw2D 2D Texture Drawing DSL & PS2 Palette Swapping" do
       compiler.compile(program)
       instructions = compiler.functions.flat_map(&.instructions)
 
-
-
       has_load_tex = instructions.any? { |i| i.opcode == Citrine::Opcode::CallNative && (i.raw & 0xFF_u32) == Citrine::NativeId::LoadTexture.value }
       has_load_pal = instructions.any? { |i| i.opcode == Citrine::Opcode::CallNative && (i.raw & 0xFF_u32) == Citrine::NativeId::LoadPalette.value }
       has_set_pal = instructions.any? { |i| i.opcode == Citrine::Opcode::CallNative && (i.raw & 0xFF_u32) == Citrine::NativeId::SetPalette.value }
       has_draw_pro = instructions.any? { |i| i.opcode == Citrine::Opcode::CallNative && (i.raw & 0xFF_u32) == Citrine::NativeId::DrawTexturePro.value }
-
 
       has_load_tex.should be_true
       has_load_pal.should be_true

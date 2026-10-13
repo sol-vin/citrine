@@ -35,7 +35,7 @@ end
 
 # Top-level context declaration block DSL:
 #
-# ```crystal
+# ```
 # context(:game) do
 #   require "citrine/draw3d"
 #   require "./entities/player"

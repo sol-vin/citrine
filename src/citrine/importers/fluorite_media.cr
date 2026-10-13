@@ -141,7 +141,7 @@ module Citrine
       def self.convert_video(
         input_path : String,
         output_path : String,
-        config : VideoConfig = VideoConfig.new
+        config : VideoConfig = VideoConfig.new,
       ) : Tuple(Process::Status, DvdTrackMetadata?)
         convert_video(input_path, output_path, config) { |_| }
       end
@@ -150,7 +150,7 @@ module Citrine
       def self.convert_audio(
         input_path : String,
         output_path : String,
-        config : AudioConfig = AudioConfig.new
+        config : AudioConfig = AudioConfig.new,
       ) : Bool
         raise "FFmpeg is not installed or not in PATH." unless ffmpeg_installed?
 
@@ -197,7 +197,7 @@ module Citrine
         output_path : String,
         bitrate : Int32 = 96_000,
         channels : Int32 = 1,
-        loop_audio : Bool = true
+        loop_audio : Bool = true,
       ) : Bool
         raise "FFmpeg is not installed or not in PATH." unless ffmpeg_installed?
 
@@ -235,7 +235,7 @@ module Citrine
       def self.convert_cdda(
         input_path : String,
         output_path : String,
-        config : CddaConfig = CddaConfig.new
+        config : CddaConfig = CddaConfig.new,
       ) : Bool
         raise "FFmpeg is not installed or not in PATH." unless ffmpeg_installed?
 
@@ -281,7 +281,7 @@ module Citrine
       def self.convert_texture(
         input_path : String,
         output_path : String,
-        config : TextureConfig = TextureConfig.new
+        config : TextureConfig = TextureConfig.new,
       ) : Bool
         raise "FFmpeg is not installed or not in PATH." unless ffmpeg_installed?
 
@@ -498,8 +498,8 @@ module Citrine
           out_path = File.join(output_dir, out_filename)
 
           yield sprintf("  [%02d/%02d] Trk %02d: %s - %s (%.1fs) -> %s",
-                        idx + 1, tracks.size, track.track_number, track.artist, track.title,
-                        track.duration_seconds, out_filename)
+            idx + 1, tracks.size, track.track_number, track.artist, track.title,
+            track.duration_seconds, out_filename)
 
           convert_cdda(track.source_file, out_path, CddaConfig.new)
 
@@ -545,7 +545,7 @@ module Citrine
 
       def self.import_album(
         album_dir : String,
-        output_dir : String
+        output_dir : String,
       ) : Array(AudioTrackMetadata)
         import_album(album_dir, output_dir) { |msg| puts msg }
       end
@@ -584,8 +584,8 @@ module Citrine
           out_path = File.join(output_dir, out_filename)
 
           yield sprintf("  [%02d/%02d] Trk %02d: %s - %s (%.1fs) -> %s (%d kbps)",
-                        idx + 1, tracks.size, track.track_number, track.artist, track.title,
-                        track.duration_seconds, out_filename, bitrate // 1000)
+            idx + 1, tracks.size, track.track_number, track.artist, track.title,
+            track.duration_seconds, out_filename, bitrate // 1000)
 
           convert_to_cas(track.source_file, out_path, bitrate: bitrate, channels: channels)
 
@@ -633,7 +633,7 @@ module Citrine
         album_dir : String,
         output_dir : String,
         bitrate : Int32 = 96_000,
-        channels : Int32 = 1
+        channels : Int32 = 1,
       ) : Array(AudioTrackMetadata)
         import_stream_album(album_dir, output_dir, bitrate, channels) { |msg| puts msg }
       end

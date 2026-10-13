@@ -7,7 +7,7 @@ module Citrine
       @param_map : Hash(String, String),
       @self_var_name : String?,
       @yield_block : Crystal::Block,
-      @target_class : ClassInfo? = nil
+      @target_class : ClassInfo? = nil,
     )
     end
 
@@ -67,8 +67,8 @@ module Citrine
         has_yield_node?(node.value)
       when Crystal::Call
         has_yield_node?(node.obj) ||
-        node.args.any? { |a| has_yield_node?(a) } ||
-        (node.block ? has_yield_node?(node.block.not_nil!.body) : false)
+          node.args.any? { |a| has_yield_node?(a) } ||
+          (node.block ? has_yield_node?(node.block.not_nil!.body) : false)
       else
         false
       end
@@ -80,7 +80,7 @@ module Citrine
       block : Crystal::Block,
       allocator : RegisterAllocator,
       instructions : Array(Instruction),
-      fn : CompiledFunction
+      fn : CompiledFunction,
     ) : UInt8
       @inline_counter += 1
       prefix = "__inl_#{@inline_counter}"

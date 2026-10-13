@@ -317,7 +317,7 @@ module Citrine
       when Crystal::StringLiteral then arg.value
       when Crystal::Var           then arg.name
       when Crystal::Call          then arg.name
-      else nil
+      else                             nil
       end
     end
 
@@ -337,7 +337,7 @@ module Citrine
           File.expand_path("../../stubs/#{req_name}.cr", __DIR__),
           File.expand_path("../../../lib/#{req_name}.cr", __DIR__),
           File.expand_path("../../../lib/#{req_name}/src/#{req_name}.cr", __DIR__),
-          File.expand_path("../../../lib/opal/src/#{req_name}.cr", __DIR__)
+          File.expand_path("../../../lib/opal/src/#{req_name}.cr", __DIR__),
         ]
         target_file = candidates.find { |c| File.exists?(c) }
       elsif req_name.starts_with?(".")

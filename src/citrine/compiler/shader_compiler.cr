@@ -109,22 +109,22 @@ module Citrine
       val_a = case blend.a
               when :source_color then 0_u64
               when :dest_color   then 1_u64
-              else 2_u64
+              else                    2_u64
               end
       val_b = case blend.b
               when :source_color then 0_u64
               when :dest_color   then 1_u64
-              else 2_u64
+              else                    2_u64
               end
       val_c = case blend.c
               when :source_alpha then 0_u64
               when :dest_alpha   then 1_u64
-              else 2_u64
+              else                    2_u64
               end
       val_d = case blend.d
               when :source_color then 0_u64
               when :dest_color   then 1_u64
-              else 2_u64
+              else                    2_u64
               end
 
       alpha_reg = val_a | (val_b << 2) | (val_c << 4) | (val_d << 6) | (blend.fixed_alpha.to_u64 << 32)
