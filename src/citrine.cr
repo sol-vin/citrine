@@ -1,6 +1,7 @@
 require "./citrine/version"
 require "./citrine/core/dma"
 require "./citrine/dsl/dma"
+require "./citrine/core/vu1"
 require "./citrine/core/regression"
 require "./citrine/dsl/regression"
 require "./citrine/cli/compile_command"
