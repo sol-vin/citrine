@@ -1,4 +1,5 @@
 require "./spec_helper"
+require "file_utils"
 require "../src/stubs/citrine"
 require "../src/stubs/citrine/draw2d"
 require "../src/stubs/citrine/draw3d"
@@ -48,34 +49,40 @@ describe "Citrine Require-Driven Context DSL & Sequential Loops" do
   describe "Block-Scoped Context Requires (context(:name) do ... end)" do
     it "registers multiple modular requires and user files within a context block" do
       # Create a temporary user file
-      user_file_dir = File.expand_path("../scratch/entities", __DIR__)
+      scratch_root = File.expand_path("../scratch", __DIR__)
+      user_file_dir = File.join(scratch_root, "entities")
       Dir.mkdir_p(user_file_dir)
       user_file_path = File.join(user_file_dir, "hero.cr")
-      File.write(user_file_path, <<-HERO
-      struct Hero
-        property x : Float32
-        property y : Float32
-        def initialize(@x : Float32, @y : Float32)
+      begin
+        File.write(user_file_path, <<-HERO
+        struct Hero
+          property x : Float32
+          property y : Float32
+
+          def initialize(@x : Float32, @y : Float32)
+          end
         end
+        HERO
+        )
+
+        source = <<-CR
+        require "citrine"
+
+        context(:game) do
+          require "citrine/draw3d"
+          require "./scratch/entities/hero"
+        end
+        CR
+
+        parser = Citrine::DslParser.new(filename: File.expand_path("../main.cr", __DIR__))
+        program = parser.parse(source)
+
+        program.vm_contexts.has_key?("game").should be_true
+        program.vm_contexts["game"].requires.should contain("citrine/draw3d")
+        program.vm_contexts["game"].structs.has_key?("Hero").should be_true
+      ensure
+        FileUtils.rm_rf(scratch_root)
       end
-      HERO
-      )
-
-      source = <<-CR
-      require "citrine"
-
-      context(:game) do
-        require "citrine/draw3d"
-        require "./scratch/entities/hero"
-      end
-      CR
-
-      parser = Citrine::DslParser.new(filename: File.expand_path("../main.cr", __DIR__))
-      program = parser.parse(source)
-
-      program.vm_contexts.has_key?("game").should be_true
-      program.vm_contexts["game"].requires.should contain("citrine/draw3d")
-      program.vm_contexts["game"].structs.has_key?("Hero").should be_true
     end
 
     it "forbids context blocks inside main_loop at parse time" do
@@ -124,37 +131,43 @@ describe "Citrine Require-Driven Context DSL & Sequential Loops" do
 
     it "rejects cross-context user type instantiation" do
       # Create a user entity file
-      user_file_dir = File.expand_path("../scratch/entities", __DIR__)
+      scratch_root = File.expand_path("../scratch", __DIR__)
+      user_file_dir = File.join(scratch_root, "entities")
       Dir.mkdir_p(user_file_dir)
       boss_path = File.join(user_file_dir, "boss.cr")
-      File.write(boss_path, <<-BOSS
-      struct Boss
-        property hp : Int32
-        def initialize(@hp : Int32)
+      begin
+        File.write(boss_path, <<-BOSS
+        struct Boss
+          property hp : Int32
+
+          def initialize(@hp : Int32)
+          end
         end
-      end
-      BOSS
-      )
+        BOSS
+        )
 
-      source = <<-CR
-      require "citrine"
+        source = <<-CR
+        require "citrine"
 
-      context(:game) do
-        require "./scratch/entities/boss"
-      end
+        context(:game) do
+          require "./scratch/entities/boss"
+        end
 
-      Citrine.main_loop(context: :menu) do
-        boss = Boss.new(100)
-        exit
-      end
-      CR
+        Citrine.main_loop(context: :menu) do
+          boss = Boss.new(100)
+          exit
+        end
+        CR
 
-      parser = Citrine::DslParser.new(filename: File.expand_path("../main.cr", __DIR__))
-      program = parser.parse(source)
+        parser = Citrine::DslParser.new(filename: File.expand_path("../main.cr", __DIR__))
+        program = parser.parse(source)
 
-      compiler = Citrine::BytecodeCompiler.new
-      expect_raises(Citrine::CompileError, /Context violation: Type 'Boss' belongs to context\(:game\).*not mounted in active main_loop context ':menu'/) do
-        compiler.compile(program)
+        compiler = Citrine::BytecodeCompiler.new
+        expect_raises(Citrine::CompileError, /Context violation: Type 'Boss' belongs to context\(:game\).*not mounted in active main_loop context ':menu'/) do
+          compiler.compile(program)
+        end
+      ensure
+        FileUtils.rm_rf(scratch_root)
       end
     end
 

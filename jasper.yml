@@ -4,7 +4,7 @@ output_dir: "src/citrine/docs"
 master_file: "src/citrine/docs.cr"
 
 features:
-  release_guard: true
+  release_guard: false
   naming_style: "prefixed"
   prefix_format: "topic_%02d_"
   table_auto_html: true

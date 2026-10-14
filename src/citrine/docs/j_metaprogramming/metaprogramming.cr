@@ -3,7 +3,6 @@
 # DO NOT EDIT MANUALLY - Edit source documentation in docs_src/ instead
 # ==============================================================================
 
-{% unless flag?(:release) %}
 module Citrine
   module Docs
     module J_METAPROGRAMMING
@@ -58,14 +57,14 @@ module Citrine
         # Define Crystal macros with standard `macro` blocks and call them with arguments. The Citrine AST expander
         # performs argument substitution and inlines the resulting expressions:
         #
-        # ```crystal
+        # ```
         # macro clamp_bound(val, min_v, max_v)
-        #   if \{{val}} < \{{min_v}}
-        #     \{{min_v}}
-        #   elsif \{{val}} > \{{max_v}}
-        #     \{{max_v}}
+        #   if {{val}} < {{min_v}}
+        #     {{min_v}}
+        #   elsif {{val}} > {{max_v}}
+        #     {{max_v}}
         #   else
-        #     \{{val}}
+        #     {{val}}
         #   end
         # end
         #
@@ -78,7 +77,7 @@ module Citrine
         #
         # Declare components with `citrine_ecs!`. It emits sequential component ID constants and totals:
         #
-        # ```crystal
+        # ```
         # citrine_ecs! do
         #   component Position, x: Float32, y: Float32
         #   component Velocity, vx: Float32, vy: Float32
@@ -93,7 +92,7 @@ module Citrine
         #
         # Declare entity behavior states with `fsm!`:
         #
-        # ```crystal
+        # ```
         # fsm PlayerAI, initial: :idle do
         #   state :idle
         #   state :moving
@@ -120,4 +119,3 @@ module Citrine
     end
   end
 end
-{% end %}
