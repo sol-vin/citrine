@@ -1,3 +1,3 @@
 module Citrine
-  VERSION = "0.1.94"
+  VERSION = "0.1.96"
 end
