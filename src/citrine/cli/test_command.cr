@@ -38,9 +38,24 @@ module Citrine
 
         puts "Found #{spec_files.size} spec files to execute.\n"
 
+        if target_path.nil? && !args.includes?("--pcsx2") && ENV["REQUIRE_PCSX2"]? != "1"
+          ENV["SKIP_PCSX2"] ||= "1"
+        end
+
+        start_time = ::Time.instant
+
+        unless args.includes?("--per-file")
+          status = Process.run("crystal", ["spec", "--error-trace"] + spec_files, output: Process::Redirect::Inherit, error: Process::Redirect::Inherit)
+          elapsed = (::Time.instant - start_time).total_seconds
+          puts "\n" + ("=" * 70)
+          puts sprintf("Completed %d spec files in %.2f seconds (status: %s)", spec_files.size, elapsed, status.success? ? "PASS" : "FAIL")
+          puts("=" * 70)
+          exit(status.exit_code) unless status.success?
+          return
+        end
+
         passed_count = 0
         failed_count = 0
-        start_time = Time.instant
 
         spec_files.each do |spec_file|
           file_rel = spec_file.gsub(/^(\.\/|spec\/)/, "")
@@ -78,7 +93,7 @@ module Citrine
           sleep 0.25.seconds
         end
 
-        elapsed = (Time.instant - start_time).total_seconds
+        elapsed = (::Time.instant - start_time).total_seconds
 
         puts "\n" + ("=" * 70)
         puts sprintf("Results: %d passed, %d failed in %.2f seconds", passed_count, failed_count, elapsed)

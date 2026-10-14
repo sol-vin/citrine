@@ -62,10 +62,16 @@ module Citrine
   # System time, frame delta, and hardware monotonic clock access.
   module Time
     alias Span = ::Time::Span
+    alias Instant = ::Time::Instant
 
     # Captures current high-resolution instant.
     def self.instant
       ::Time.instant
+    end
+
+    # Returns current UTC timestamp.
+    def self.utc
+      ::Time.utc
     end
 
     @@simulated_now : Float32 = 0.0_f32

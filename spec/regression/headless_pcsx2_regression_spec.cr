@@ -201,7 +201,7 @@ describe "Citrine Headless PCSX2 Automated Regression Subsystem" do
   describe "Live Headless PCSX2 Regression Verification", tags: "pcsx2" do
     it "executes a compiled test case headlessly with rapid early termination" do
       manager = Citrine::Core::Regression::HeadlessProcessManager.new
-      unless manager.available?
+      if ENV["SKIP_PCSX2"]? == "1" || !manager.available?
         next
       end
 

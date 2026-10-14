@@ -1,5 +1,5 @@
 name: citrine
-version: 0.1.93
+version: 0.1.94
 
 authors:
   - sol-vin <ian@sol-vin.com>
@@ -24,7 +24,7 @@ dependencies:
     branch: main
   cradare2:
     github: sol-vin/cradare2
-    branch: master
+    branch: main
   fluorite:
     github: sol-vin/fluorite
     branch: main
