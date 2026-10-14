@@ -1561,18 +1561,45 @@ module Citrine
       end
 
       # =========================================================================
-      # Assembled VU1 Microprogram Container (`AssembledProgram`)
+      # Double-Buffer Configuration & Assembled VU1 Microprogram Container
       # =========================================================================
 
+      # Hardware VIF1 / VU1 Data Memory double-buffering configuration (`BASE`, `OFFSET`, `XTOP`, `XGKICK`).
+      struct DoubleBufferConfig
+        getter base_qwc : UInt16
+        getter offset_qwc : UInt16
+        getter input_offset : UInt16
+        getter kick_offset_a : UInt16
+        getter kick_offset_b : UInt16
+
+        def initialize(
+          @base_qwc : UInt16 = 0_u16,
+          @offset_qwc : UInt16 = 512_u16,
+          @input_offset : UInt16 = 0_u16,
+          @kick_offset_a : UInt16 = 256_u16,
+          @kick_offset_b : UInt16 = 384_u16,
+        )
+          if @base_qwc.to_i >= MAX_DATA_QWC || (@base_qwc.to_i + @offset_qwc.to_i) > MAX_DATA_QWC
+            raise ArgumentError.new("VU1 double-buffer layout (base=#{@base_qwc}, offset=#{@offset_qwc}) exceeds VU1 Data Memory (#{MAX_DATA_QWC} QWC)")
+          end
+        end
+      end
+
       struct AssembledProgram
+        getter name : String
         getter instructions : Array(MicroInstruction)
         getter labels : Hash(String, Int32)
         getter hazard_report : HazardReport
+        getter gif_tags : Array(Citrine::Core::DMA::GifTag)
+        getter double_buffer : DoubleBufferConfig?
 
         def initialize(
           @instructions : Array(MicroInstruction),
           @labels : Hash(String, Int32),
           @hazard_report : HazardReport,
+          @name : String = "vu1_program",
+          @gif_tags : Array(Citrine::Core::DMA::GifTag) = [] of Citrine::Core::DMA::GifTag,
+          @double_buffer : DoubleBufferConfig? = nil,
         )
         end
 
@@ -1611,6 +1638,50 @@ module Citrine
           packer.mpg(@instructions, dst_addr: dst_addr)
           packer.mscal(exec_addr || dst_addr) if mscal
           packer.flush if flush_after
+          packer.to_slice
+        end
+
+        # Packs a complete double-buffered VIF1 DMA stream (`BASE`, `OFFSET`, `MPG`, `UNPACK` with `TOPS` relative
+        # addressing for both the GS `XGKICK` `GIFTag` header and vertex payload batches, `ITOP`, `MSCAL`, and `FLUSH`).
+        def pack_double_buffered_vif1(
+          batches : Array(Array(Float32)) = [] of Array(Float32),
+          gif_tag : Citrine::Core::DMA::GifTag? = nil,
+          dst_addr : UInt16 = 0_u16,
+          exec_addr : UInt16? = nil,
+        ) : Bytes
+          db = @double_buffer || DoubleBufferConfig.new
+          active_tag = gif_tag || @gif_tags.first?
+
+          total_float_qwc = batches.sum { |b| (b.size + 3) // 4 }
+          packer = VifPacketPacker.new(capacity_qwc: (@instructions.size // 2) + total_float_qwc + (batches.size * 8) + 32)
+          packer.flush
+          packer.stcycl(1_u8, 1_u8)
+          packer.base(db.base_qwc)
+          packer.offset(db.offset_qwc)
+          packer.mpg(@instructions, dst_addr: dst_addr)
+
+          if batches.empty?
+            if tag = active_tag
+              packer.unpack_quadwords(db.kick_offset_a, [tag.to_quadword], use_tops: true)
+              packer.itop(tag.nloop)
+            end
+            packer.mscal(exec_addr || dst_addr)
+          else
+            batches.each do |batch_floats|
+              qwc_count = batch_floats.size // 4
+              if tag = active_tag
+                # Emit GIFTag header to both input header (or kick_offset_a) relative to TOPS
+                packer.unpack_quadwords(db.kick_offset_a, [tag.to_quadword], use_tops: true)
+              end
+              if !batch_floats.empty?
+                packer.unpack_floats(db.input_offset, batch_floats, format: UnpackFormat::V4_32, use_tops: true)
+              end
+              packer.itop(qwc_count.to_u16)
+              packer.mscal(exec_addr || dst_addr)
+            end
+          end
+
+          packer.flush
           packer.to_slice
         end
       end
